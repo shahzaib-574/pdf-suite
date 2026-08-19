@@ -1,0 +1,212 @@
+// Canvas rendering must run on the main thread (DOM canvas and toBlob).
+import { PDFDocument } from 'pdf-lib';
+import * as pdfjs from 'pdfjs-dist';
+import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
+import pdfjsWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import jbig2FallbackUrl from 'pdfjs-dist/wasm/jbig2_nowasm_fallback.js?url';
+import jbig2WasmUrl from 'pdfjs-dist/wasm/jbig2.wasm?url';
+import openjpegFallbackUrl from 'pdfjs-dist/wasm/openjpeg_nowasm_fallback.js?url';
+import openjpegWasmUrl from 'pdfjs-dist/wasm/openjpeg.wasm?url';
+import qcmsWasmUrl from 'pdfjs-dist/wasm/qcms_bg.wasm?url';
+import quickjsJsUrl from 'pdfjs-dist/wasm/quickjs-eval.js?url';
+import quickjsWasmUrl from 'pdfjs-dist/wasm/quickjs-eval.wasm?url';
+import type { CompressLevel, JobResult, PickedFile } from '../lib/types';
+import { copyBytes, humanError } from './util';
+
+pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc;
+
+const wasmAssets: Record<string, string> = {
+  'jbig2.wasm': jbig2WasmUrl,
+  'jbig2_nowasm_fallback.js': jbig2FallbackUrl,
+  'openjpeg.wasm': openjpegWasmUrl,
+  'openjpeg_nowasm_fallback.js': openjpegFallbackUrl,
+  'qcms_bg.wasm': qcmsWasmUrl,
+  'quickjs-eval.js': quickjsJsUrl,
+  'quickjs-eval.wasm': quickjsWasmUrl,
+};
+
+const cmapAssets = import.meta.glob<string>(
+  '../../node_modules/pdfjs-dist/cmaps/*',
+  { query: '?url', import: 'default', eager: true, exhaustive: true },
+);
+
+const fontAssets = import.meta.glob<string>(
+  '../../node_modules/pdfjs-dist/standard_fonts/*',
+  { query: '?url', import: 'default', eager: true, exhaustive: true },
+);
+
+function assetUrl(map: Record<string, string>, filename: string): string | undefined {
+  if (map[filename]) return map[filename];
+  const suffix = `/${filename}`;
+  for (const [key, url] of Object.entries(map)) {
+    if (key === filename || key.endsWith(suffix)) return url;
+  }
+  return undefined;
+}
+
+class ViteBinaryDataFactory {
+  async fetch(params: { kind: string; filename: string }): Promise<Uint8Array> {
+    const { kind, filename } = params;
+    const url =
+      kind === 'wasmUrl'
+        ? assetUrl(wasmAssets, filename)
+        : kind === 'cMapUrl'
+          ? assetUrl(cmapAssets, filename)
+          : kind === 'standardFontDataUrl'
+            ? assetUrl(fontAssets, filename)
+            : undefined;
+    if (!url) {
+      throw new Error(`Missing on-device PDF.js asset (${kind}: ${filename}).`);
+    }
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Unable to load PDF.js asset: ${filename}`);
+    }
+    return new Uint8Array(await res.arrayBuffer());
+  }
+}
+
+const COMPRESS: Record<CompressLevel, { scale: number; quality: number }> = {
+  strong: { scale: 0.5, quality: 0.52 },
+  balanced: { scale: 0.75, quality: 0.72 },
+  keep: { scale: 1, quality: 0.92 },
+};
+
+function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error('Could not encode this page as JPEG.'));
+          return;
+        }
+        resolve(blob);
+      },
+      'image/jpeg',
+      quality,
+    );
+  });
+}
+
+async function withPdfjs<T>(
+  file: PickedFile,
+  fn: (pdf: PDFDocumentProxy) => Promise<T>,
+): Promise<T> {
+  const data = copyBytes(file.bytes);
+  const task = pdfjs.getDocument({
+    data,
+    useWorkerFetch: false,
+    useSystemFonts: true,
+    BinaryDataFactory: ViteBinaryDataFactory,
+  });
+  const pdf = await task.promise;
+  try {
+    return await fn(pdf);
+  } finally {
+    await pdf.cleanup();
+    await task.destroy();
+  }
+}
+
+async function renderPageToJpeg(
+  page: PDFPageProxy,
+  scale: number,
+  quality: number,
+): Promise<Blob> {
+  const viewport = page.getViewport({ scale: Math.max(scale, 0.05) });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.ceil(viewport.width));
+  canvas.height = Math.max(1, Math.ceil(viewport.height));
+  const canvasContext = canvas.getContext('2d', { alpha: false });
+  if (!canvasContext) {
+    throw new Error('Could not create a canvas to render this page.');
+  }
+  canvasContext.fillStyle = '#ffffff';
+  canvasContext.fillRect(0, 0, canvas.width, canvas.height);
+  const task = page.render({ canvas, canvasContext, viewport });
+  try {
+    await task.promise;
+    return await canvasToJpeg(canvas, quality);
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
+    page.cleanup();
+  }
+}
+
+export async function renderPage(
+  file: PickedFile,
+  pageIndex: number,
+  width: number,
+): Promise<Blob> {
+  return withPdfjs(file, async (pdf) => {
+    if (pageIndex < 0 || pageIndex >= pdf.numPages) {
+      throw new Error('That page is out of range.');
+    }
+    const page = await pdf.getPage(pageIndex + 1);
+    const base = page.getViewport({ scale: 1 });
+    const scale = base.width > 0 ? width / base.width : 1;
+    return renderPageToJpeg(page, scale, 0.82);
+  });
+}
+
+export async function pdfToImages(file: PickedFile): Promise<JobResult> {
+  try {
+    return await withPdfjs(file, async (pdf) => {
+      if (pdf.numPages < 1) {
+        return { ok: false, message: 'This PDF has no pages to export.' };
+      }
+      const images: Blob[] = [];
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        images.push(await renderPageToJpeg(page, 2, 0.82));
+      }
+      return {
+        ok: true,
+        bytes: copyBytes(file.bytes),
+        filename: 'pages.json',
+        pageCount: pdf.numPages,
+        extra: { images },
+      };
+    });
+  } catch (err) {
+    return { ok: false, message: humanError(err) };
+  }
+}
+
+export async function compress(
+  file: PickedFile,
+  level: CompressLevel,
+): Promise<JobResult> {
+  try {
+    const { scale, quality } = COMPRESS[level];
+    return await withPdfjs(file, async (pdf) => {
+      if (pdf.numPages < 1) {
+        return { ok: false, message: 'This PDF has no pages to compress.' };
+      }
+      const out = await PDFDocument.create();
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const base = page.getViewport({ scale: 1 });
+        const jpeg = await renderPageToJpeg(page, scale, quality);
+        const image = await out.embedJpg(new Uint8Array(await jpeg.arrayBuffer()));
+        const pdfPage = out.addPage([base.width, base.height]);
+        pdfPage.drawImage(image, {
+          x: 0,
+          y: 0,
+          width: base.width,
+          height: base.height,
+        });
+      }
+      const bytes = await out.save();
+      return {
+        ok: true,
+        bytes: copyBytes(bytes),
+        filename: 'compressed.pdf',
+        pageCount: out.getPageCount(),
+      };
+    });
+  } catch (err) {
+    return { ok: false, message: humanError(err) };
+  }
+}

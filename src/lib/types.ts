@@ -1,0 +1,73 @@
+export type ToolId =
+  | 'merge'
+  | 'split'
+  | 'images'
+  | 'pdf-images'
+  | 'compress'
+  | 'scan'
+  | 'organize'
+  | 'watermark'
+  | 'numbers'
+  | 'protect'
+  | 'view'
+  | 'docx-pdf';
+
+export type PdfBytes = Uint8Array;
+
+export type PickedFile = {
+  name: string;
+  mime: string;
+  bytes: Uint8Array;
+};
+
+export type PageRange = {
+  start: number;
+  end: number;
+};
+
+export type CompressLevel = 'strong' | 'balanced' | 'keep';
+
+export type WatermarkInput = {
+  text: string;
+  opacity: number;
+};
+
+export type ProtectInput = {
+  userPassword: string;
+};
+
+export type OrganizeOp =
+  | { type: 'rotate'; pageIndex: number; degrees: 90 | 180 | 270 }
+  | { type: 'remove'; pageIndex: number }
+  | { type: 'reorder'; order: number[] };
+
+export type JobOk = {
+  ok: true;
+  bytes: Uint8Array;
+  filename: string;
+  pageCount?: number;
+  extra?: { images?: Blob[] };
+};
+
+export type JobErr = {
+  ok: false;
+  message: string;
+};
+
+export type JobResult = JobOk | JobErr;
+
+export type RecentItem = {
+  id: string;
+  name: string;
+  tool: ToolId;
+  createdAt: number;
+  bytes: Uint8Array;
+  size: number;
+};
+
+export type Route =
+  | { name: 'home' }
+  | { name: 'tool'; id: ToolId }
+  | { name: 'viewer'; recentId?: string }
+  | { name: 'result' }
+  | { name: 'settings' };
