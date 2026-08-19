@@ -1,0 +1,26 @@
+import type { JobResult, PickedFile } from '../lib/types';
+import { DOCX_MIME, pagesToDocx } from './docxBuild';
+import { humanError } from './util';
+
+function docxNameFromPdf(name: string): string {
+  const base = name.replace(/\\/g, '/').split('/').pop() ?? 'document';
+  const stem = base.replace(/\.pdf$/i, '').trim() || 'document';
+  return `${stem}.docx`;
+}
+
+export async function pdfToDocx(file: PickedFile): Promise<JobResult> {
+  try {
+    const { extractPdfText } = await import('./render');
+    const pages = await extractPdfText(file);
+    const bytes = await pagesToDocx(pages);
+    return {
+      ok: true,
+      bytes,
+      filename: docxNameFromPdf(file.name),
+      pageCount: Math.max(1, pages.length),
+      mime: DOCX_MIME,
+    };
+  } catch (err) {
+    return { ok: false, message: humanError(err) };
+  }
+}

@@ -11,7 +11,11 @@ import qcmsWasmUrl from 'pdfjs-dist/wasm/qcms_bg.wasm?url';
 import quickjsJsUrl from 'pdfjs-dist/wasm/quickjs-eval.js?url';
 import quickjsWasmUrl from 'pdfjs-dist/wasm/quickjs-eval.wasm?url';
 import type { CompressLevel, JobResult, PickedFile } from '../lib/types';
+import { analyzeGlyphs, clusterLines, glyphFromPdfItem, pageCharCount } from './textLayout';
+import type { PdfTextPage } from './textTypes';
 import { copyBytes, humanError } from './util';
+
+export type { PdfTextPage };
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc;
 
@@ -209,4 +213,50 @@ export async function compress(
   } catch (err) {
     return { ok: false, message: humanError(err) };
   }
+}
+
+export async function extractPdfText(file: PickedFile): Promise<PdfTextPage[]> {
+  return withPdfjs(file, async (pdf) => {
+    if (pdf.numPages < 1) return [];
+    const pages: PdfTextPage[] = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      try {
+        const viewport = page.getViewport({ scale: 1 });
+        const content = await page.getTextContent();
+        const glyphs = [];
+        for (const item of content.items) {
+          const glyph = glyphFromPdfItem(item);
+          if (glyph) glyphs.push(glyph);
+        }
+        const lines = clusterLines(glyphs);
+        const chars = pageCharCount(lines);
+        if (chars < 40) {
+          const jpeg = await renderPageToJpeg(page, Math.min(1.6, 900 / viewport.width), 0.78);
+          pages.push({
+            width: viewport.width,
+            height: viewport.height,
+            blocks: [
+              {
+                kind: 'image',
+                bytes: new Uint8Array(await jpeg.arrayBuffer()),
+                mime: 'image/jpeg',
+                widthPt: viewport.width,
+                heightPt: viewport.height,
+              },
+            ],
+          });
+        } else {
+          pages.push({
+            width: viewport.width,
+            height: viewport.height,
+            blocks: analyzeGlyphs(glyphs, viewport.width),
+          });
+        }
+      } finally {
+        page.cleanup();
+      }
+    }
+    return pages;
+  });
 }

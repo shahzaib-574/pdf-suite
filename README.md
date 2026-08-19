@@ -20,7 +20,7 @@ Open the local URL on your computer or phone (same Wi‑Fi).
 
 ## Tools in phase 1
 
-Merge, split, images→PDF, scan (camera), compress, organize, watermark, page numbers, view, PDF→images, Word → PDF (DOCX, simplified, on-device).
+Merge, split, images→PDF, scan (camera), compress, organize, watermark, page numbers, view, PDF→images, Word → PDF (simplified), PDF → Word (text, tables, columns; scans as page images).
 
 Protect is listed but **cannot encrypt** until we add an engine that supports it. The screen says so.
 

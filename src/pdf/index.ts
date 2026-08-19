@@ -36,6 +36,7 @@ export type PdfEngine = {
     width: number,
   ): Promise<Blob>;
   docxToPdf(file: PickedFile): Promise<JobResult>;
+  pdfToDocx(file: PickedFile): Promise<JobResult>;
 };
 
 type Pending = {
@@ -217,6 +218,14 @@ export const engine: PdfEngine = {
     try {
       const { docxToPdf } = await import('./docxToPdf');
       return await docxToPdf(file);
+    } catch (err) {
+      return { ok: false, message: humanError(err) };
+    }
+  },
+  async pdfToDocx(file) {
+    try {
+      const { pdfToDocx } = await import('./pdfToDocx');
+      return await pdfToDocx(file);
     } catch (err) {
       return { ok: false, message: humanError(err) };
     }

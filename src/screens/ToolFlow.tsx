@@ -53,6 +53,8 @@ function wellCopy(id: ToolId, minFiles: number): { label: string; hint: string }
       return { label: 'Open a PDF', hint: 'Stays on this device' };
     case 'docx-pdf':
       return { label: 'Choose a Word file', hint: 'DOCX only. Layout is simplified.' };
+    case 'pdf-docx':
+      return { label: 'Choose a PDF', hint: 'Extracts text into Word' };
     default:
       return { label: 'Choose a PDF', hint: 'Stays on this device' };
   }
@@ -270,13 +272,18 @@ export function ToolFlow({ id }: ToolFlowProps) {
         case 'docx-pdf':
           result = await engine.docxToPdf(first);
           break;
+        case 'pdf-docx':
+          result = await engine.pdfToDocx(first);
+          break;
       }
       if (!result.ok) {
         setError(result.message);
         return;
       }
       setLastJob(result, tool.id);
-      setCurrentViewer(result.bytes, result.filename);
+      if (result.filename.toLowerCase().endsWith('.pdf')) {
+        setCurrentViewer(result.bytes, result.filename);
+      }
       navigate('#/result');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
@@ -355,6 +362,13 @@ export function ToolFlow({ id }: ToolFlowProps) {
             Page margins, blank lines, and space before/after follow the Word
             file. Nested tables and text boxes still will not match. Standard
             fonts: non-Latin letters may become ?.
+          </p>
+        ) : null}
+        {tool.id === 'pdf-docx' ? (
+          <p className="ps-note">
+            Rebuilds text, detected tables, and two-column layouts. Pages with
+            almost no text (scans) are inserted as page images. Not a perfect
+            copy of every PDF design.
           </p>
         ) : null}
 

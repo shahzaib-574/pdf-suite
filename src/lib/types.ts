@@ -10,7 +10,8 @@ export type ToolId =
   | 'numbers'
   | 'protect'
   | 'view'
-  | 'docx-pdf';
+  | 'docx-pdf'
+  | 'pdf-docx';
 
 export type PdfBytes = Uint8Array;
 
@@ -46,6 +47,7 @@ export type JobOk = {
   bytes: Uint8Array;
   filename: string;
   pageCount?: number;
+  mime?: string;
   extra?: { images?: Blob[] };
 };
 

@@ -32,6 +32,10 @@ export function Result() {
         bytes: job.bytes,
       });
     }
+    if (job.filename.toLowerCase().endsWith('.docx')) {
+      setPageCount(job.pageCount);
+      return;
+    }
     if (job.pageCount != null) {
       setPageCount(job.pageCount);
       return;
@@ -73,7 +77,12 @@ export function Result() {
   }
 
   const done = job;
-  const hasPdf = done.bytes.byteLength > 0;
+  const isDocx = done.filename.toLowerCase().endsWith('.docx');
+  const docxMime =
+    done.mime ??
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  const hasPdf = done.bytes.byteLength > 0 && !isDocx;
+  const hasFile = done.bytes.byteLength > 0;
   const hasImages = Boolean(images && images.length > 0);
 
   function openViewer(): void {
@@ -89,8 +98,12 @@ export function Result() {
         await shareOrDownloadBlobs(images, 'page');
         return;
       }
-      if (hasPdf) {
-        await shareOrDownload(done.bytes, done.filename);
+      if (hasFile) {
+        await shareOrDownload(
+          done.bytes,
+          done.filename,
+          isDocx ? docxMime : 'application/pdf',
+        );
       }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Share failed');
@@ -106,7 +119,13 @@ export function Result() {
       });
       return;
     }
-    if (hasPdf) downloadBytes(done.bytes, done.filename);
+    if (hasFile) {
+      downloadBytes(
+        done.bytes,
+        done.filename,
+        isDocx ? docxMime : 'application/pdf',
+      );
+    }
   }
 
   return (
@@ -145,7 +164,7 @@ export function Result() {
             block
             variant="ghost"
             icon={Share2}
-            disabled={!hasPdf && !hasImages}
+            disabled={!hasFile && !hasImages}
             onClick={() => {
               void onShare();
             }}
@@ -156,7 +175,7 @@ export function Result() {
             block
             variant="ghost"
             icon={Download}
-            disabled={!hasPdf && !hasImages}
+            disabled={!hasFile && !hasImages}
             onClick={onSave}
           >
             Save

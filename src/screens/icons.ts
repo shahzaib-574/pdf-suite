@@ -4,6 +4,7 @@ import {
   Combine,
   Eye,
   FileType,
+  FileText,
   Hash,
   ImageDown,
   Images,
@@ -28,4 +29,5 @@ export const TOOL_ICONS: Record<ToolId, LucideIcon> = {
   protect: Lock,
   view: Eye,
   'docx-pdf': FileType,
+  'pdf-docx': FileText,
 };

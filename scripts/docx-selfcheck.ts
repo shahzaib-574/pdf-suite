@@ -7,10 +7,12 @@ import {
   paragraphXml,
   runDocxToPdfSelfCheck,
 } from '../src/pdf/docxToPdf.test.ts';
+import { runPagesToDocxSelfCheck } from '../src/pdf/docxBuild.test.ts';
 import { docxToPdf } from '../src/pdf/docxToPdf.ts';
 import { pickedDocx } from '../src/pdf/docxToPdf.test.ts';
 
 await runDocxToPdfSelfCheck();
+await runPagesToDocxSelfCheck();
 
 const sample = await buildDocx({
   documentXml: documentXml(
@@ -34,3 +36,4 @@ writeFileSync(outPath, result.bytes);
 console.log(
   `SELF_CHECK_OK pages=${result.pageCount ?? '?'} bytes=${result.bytes.byteLength} wrote=${outPath}`,
 );
+console.log('PDF_TO_DOCX_PACKAGER_OK');

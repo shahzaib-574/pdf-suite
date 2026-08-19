@@ -133,6 +133,16 @@ export const TOOLS: ToolDef[] = [
     minFiles: 1,
     maxFilesFree: 1,
   },
+  {
+    id: 'pdf-docx',
+    title: 'PDF → Word',
+    blurb: 'Extract text into a DOCX',
+    group: 'everyday',
+    pro: false,
+    accept: 'pdf',
+    minFiles: 1,
+    maxFilesFree: 1,
+  },
 ];
 
 export const APP_NAME = 'Ream - PDF Suite';
