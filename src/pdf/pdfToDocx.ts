@@ -1,4 +1,4 @@
-import type { JobResult, PickedFile } from '../lib/types';
+import type { JobResult, PdfToDocxProgress, PickedFile } from '../lib/types';
 import { DOCX_MIME, pagesToDocx } from './docxBuild';
 import { humanError } from './util';
 
@@ -8,11 +8,15 @@ function docxNameFromPdf(name: string): string {
   return `${stem}.docx`;
 }
 
-export async function pdfToDocx(file: PickedFile): Promise<JobResult> {
+export async function pdfToDocx(
+  file: PickedFile,
+  onProgress?: (update: PdfToDocxProgress) => void,
+): Promise<JobResult> {
   try {
     const { extractPdfText } = await import('./render');
-    const pages = await extractPdfText(file);
+    const pages = await extractPdfText(file, onProgress);
     const bytes = await pagesToDocx(pages);
+    onProgress?.({ progress: 1, label: 'Word document ready' });
     return {
       ok: true,
       bytes,

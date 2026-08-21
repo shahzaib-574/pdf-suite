@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, Eye, Share2, Plus } from 'lucide-react';
+import { Check, Download, Eye, Share2, Plus } from 'lucide-react';
 import { AnimatedButton, PageHeader } from '../components';
 import { engine } from '../pdf';
 import type { PickedFile } from '../lib/types';
@@ -26,11 +26,16 @@ export function Result() {
     if (!job) return;
     if (savedResult !== job) {
       savedResult = job;
-      void saveRecent({
-        name: job.filename,
-        tool: lastJob.tool ?? 'view',
-        bytes: job.bytes,
-      });
+      if (job.bytes.byteLength > 0) {
+        void saveRecent({
+          name: job.filename,
+          mime: job.mime,
+          tool: lastJob.tool ?? 'view',
+          bytes: job.bytes,
+        }).catch(() => {
+          setMessage('Created successfully, but it could not be added to Recents.');
+        });
+      }
     }
     if (job.filename.toLowerCase().endsWith('.docx')) {
       setPageCount(job.pageCount);
@@ -77,11 +82,15 @@ export function Result() {
   }
 
   const done = job;
-  const isDocx = done.filename.toLowerCase().endsWith('.docx');
+  const isDocx =
+    done.mime ===
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    done.filename.toLowerCase().endsWith('.docx');
+  const isPdf = done.mime === 'application/pdf' || done.filename.toLowerCase().endsWith('.pdf');
   const docxMime =
     done.mime ??
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-  const hasPdf = done.bytes.byteLength > 0 && !isDocx;
+  const hasPdf = done.bytes.byteLength > 0 && isPdf;
   const hasFile = done.bytes.byteLength > 0;
   const hasImages = Boolean(images && images.length > 0);
 
@@ -132,19 +141,23 @@ export function Result() {
     <div className="ps-screen">
       <PageHeader title="Done" subtitle={job.filename} onBack={() => navigate('#/')} />
       <div className="ps-body">
-        <div className="ps-meta">
-          <p>{job.filename}</p>
-          <p className="tabular">{formatBytes(job.bytes.byteLength)}</p>
-          {pageCount != null ? (
-            <p>
-              {pageCount} page{pageCount === 1 ? '' : 's'}
-            </p>
-          ) : null}
-          {hasImages && images ? (
-            <p>
-              {images.length} image{images.length === 1 ? '' : 's'}
-            </p>
-          ) : null}
+        <div className="ps-result-card">
+          <span className="ps-result-card__icon" aria-hidden="true">
+            <Check size={27} strokeWidth={2.4} />
+          </span>
+          <div>
+            <h2>Your file is ready</h2>
+            <p>{job.filename}</p>
+          </div>
+          <div className="ps-meta">
+            {hasFile ? <span className="tabular">{formatBytes(job.bytes.byteLength)}</span> : null}
+            {pageCount != null ? (
+              <span>{pageCount} page{pageCount === 1 ? '' : 's'}</span>
+            ) : null}
+            {hasImages && images ? (
+              <span>{images.length} image{images.length === 1 ? '' : 's'}</span>
+            ) : null}
+          </div>
         </div>
         {message ? (
           <p className="ps-banner ps-banner--error" role="alert">

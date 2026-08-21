@@ -16,6 +16,12 @@ function isToolId(value: unknown): value is ToolId {
   return typeof value === 'string' && toolById(value) !== undefined;
 }
 
+function mimeFromName(name: string): string {
+  return name.toLowerCase().endsWith('.docx')
+    ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    : 'application/pdf';
+}
+
 function normalizeItem(raw: unknown): RecentItem | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const item = raw as Record<string, unknown>;
@@ -27,6 +33,7 @@ function normalizeItem(raw: unknown): RecentItem | null {
   return {
     id: item.id,
     name: item.name,
+    mime: typeof item.mime === 'string' ? item.mime : mimeFromName(item.name),
     tool: item.tool,
     createdAt: item.createdAt,
     bytes: asBytes(item.bytes),
@@ -52,6 +59,7 @@ export async function listRecents(): Promise<RecentItem[]> {
 
 export async function saveRecent(input: {
   name: string;
+  mime?: string;
   tool: ToolId;
   bytes: Uint8Array;
 }): Promise<RecentItem> {
@@ -59,6 +67,7 @@ export async function saveRecent(input: {
   const item: RecentItem = {
     id: crypto.randomUUID(),
     name: input.name,
+    mime: input.mime ?? mimeFromName(input.name),
     tool: input.tool,
     createdAt: Date.now(),
     bytes: size > MAX_BYTES ? new Uint8Array() : new Uint8Array(input.bytes),

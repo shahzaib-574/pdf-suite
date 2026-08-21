@@ -2,15 +2,15 @@
   "name": "Ream - PDF Suite",
   "short_name": "Ream",
   "description": "Ream - PDF Suite. On-device PDF tools. Your files stay here.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": ".",
+  "scope": ".",
   "display": "standalone",
-  "background_color": "#12110e",
-  "theme_color": "#12110e",
+  "background_color": "#f7f6fb",
+  "theme_color": "#6958ed",
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/favicon.svg",
+      "src": "./favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"

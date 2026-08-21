@@ -57,6 +57,34 @@ export async function runPagesToDocxSelfCheck(): Promise<void> {
     throw new Error(`expected columns, got ${JSON.stringify(colBlocks)}`);
   }
 
+  const whitespaceTable = analyzeGlyphs(
+    [400, 380, 360].flatMap((y, row) => [
+      { str: row === 0 ? 'Item' : `Row ${row}`, x: 24, y, width: 38, size: 10, eol: false },
+      { str: ' ', x: 62, y, width: 98, size: 10, eol: false },
+      { str: row === 0 ? 'Qty' : String(row), x: 160, y, width: 20, size: 10, eol: false },
+      { str: ' ', x: 180, y, width: 100, size: 10, eol: false },
+      { str: row === 0 ? 'Total' : `$${row * 10}`, x: 280, y, width: 32, size: 10, eol: false },
+    ]),
+    400,
+    500,
+  );
+  if (!whitespaceTable.some((block) => block.kind === 'table')) {
+    throw new Error(`wide PDF whitespace must preserve table cells: ${JSON.stringify(whitespaceTable)}`);
+  }
+
+  const spacedParagraphs = analyzeGlyphs(
+    [
+      { str: 'First paragraph', x: 72, y: 500, width: 90, size: 11, eol: false },
+      { str: 'wrapped line', x: 72, y: 485, width: 70, size: 11, eol: false },
+      { str: 'Second paragraph', x: 72, y: 445, width: 100, size: 11, eol: false },
+    ],
+    612,
+    792,
+  );
+  if (spacedParagraphs.filter((block) => block.kind === 'para').length !== 2) {
+    throw new Error(`paragraph gaps were collapsed: ${JSON.stringify(spacedParagraphs)}`);
+  }
+
   const bytes = await pagesToDocx([
     {
       width: 612,
@@ -66,7 +94,16 @@ export async function runPagesToDocxSelfCheck(): Promise<void> {
           kind: 'para',
           heading: true,
           x: 72,
-          lines: [{ text: 'Quarterly Report', fontSize: 22 }],
+          top: 760,
+          bottom: 735,
+          spaceBeforePt: 32,
+          lines: [
+            {
+              text: 'Quarterly Report',
+              fontSize: 22,
+              runs: [{ text: 'Quarterly ', fontSize: 22, bold: true }, { text: 'Report', fontSize: 22, italic: true }],
+            },
+          ],
         },
         {
           kind: 'para',
@@ -74,7 +111,13 @@ export async function runPagesToDocxSelfCheck(): Promise<void> {
           x: 72,
           lines: [{ text: 'Revenue was up.', fontSize: 11 }],
         },
-        { kind: 'table', rows: [['Name', 'Qty'], ['Apples', '3']] },
+        {
+          kind: 'table',
+          rows: [['Name', 'Qty'], ['Apples', '3']],
+          x: 72,
+          columnWidthsPt: [300, 120],
+          headerRows: 1,
+        },
       ],
     },
     {
@@ -93,7 +136,7 @@ export async function runPagesToDocxSelfCheck(): Promise<void> {
   const zip = await JSZip.loadAsync(bytes);
   const xml = await zip.file('word/document.xml')?.async('string');
   if (!xml) throw new Error('docx missing word/document.xml');
-  if (!xml.includes('Quarterly Report')) {
+  if (!xml.includes('Quarterly ') || !xml.includes('Report')) {
     throw new Error('heading text missing from docx');
   }
   if (!xml.includes('Revenue was up.')) {
@@ -102,14 +145,20 @@ export async function runPagesToDocxSelfCheck(): Promise<void> {
   if (!xml.includes('Second page notes.')) {
     throw new Error('page 2 text missing from docx');
   }
-  if (!xml.includes('w:type="page"')) {
-    throw new Error('expected a page break between PDF pages');
+  if (!xml.includes('<w:type w:val="nextPage"/>')) {
+    throw new Error('expected a next-page section between PDF pages');
   }
   if (!xml.includes('Heading1')) {
     throw new Error('expected Heading1 style on larger text');
   }
   if (!xml.includes('<w:tbl>') || !xml.includes('Apples')) {
     throw new Error('expected a Word table with cell text');
+  }
+  if (!xml.includes('<w:tblLayout w:type="fixed"/>') || !xml.includes('<w:tblInd w:w="1440"')) {
+    throw new Error('expected fixed table geometry and source-aligned indentation');
+  }
+  if (!xml.includes('<w:b/>') || !xml.includes('<w:i/>')) {
+    throw new Error('expected bold and italic PDF runs to survive in DOCX');
   }
 
   const empty = await pagesToDocx([{ width: 612, height: 792, blocks: [] }]);
@@ -118,5 +167,27 @@ export async function runPagesToDocxSelfCheck(): Promise<void> {
   );
   if (!emptyXml?.includes('No extractable text')) {
     throw new Error('empty page should explain there was no text');
+  }
+
+  const scan = await pagesToDocx([
+    {
+      width: 612,
+      height: 792,
+      blocks: [
+        {
+          kind: 'image',
+          bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+          mime: 'image/jpeg',
+          widthPt: 612,
+          heightPt: 792,
+        },
+      ],
+    },
+  ]);
+  const scanXml = await JSZip.loadAsync(scan).then((z) =>
+    z.file('word/document.xml')?.async('string'),
+  );
+  if (!scanXml?.includes('cx="7772400"')) {
+    throw new Error('scan fallback should use the full source page width');
   }
 }

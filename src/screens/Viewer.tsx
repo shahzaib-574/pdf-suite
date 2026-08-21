@@ -11,8 +11,6 @@ import {
 import { getRecent } from '../store/recents';
 import { navigate } from './nav';
 
-const MAX_PAGES = 30;
-
 type ViewerProps = {
   recentId?: string;
 };
@@ -87,7 +85,7 @@ export function Viewer({ recentId }: ViewerProps) {
 
   useEffect(() => {
     if (!bytes || total < 1) return;
-    const shown = Math.min(total, MAX_PAGES);
+    const shown = total;
     if (page > shown) {
       setPage(shown);
       return;
@@ -121,8 +119,8 @@ export function Viewer({ recentId }: ViewerProps) {
     };
   }, [bytes, name, page, total]);
 
-  const shown = Math.min(total, MAX_PAGES);
-  const backHash = recentId ? '#/' : lastJob.result ? '#/result' : '#/';
+  const shown = total;
+  const backHash = recentId ? '#/recents' : lastJob.result ? '#/result' : '#/';
 
   return (
     <div className="ps-screen">
@@ -136,9 +134,6 @@ export function Viewer({ recentId }: ViewerProps) {
           <p className="ps-banner ps-banner--error" role="alert">
             {error}
           </p>
-        ) : null}
-        {total > MAX_PAGES ? (
-          <p className="ps-note">Showing the first {MAX_PAGES} pages.</p>
         ) : null}
         {total > 0 ? (
           <p className="ps-muted tabular">

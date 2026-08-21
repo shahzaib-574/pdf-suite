@@ -1,4 +1,10 @@
-import type { PdfBlock, PdfTextLine, TextGlyph } from './textTypes';
+import type {
+  PdfBlock,
+  PdfParagraphLine,
+  PdfTextLine,
+  PdfTextRun,
+  TextGlyph,
+} from './textTypes';
 
 function avgY(row: TextGlyph[]): number {
   return row.reduce((sum, g) => sum + g.y, 0) / row.length;
@@ -9,34 +15,74 @@ function glyphWidth(g: TextGlyph): number {
   return Math.max(g.size * 0.4, g.str.length * g.size * 0.45);
 }
 
-function joinGlyphs(glyphs: TextGlyph[]): string {
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[middle] ?? 0;
+  return ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2;
+}
+
+function dominantSize(glyphs: TextGlyph[]): number {
+  if (glyphs.length === 0) return 11;
+  const weighted = glyphs
+    .flatMap((glyph) =>
+      Array.from(
+        { length: Math.max(1, glyph.str.replace(/\s/g, '').length) },
+        () => glyph.size,
+      ),
+    )
+    .sort((a, b) => a - b);
+  return weighted[Math.floor(weighted.length / 2)] ?? 11;
+}
+
+function sameRunStyle(a: PdfTextRun, b: PdfTextRun): boolean {
+  return (
+    Math.abs(a.fontSize - b.fontSize) < 0.15 &&
+    a.fontFamily === b.fontFamily &&
+    Boolean(a.bold) === Boolean(b.bold) &&
+    Boolean(a.italic) === Boolean(b.italic)
+  );
+}
+
+function cleanText(text: string): string {
+  return text.replace(/[\t\r\n ]+/g, ' ').trim();
+}
+
+function rowText(glyphs: TextGlyph[]): { text: string; runs: PdfTextRun[] } {
   const ordered = [...glyphs].sort((a, b) => a.x - b.x);
+  const runs: PdfTextRun[] = [];
   let text = '';
   let lastRight = Number.NEGATIVE_INFINITY;
-  for (const g of ordered) {
-    const gap = g.x - lastRight;
-    const spaceGap = Math.max(0.9, g.size * 0.14);
-    if (text.length > 0) {
-      const prev = text[text.length - 1];
-      const next = g.str[0];
-      const already =
-        prev === ' ' ||
-        prev === '\n' ||
-        next === ' ' ||
-        next === ',' ||
-        next === '.' ||
-        next === ';' ||
-        next === ':';
-      if (!already && gap > spaceGap) text += ' ';
-    }
-    text += g.str;
-    lastRight = g.x + glyphWidth(g);
+  for (const glyph of ordered) {
+    const value = cleanText(glyph.str);
+    if (!value) continue;
+    const gap = glyph.x - lastRight;
+    const widthPerChar = glyphWidth(glyph) / Math.max(1, value.length);
+    const spaceGap = Math.max(0.8, Math.min(glyph.size * 0.32, widthPerChar * 0.55));
+    const previous = text[text.length - 1];
+    const next = value[0];
+    const punctuation = next != null && /^[,.;:!?%)\]}]/.test(next);
+    const needsSpace =
+      text.length > 0 && previous !== ' ' && next !== ' ' && !punctuation && gap > spaceGap;
+    const run: PdfTextRun = {
+      text: `${needsSpace ? ' ' : ''}${value}`,
+      fontSize: glyph.size,
+      fontFamily: glyph.fontFamily,
+      bold: glyph.bold,
+      italic: glyph.italic,
+    };
+    const prior = runs[runs.length - 1];
+    if (prior && sameRunStyle(prior, run)) prior.text += run.text;
+    else runs.push(run);
+    text += run.text;
+    lastRight = Math.max(lastRight, glyph.x + glyphWidth(glyph));
   }
-  return text.replace(/[ \t]+/g, ' ').replace(/\s+$/g, '').trim();
+  return { text: text.trim(), runs };
 }
 
 function tokenGroups(row: TextGlyph[]): TextGlyph[][] {
-  const ordered = [...row].sort((a, b) => a.x - b.x);
+  const ordered = row.filter((glyph) => cleanText(glyph.str).length > 0).sort((a, b) => a.x - b.x);
   if (ordered.length === 0) return [];
   const groups: TextGlyph[][] = [[ordered[0]!]];
   for (let i = 1; i < ordered.length; i++) {
@@ -50,34 +96,46 @@ function tokenGroups(row: TextGlyph[]): TextGlyph[][] {
   return groups;
 }
 
-function tokensFromRow(row: TextGlyph[]): { text: string; x: number; xEnd: number }[] {
+function tokensFromRow(row: TextGlyph[]): PdfTextLine['tokens'] {
   return tokenGroups(row)
     .map((group) => {
       const last = group[group.length - 1]!;
+      const joined = rowText(group);
       return {
-        text: joinGlyphs(group),
+        text: joined.text,
         x: group[0]!.x,
         xEnd: last.x + glyphWidth(last),
+        runs: joined.runs,
       };
     })
     .filter((t) => t.text.length > 0);
 }
 
 function joinLine(row: TextGlyph[]): PdfTextLine | undefined {
-  const ordered = [...row].sort((a, b) => a.x - b.x);
-  const text = joinGlyphs(ordered);
+  const ordered = row.filter((glyph) => cleanText(glyph.str).length > 0).sort((a, b) => a.x - b.x);
+  if (ordered.length === 0) return undefined;
+  const joined = rowText(ordered);
+  const text = joined.text;
   if (!text) return undefined;
   const last = ordered[ordered.length - 1]!;
   const tokens = tokensFromRow(ordered);
   const cells = tokens.map((t) => t.text);
   return {
     text,
-    fontSize: ordered.reduce((m, g) => Math.max(m, g.size), 11),
+    fontSize: dominantSize(ordered),
     x: ordered[0]!.x,
     y: avgY(ordered),
     xEnd: last.x + glyphWidth(last),
     cells: cells.length >= 2 ? cells : [text],
     tokens,
+    runs: joined.runs,
+    height: Math.max(...ordered.map((glyph) => glyph.size), 11),
+    bold: ordered.some((glyph) => glyph.bold),
+    italic: ordered.some((glyph) => glyph.italic),
+    direction:
+      ordered.filter((glyph) => glyph.direction === 'rtl').length > ordered.length / 2
+        ? 'rtl'
+        : 'ltr',
   };
 }
 
@@ -105,7 +163,26 @@ export function clusterLines(glyphs: TextGlyph[]): PdfTextLine[] {
   return lines;
 }
 
-export function glyphFromPdfItem(item: unknown): TextGlyph | undefined {
+type PdfTextStyle = {
+  fontFamily?: string;
+  ascent?: number;
+  descent?: number;
+  vertical?: boolean;
+  bold?: boolean;
+  italic?: boolean;
+};
+
+function normalizeFontFamily(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const first = value.split(',')[0]?.replace(/["']/g, '').trim();
+  if (!first) return undefined;
+  return first.replace(/^[A-Z]{6}\+/, '');
+}
+
+export function glyphFromPdfItem(
+  item: unknown,
+  styles?: Record<string, PdfTextStyle>,
+): TextGlyph | undefined {
   if (typeof item !== 'object' || item === null) return undefined;
   const rec = item as Record<string, unknown>;
   if (typeof rec.str !== 'string' || rec.str.length === 0) return undefined;
@@ -115,8 +192,16 @@ export function glyphFromPdfItem(item: unknown): TextGlyph | undefined {
   const y = Number(transform[5]);
   const a = Number(transform[0]);
   const d = Number(transform[3]);
-  const size = Math.abs(d) || Math.abs(a) || 11;
+  const itemHeight = Number(rec.height);
+  const size =
+    (Number.isFinite(itemHeight) && itemHeight > 0 ? itemHeight : 0) ||
+    Math.hypot(Number(transform[2]) || 0, d) ||
+    Math.hypot(a, Number(transform[1]) || 0) ||
+    11;
   const width = Number(rec.width);
+  const fontName = typeof rec.fontName === 'string' ? rec.fontName : undefined;
+  const fontFamily = normalizeFontFamily(fontName ? styles?.[fontName]?.fontFamily : undefined);
+  const styleName = `${fontName ?? ''} ${fontFamily ?? ''}`;
   if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
   return {
     str: rec.str,
@@ -125,55 +210,135 @@ export function glyphFromPdfItem(item: unknown): TextGlyph | undefined {
     width: Number.isFinite(width) && width > 0 ? width : 0,
     size,
     eol: rec.hasEOL === true,
+    fontName,
+    fontFamily,
+    bold: styles?.[fontName ?? '']?.bold === true || /bold|black|heavy|semibold|demi/i.test(styleName),
+    italic: styles?.[fontName ?? '']?.italic === true || /italic|oblique/i.test(styleName),
+    direction: rec.dir === 'rtl' ? 'rtl' : 'ltr',
   };
 }
 
-function paraFromLines(lines: PdfTextLine[]): PdfBlock[] {
+function paragraphLine(line: PdfTextLine): PdfParagraphLine {
+  return {
+    text: line.text,
+    fontSize: line.fontSize,
+    runs: line.runs,
+    x: line.x,
+    xEnd: line.xEnd,
+    y: line.y,
+  };
+}
+
+function alignmentOf(
+  line: PdfTextLine,
+  pageWidth: number,
+): 'left' | 'center' | 'right' {
+  const width = line.xEnd - line.x;
+  const centerDelta = Math.abs((line.x + line.xEnd) / 2 - pageWidth / 2);
+  if (width < pageWidth * 0.82 && centerDelta <= Math.max(14, pageWidth * 0.035)) {
+    return 'center';
+  }
+  if (line.x > pageWidth * 0.35 && line.xEnd >= pageWidth * 0.9) return 'right';
+  return 'left';
+}
+
+function paraFromLines(lines: PdfTextLine[], pageWidth = 612): PdfBlock[] {
   if (lines.length === 0) return [];
   const sizes = lines.map((l) => l.fontSize).sort((a, b) => a - b);
   const typical = sizes[Math.floor((sizes.length - 1) * 0.35)] ?? 11;
-  const headingSize = Math.max(typical * 1.35, typical + 2.5);
+  const headingSize = Math.max(typical * 1.28, typical + 2.2);
+  const candidateLeadings: number[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const gap = (lines[i - 1]?.y ?? 0) - (lines[i]?.y ?? 0);
+    if (gap > typical * 0.75 && gap < typical * 2.1) candidateLeadings.push(gap);
+  }
+  const normalLeading = median(candidateLeadings) || typical * 1.2;
   const groups: Extract<PdfBlock, { kind: 'para' }>[] = [];
   for (const line of lines) {
-    const heading = line.fontSize >= headingSize && line.text.length < 90;
+    const heading =
+      line.text.length < 120 &&
+      (line.fontSize >= headingSize || (line.bold && line.fontSize >= typical * 1.16));
+    const alignment = alignmentOf(line, pageWidth);
     const prev = groups[groups.length - 1];
+    const prevLine = prev?.lines[prev.lines.length - 1];
+    const verticalGap = prevLine?.y != null ? prevLine.y - line.y : Number.POSITIVE_INFINITY;
     const sameIndent = prev
-      ? Math.abs(prev.x - line.x) < Math.max(8, line.fontSize)
+      ? Math.abs(prev.x - line.x) < Math.max(5, line.fontSize * 0.75)
       : false;
     const sameKind = prev ? prev.heading === heading : false;
-    if (prev && sameKind && sameIndent && !heading) {
-      prev.lines.push({ text: line.text, fontSize: line.fontSize });
+    const sameFlow =
+      prev?.alignment === alignment && prev.direction === line.direction && sameIndent;
+    const followsNormally =
+      verticalGap > 0 && verticalGap <= Math.max(normalLeading * 1.42, line.height * 1.65);
+    if (prev && sameKind && sameFlow && followsNormally && !heading) {
+      prev.lines.push(paragraphLine(line));
+      prev.xEnd = Math.max(prev.xEnd ?? line.xEnd, line.xEnd);
+      prev.bottom = Math.min(prev.bottom ?? line.y, line.y - line.height * 0.25);
+      prev.lineSpacingPt = median(
+        prev.lines
+          .slice(1)
+          .map((item, index) => (prev.lines[index]?.y ?? 0) - (item.y ?? 0))
+          .filter((gap) => gap > 0),
+      ) || normalLeading;
     } else {
       groups.push({
         kind: 'para',
-        lines: [{ text: line.text, fontSize: line.fontSize }],
+        lines: [paragraphLine(line)],
         heading,
         x: line.x,
+        xEnd: line.xEnd,
+        top: line.y + line.height * 0.82,
+        bottom: line.y - line.height * 0.25,
+        lineSpacingPt: normalLeading,
+        alignment,
+        direction: line.direction,
       });
     }
   }
   return groups;
 }
 
-function clusterAnchors(
-  xs: number[],
-  eps = 12,
+function clusterLineAnchors(
+  lines: PdfTextLine[],
+  eps = 10,
 ): { x: number; count: number }[] {
-  const sorted = [...xs].sort((a, b) => a - b);
-  if (sorted.length === 0) return [];
-  const groups: number[][] = [[sorted[0]!]];
-  for (let i = 1; i < sorted.length; i++) {
-    const x = sorted[i]!;
+  const points = lines.flatMap((line, lineIndex) =>
+    (line.tokens.length > 0 ? line.tokens : [{ x: line.x }]).map((token) => ({
+      x: token.x,
+      lineIndex,
+    })),
+  );
+  points.sort((a, b) => a.x - b.x);
+  if (points.length === 0) return [];
+  const groups: typeof points[] = [[points[0]!]];
+  for (let i = 1; i < points.length; i++) {
+    const point = points[i]!;
     const group = groups[groups.length - 1]!;
-    if (x - group[group.length - 1]! > eps) groups.push([x]);
-    else group.push(x);
+    if (point.x - group[group.length - 1]!.x > eps) groups.push([point]);
+    else group.push(point);
   }
   return groups
     .map((group) => ({
-      x: group.reduce((a, b) => a + b, 0) / group.length,
-      count: group.length,
+      x: group.reduce((sum, point) => sum + point.x, 0) / group.length,
+      count: new Set(group.map((point) => point.lineIndex)).size,
     }))
-    .filter((a) => a.count >= 2);
+    .filter((anchor) => anchor.count >= 2);
+}
+
+function tableGeometry(
+  lines: PdfTextLine[],
+  anchors: { x: number }[],
+  pageWidth: number,
+): { x: number; widths: number[] } {
+  const xs = anchors.map((anchor) => anchor.x).sort((a, b) => a - b);
+  const maxContent = Math.max(...lines.map((line) => line.xEnd), xs[xs.length - 1] ?? 0);
+  const typicalGap = median(xs.slice(1).map((x, index) => x - (xs[index] ?? x))) || 72;
+  const right = Math.min(pageWidth, Math.max(maxContent + 8, (xs[xs.length - 1] ?? 0) + typicalGap));
+  const widths = xs.map((x, index) => {
+    const next = xs[index + 1] ?? right;
+    return Math.max(18, next - x);
+  });
+  return { x: xs[0] ?? 0, widths };
 }
 
 function assignCells(
@@ -192,18 +357,26 @@ function assignCells(
         best = i;
       }
     }
-    if (bestD > 26) continue;
     const prev = cells[best] ?? '';
     cells[best] = prev ? `${prev} ${token.text}` : token.text;
   }
   return cells;
 }
 
-function alignedTable(lines: PdfTextLine[]): PdfBlock | undefined {
-  const xs = lines.flatMap((line) =>
-    (line.tokens.length > 0 ? line.tokens : [{ x: line.x }]).map((t) => t.x),
-  );
-  const anchors = clusterAnchors(xs);
+function inferredHeaderRows(rows: string[][], firstLineBold: boolean): number {
+  if (firstLineBold) return 1;
+  const first = rows[0];
+  const second = rows[1];
+  if (!first || !second) return 0;
+  const firstTextual = first.filter(Boolean).filter((cell) => !/\d/.test(cell)).length;
+  const secondNumeric = second.filter(Boolean).filter((cell) => /\d/.test(cell)).length;
+  return firstTextual >= Math.max(2, first.filter(Boolean).length - 1) && secondNumeric > 0
+    ? 1
+    : 0;
+}
+
+function alignedTable(lines: PdfTextLine[], pageWidth = 612): PdfBlock | undefined {
+  const anchors = clusterLineAnchors(lines);
   if (anchors.length < 2) return undefined;
   const rows: string[][] = [];
   let hits = 0;
@@ -227,11 +400,20 @@ function alignedTable(lines: PdfTextLine[]): PdfBlock | undefined {
     return undefined;
   }
   if (rows.length === 0) return undefined;
-  return { kind: 'table', rows };
+  const geometry = tableGeometry(lines, anchors, pageWidth);
+  return {
+    kind: 'table',
+    rows,
+    x: geometry.x,
+    columnWidthsPt: geometry.widths,
+    top: Math.max(...lines.map((line) => line.y + line.height * 0.82)),
+    bottom: Math.min(...lines.map((line) => line.y - line.height * 0.25)),
+    headerRows: inferredHeaderRows(rows, lines[0]?.bold === true),
+  };
 }
 
-function tableFromRun(run: PdfTextLine[]): PdfBlock | undefined {
-  const aligned = alignedTable(run);
+function tableFromRun(run: PdfTextLine[], pageWidth = 612): PdfBlock | undefined {
+  const aligned = alignedTable(run, pageWidth);
   if (aligned) return aligned;
   if (run.length === 0) return undefined;
   const colCount = Math.max(...run.map((l) => l.cells.length));
@@ -248,12 +430,18 @@ function consumeTable(
   lines: PdfTextLine[],
   start: number,
   anchors: { x: number; count: number }[],
+  pageWidth: number,
 ): { table: PdfBlock; next: number } | undefined {
   const rows: string[][] = [];
   let i = start;
   let lastY = lines[start]?.y ?? 0;
   while (i < lines.length) {
     const line = lines[i]!;
+    const rowGap = lastY - line.y;
+    // OCR baselines are derived from bounding boxes and can drift more than
+    // embedded PDF text. Multi-cell aligned rows are still strong evidence of
+    // one table, so tolerate a larger vertical gap between them.
+    if (rows.length > 0 && rowGap > Math.max(48, line.height * 3.2)) break;
     const cells = assignCells(line, anchors);
     const filled = cells.filter((c) => c.length > 0).length;
     if (filled >= 2) {
@@ -266,7 +454,7 @@ function consumeTable(
       const col = cells.findIndex((c) => c.length > 0);
       if (col >= 0) {
         const last = rows[rows.length - 1]!;
-        last[col] = `${last[col] ?? ''} ${cells[col]}`.trim();
+        last[col] = `${last[col] ?? ''}\n${cells[col]}`.trim();
       }
       lastY = line.y;
       i += 1;
@@ -277,19 +465,29 @@ function consumeTable(
   if (rows.length === 0) return undefined;
   const cols = rows[0]?.filter(Boolean).length ?? 0;
   if (rows.length < 2 && cols < 3) return undefined;
-  return { table: { kind: 'table', rows }, next: i };
+  const used = lines.slice(start, i);
+  const geometry = tableGeometry(used, anchors, pageWidth);
+  return {
+    table: {
+      kind: 'table',
+      rows,
+      x: geometry.x,
+      columnWidthsPt: geometry.widths,
+      top: Math.max(...used.map((line) => line.y + line.height * 0.82)),
+      bottom: Math.min(...used.map((line) => line.y - line.height * 0.25)),
+      headerRows: inferredHeaderRows(rows, used[0]?.bold === true),
+    },
+    next: i,
+  };
 }
 
-export function blocksFromLines(lines: PdfTextLine[]): PdfBlock[] {
+export function blocksFromLines(lines: PdfTextLine[], pageWidth = 612): PdfBlock[] {
   const ordered = [...lines].sort((a, b) => b.y - a.y || a.x - b.x);
-  const xs = ordered.flatMap((line) =>
-    (line.tokens.length > 0 ? line.tokens : [{ x: line.x }]).map((t) => t.x),
-  );
-  const anchors = clusterAnchors(xs);
+  const anchors = clusterLineAnchors(ordered);
   if (anchors.length < 2) {
-    const fallback = tableFromRun(ordered);
+    const fallback = tableFromRun(ordered, pageWidth);
     if (fallback) return [fallback];
-    return paraFromLines(ordered);
+    return paraFromLines(ordered, pageWidth);
   }
   const out: PdfBlock[] = [];
   let i = 0;
@@ -297,7 +495,7 @@ export function blocksFromLines(lines: PdfTextLine[]): PdfBlock[] {
     const cells = assignCells(ordered[i]!, anchors);
     const filled = cells.filter((c) => c.length > 0).length;
     if (filled >= 2) {
-      const taken = consumeTable(ordered, i, anchors);
+      const taken = consumeTable(ordered, i, anchors, pageWidth);
       if (taken) {
         out.push(taken.table);
         i = taken.next;
@@ -312,7 +510,7 @@ export function blocksFromLines(lines: PdfTextLine[]): PdfBlock[] {
       if (nextFilled >= 2) break;
       i += 1;
     }
-    out.push(...paraFromLines(ordered.slice(start, i)));
+    out.push(...paraFromLines(ordered.slice(start, i), pageWidth));
   }
   return out;
 }
@@ -320,17 +518,18 @@ export function blocksFromLines(lines: PdfTextLine[]): PdfBlock[] {
 function splitGlyphColumns(
   glyphs: TextGlyph[],
   pageWidth: number,
-): { header: TextGlyph[]; columns: TextGlyph[][] } {
+): { header: TextGlyph[]; columns: TextGlyph[][]; widthsPt?: number[]; x?: number } {
   if (glyphs.length < 6 || pageWidth < 200) {
     return { header: [], columns: [glyphs] };
   }
-  const minX = Math.min(...glyphs.map((g) => g.x));
-  const maxX = Math.max(...glyphs.map((g) => g.x + glyphWidth(g)));
+  const visible = glyphs.filter((glyph) => cleanText(glyph.str).length > 0);
+  const minX = Math.min(...visible.map((g) => g.x));
+  const maxX = Math.max(...visible.map((g) => g.x + glyphWidth(g)));
   const inner = maxX - minX;
   if (inner < 140) return { header: [], columns: [glyphs] };
   const bins = 48;
   const hits = new Array<number>(bins).fill(0);
-  for (const g of glyphs) {
+  for (const g of visible) {
     const a = Math.max(0, Math.floor(((g.x - minX) / inner) * bins));
     const b = Math.min(
       bins - 1,
@@ -357,9 +556,9 @@ function splitGlyphColumns(
   const gapPt = (bestGap / bins) * inner;
   if (bestAt < 0 || gapPt < 24) return { header: [], columns: [glyphs] };
   const splitX = minX + ((bestAt + 0.5) / bins) * inner;
-  const left = glyphs.filter((g) => g.x + glyphWidth(g) <= splitX + 3);
-  const right = glyphs.filter((g) => g.x >= splitX - 3);
-  const header = glyphs.filter(
+  let left = visible.filter((g) => g.x + glyphWidth(g) <= splitX + 3);
+  let right = visible.filter((g) => g.x >= splitX - 3);
+  const spanning = visible.filter(
     (g) => g.x < splitX && g.x + glyphWidth(g) > splitX,
   );
   if (left.length < 3 || right.length < 3) {
@@ -372,7 +571,29 @@ function splitGlyphColumns(
     medianLen(rightLines) < 28 &&
     yAligned(leftLines, rightLines);
   if (short) return { header: [], columns: [glyphs] };
-  return { header, columns: [left, right] };
+  const smallerTop = Math.min(
+    Math.max(...left.map((glyph) => glyph.y)),
+    Math.max(...right.map((glyph) => glyph.y)),
+  );
+  const bodySize = median([...left, ...right].map((glyph) => glyph.size)) || 11;
+  const topHeader = visible.filter(
+    (glyph) =>
+      glyph.y > smallerTop + Math.max(8, bodySize * 1.15) &&
+      (glyph.size >= bodySize * 1.22 || glyphWidth(glyph) >= inner * 0.46),
+  );
+  const headerSet = new Set([...spanning, ...topHeader]);
+  left = left.filter((glyph) => !headerSet.has(glyph));
+  right = right.filter((glyph) => !headerSet.has(glyph));
+  const header = visible.filter((glyph) => headerSet.has(glyph));
+  if (left.length < 2 || right.length < 2) {
+    return { header: [], columns: [glyphs] };
+  }
+  return {
+    header,
+    columns: [left, right],
+    widthsPt: [Math.max(36, splitX - minX), Math.max(36, maxX - splitX)],
+    x: minX,
+  };
 }
 
 function medianLen(lines: PdfTextLine[]): number {
@@ -394,7 +615,7 @@ function yAligned(a: PdfTextLine[], b: PdfTextLine[]): boolean {
 function splitColumns(
   lines: PdfTextLine[],
   pageWidth: number,
-): { header: PdfTextLine[]; columns: PdfTextLine[][] } {
+): { header: PdfTextLine[]; columns: PdfTextLine[][]; widthsPt?: number[]; x?: number } {
   if (lines.length < 4 || pageWidth < 200) {
     return { header: [], columns: [lines] };
   }
@@ -445,43 +666,89 @@ function splitColumns(
   if (left.length < 2 || right.length < 2) {
     return { header: [], columns: [lines] };
   }
-  return { header, columns: [left, right] };
+  return {
+    header,
+    columns: [left, right],
+    widthsPt: [Math.max(36, splitX - minX), Math.max(36, maxX - splitX)],
+    x: minX,
+  };
+}
+
+function blockTop(block: PdfBlock): number | undefined {
+  if (block.kind === 'image') return undefined;
+  return block.top;
+}
+
+function blockBottom(block: PdfBlock): number | undefined {
+  if (block.kind === 'image') return undefined;
+  return block.bottom;
+}
+
+function addBlockSpacing(blocks: PdfBlock[], pageHeight: number): PdfBlock[] {
+  let previousBottom = pageHeight;
+  for (const block of blocks) {
+    if (block.kind === 'image') continue;
+    const top = blockTop(block);
+    const bottom = blockBottom(block);
+    if (top != null) {
+      // Word adds its own font leading around paragraphs and tables. Keeping the
+      // raw PDF gap would double-count that leading and make every block drift
+      // farther down the page, so retain the visual whitespace portion only.
+      block.spaceBeforePt = Math.max(0, Math.min(pageHeight, previousBottom - top) * 0.65);
+    }
+    if (bottom != null) previousBottom = bottom;
+  }
+  return blocks;
 }
 
 export function analyzePage(
   lines: PdfTextLine[],
   pageWidth: number,
+  pageHeight = 792,
 ): PdfBlock[] {
   if (lines.length === 0) return [];
-  const { header, columns } = splitColumns(lines, pageWidth);
-  const blocks: PdfBlock[] = [...paraFromLines(header)];
+  const { header, columns, widthsPt, x } = splitColumns(lines, pageWidth);
+  const blocks: PdfBlock[] = [...paraFromLines(header, pageWidth)];
   if (columns.length <= 1) {
-    blocks.push(...blocksFromLines(columns[0] ?? lines));
-    return blocks;
+    blocks.push(...blocksFromLines(columns[0] ?? lines, pageWidth));
+    return addBlockSpacing(blocks, pageHeight);
   }
+  const columnBlocks = columns.map((col) => blocksFromLines(col, pageWidth));
+  const allColumnBlocks = columnBlocks.flat();
   blocks.push({
     kind: 'columns',
-    columns: columns.map((col) => blocksFromLines(col)),
+    columns: columnBlocks,
+    widthsPt,
+    x,
+    top: Math.max(...allColumnBlocks.map((block) => blockTop(block) ?? 0)),
+    bottom: Math.min(...allColumnBlocks.map((block) => blockBottom(block) ?? pageHeight)),
   });
-  return blocks;
+  return addBlockSpacing(blocks, pageHeight);
 }
 
 export function analyzeGlyphs(
   glyphs: TextGlyph[],
   pageWidth: number,
+  pageHeight = 792,
 ): PdfBlock[] {
   if (glyphs.length === 0) return [];
-  const { header, columns } = splitGlyphColumns(glyphs, pageWidth);
-  const blocks: PdfBlock[] = [...paraFromLines(clusterLines(header))];
+  const { header, columns, widthsPt, x } = splitGlyphColumns(glyphs, pageWidth);
+  const blocks: PdfBlock[] = [...paraFromLines(clusterLines(header), pageWidth)];
   if (columns.length <= 1) {
-    blocks.push(...blocksFromLines(clusterLines(columns[0] ?? glyphs)));
-    return blocks;
+    blocks.push(...blocksFromLines(clusterLines(columns[0] ?? glyphs), pageWidth));
+    return addBlockSpacing(blocks, pageHeight);
   }
+  const columnBlocks = columns.map((col) => blocksFromLines(clusterLines(col), pageWidth));
+  const allColumnBlocks = columnBlocks.flat();
   blocks.push({
     kind: 'columns',
-    columns: columns.map((col) => blocksFromLines(clusterLines(col))),
+    columns: columnBlocks,
+    widthsPt,
+    x,
+    top: Math.max(...allColumnBlocks.map((block) => blockTop(block) ?? 0)),
+    bottom: Math.min(...allColumnBlocks.map((block) => blockBottom(block) ?? pageHeight)),
   });
-  return blocks;
+  return addBlockSpacing(blocks, pageHeight);
 }
 
 export function pageCharCount(lines: PdfTextLine[]): number {

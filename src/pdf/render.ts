@@ -10,7 +10,13 @@ import openjpegWasmUrl from 'pdfjs-dist/wasm/openjpeg.wasm?url';
 import qcmsWasmUrl from 'pdfjs-dist/wasm/qcms_bg.wasm?url';
 import quickjsJsUrl from 'pdfjs-dist/wasm/quickjs-eval.js?url';
 import quickjsWasmUrl from 'pdfjs-dist/wasm/quickjs-eval.wasm?url';
-import type { CompressLevel, JobResult, PickedFile } from '../lib/types';
+import type {
+  CompressLevel,
+  JobResult,
+  PdfToDocxProgress,
+  PickedFile,
+} from '../lib/types';
+import type { OcrSession } from './ocr';
 import { analyzeGlyphs, clusterLines, glyphFromPdfItem, pageCharCount } from './textLayout';
 import type { PdfTextPage } from './textTypes';
 import { copyBytes, humanError } from './util';
@@ -101,6 +107,7 @@ async function withPdfjs<T>(
     data,
     useWorkerFetch: false,
     useSystemFonts: true,
+    fontExtraProperties: true,
     BinaryDataFactory: ViteBinaryDataFactory,
   });
   const pdf = await task.promise;
@@ -167,9 +174,10 @@ export async function pdfToImages(file: PickedFile): Promise<JobResult> {
       }
       return {
         ok: true,
-        bytes: copyBytes(file.bytes),
-        filename: 'pages.json',
+        bytes: new Uint8Array(),
+        filename: `${file.name.replace(/\.pdf$/i, '') || 'document'}-pages`,
         pageCount: pdf.numPages,
+        mime: 'application/x-image-set',
         extra: { images },
       };
     });
@@ -203,11 +211,15 @@ export async function compress(
         });
       }
       const bytes = await out.save();
+      const compressed = copyBytes(bytes);
+      const finalBytes =
+        compressed.byteLength < file.bytes.byteLength ? compressed : copyBytes(file.bytes);
       return {
         ok: true,
-        bytes: copyBytes(bytes),
+        bytes: finalBytes,
         filename: 'compressed.pdf',
         pageCount: out.getPageCount(),
+        mime: 'application/pdf',
       };
     });
   } catch (err) {
@@ -215,24 +227,119 @@ export async function compress(
   }
 }
 
-export async function extractPdfText(file: PickedFile): Promise<PdfTextPage[]> {
+export async function extractPdfText(
+  file: PickedFile,
+  onProgress?: (update: PdfToDocxProgress) => void,
+): Promise<PdfTextPage[]> {
   return withPdfjs(file, async (pdf) => {
     if (pdf.numPages < 1) return [];
     const pages: PdfTextPage[] = [];
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      try {
+    let ocr: OcrSession | undefined;
+    let ocrUnavailable = false;
+    try {
+      for (let i = 1; i <= pdf.numPages; i++) {
+        onProgress?.({
+          progress: (i - 1) / pdf.numPages,
+          label: `Reading page ${i} of ${pdf.numPages}`,
+        });
+        const page = await pdf.getPage(i);
+        try {
         const viewport = page.getViewport({ scale: 1 });
         const content = await page.getTextContent();
+        await page.getOperatorList();
+        const styles = { ...content.styles } as Record<
+          string,
+          {
+            fontFamily?: string;
+            ascent?: number;
+            descent?: number;
+            vertical?: boolean;
+            bold?: boolean;
+            italic?: boolean;
+          }
+        >;
+        const fontNames = new Set<string>();
+        for (const item of content.items) {
+          if (typeof item === 'object' && item && 'fontName' in item) {
+            const fontName = (item as { fontName?: unknown }).fontName;
+            if (typeof fontName === 'string') fontNames.add(fontName);
+          }
+        }
+        for (const fontName of fontNames) {
+          try {
+            const font = page.commonObjs.get(fontName) as {
+              name?: string;
+              fallbackName?: string;
+              bold?: boolean;
+              italic?: boolean;
+            };
+            const previous = styles[fontName] ?? {};
+            styles[fontName] = {
+              ...previous,
+              fontFamily: font.name ?? font.fallbackName ?? previous.fontFamily,
+              bold: font.bold,
+              italic: font.italic,
+            };
+          } catch {
+            // Some malformed PDFs omit a resolvable font object; keep text extraction usable.
+          }
+        }
         const glyphs = [];
         for (const item of content.items) {
-          const glyph = glyphFromPdfItem(item);
+          const glyph = glyphFromPdfItem(item, styles);
           if (glyph) glyphs.push(glyph);
         }
         const lines = clusterLines(glyphs);
         const chars = pageCharCount(lines);
-        if (chars < 40) {
-          const jpeg = await renderPageToJpeg(page, Math.min(1.6, 900 / viewport.width), 0.78);
+        if (chars >= 12) {
+          pages.push({
+            width: viewport.width,
+            height: viewport.height,
+            blocks: analyzeGlyphs(glyphs, viewport.width, viewport.height),
+          });
+          continue;
+        }
+
+        const ocrScale = Math.max(1.5, Math.min(2.6, 1800 / viewport.width));
+        const jpeg = await renderPageToJpeg(page, ocrScale, 0.9);
+        let recognized = false;
+        if (!ocrUnavailable) {
+          try {
+            if (!ocr) {
+              onProgress?.({
+                progress: (i - 0.9) / pdf.numPages,
+                label: 'Starting on-device OCR',
+              });
+              const module = await import('./ocr');
+              ocr = await module.createOcrSession((update) => {
+                onProgress?.({
+                  progress: (i - 1 + update.progress * 0.9) / pdf.numPages,
+                  label: `OCR page ${i} of ${pdf.numPages}`,
+                });
+              });
+            }
+            const result = await ocr.recognize(jpeg, ocrScale, viewport.height);
+            const ocrChars = result.text.replace(/\s/g, '').length;
+            if (result.confidence >= 45 && ocrChars >= 10) {
+              const blocks = analyzeGlyphs(
+                result.glyphs,
+                viewport.width,
+                viewport.height,
+              );
+              if (blocks.length > 0) {
+                pages.push({
+                  width: viewport.width,
+                  height: viewport.height,
+                  blocks,
+                });
+                recognized = true;
+              }
+            }
+          } catch {
+            ocrUnavailable = true;
+          }
+        }
+        if (!recognized) {
           pages.push({
             width: viewport.width,
             height: viewport.height,
@@ -246,17 +353,15 @@ export async function extractPdfText(file: PickedFile): Promise<PdfTextPage[]> {
               },
             ],
           });
-        } else {
-          pages.push({
-            width: viewport.width,
-            height: viewport.height,
-            blocks: analyzeGlyphs(glyphs, viewport.width),
-          });
         }
-      } finally {
-        page.cleanup();
+        } finally {
+          page.cleanup();
+        }
       }
+    } finally {
+      await ocr?.terminate();
     }
+    onProgress?.({ progress: 0.96, label: 'Building Word document' });
     return pages;
   });
 }

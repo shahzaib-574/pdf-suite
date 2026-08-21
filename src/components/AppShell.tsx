@@ -5,11 +5,13 @@ import { AnimatedButton } from './AnimatedButton';
 
 export type AppShellProps = {
   children: ReactNode;
-  footer?: ReactNode;
   onSettings?: () => void;
 };
 
-export function AppShell({ children, footer, onSettings }: AppShellProps) {
+export function AppShell({
+  children,
+  onSettings,
+}: AppShellProps) {
   return (
     <div className="shell">
       <header className="shell__bar">
@@ -20,16 +22,19 @@ export function AppShell({ children, footer, onSettings }: AppShellProps) {
             <p className="shell__tag">{APP_TAGLINE}</p>
           </div>
         </div>
-        <AnimatedButton
-          variant="ghost"
-          className="btn--icon"
-          icon={Settings}
-          aria-label="Settings"
-          onClick={onSettings}
-        />
+        {onSettings ? (
+          <AnimatedButton
+            variant="ghost"
+            className="btn--icon"
+            icon={Settings}
+            aria-label="Settings"
+            onClick={onSettings}
+          />
+        ) : (
+          <span className="shell__bar-spacer" aria-hidden="true" />
+        )}
       </header>
       <main className="shell__body">{children}</main>
-      {footer ? <footer className="shell__footer">{footer}</footer> : null}
     </div>
   );
 }

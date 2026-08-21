@@ -10,9 +10,11 @@ import {
 import { runPagesToDocxSelfCheck } from '../src/pdf/docxBuild.test.ts';
 import { docxToPdf } from '../src/pdf/docxToPdf.ts';
 import { pickedDocx } from '../src/pdf/docxToPdf.test.ts';
+import { runOcrLayoutSelfCheck } from '../src/pdf/ocr.test.ts';
 
 await runDocxToPdfSelfCheck();
 await runPagesToDocxSelfCheck();
+await runOcrLayoutSelfCheck();
 
 const sample = await buildDocx({
   documentXml: documentXml(
@@ -37,3 +39,4 @@ console.log(
   `SELF_CHECK_OK pages=${result.pageCount ?? '?'} bytes=${result.bytes.byteLength} wrote=${outPath}`,
 );
 console.log('PDF_TO_DOCX_PACKAGER_OK');
+console.log('OCR_LAYOUT_PACKAGER_OK');

@@ -1,17 +1,28 @@
 {
   "name": "pdf-suite",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "oxlint",
+    "lint": "oxlint src scripts",
     "preview": "vite preview",
-    "docx-selfcheck": "tsx scripts/docx-selfcheck.ts"
+    "docx-selfcheck": "tsx scripts/docx-selfcheck.ts",
+    "pdf-selfcheck": "tsx scripts/pdf-tools-selfcheck.ts",
+    "pdf-docx-preview": "tsx scripts/pdf-to-docx-preview.ts",
+    "ocr-preview": "tsx scripts/ocr-preview.ts",
+    "android:add": "npm run build && cap add android",
+    "android:sync": "npm run build && cap sync android",
+    "android:open": "cap open android",
+    "android:debug": "npm run android:sync && cd android && gradlew.bat assembleDebug",
+    "android:bundle": "npm run android:sync && cd android && gradlew.bat bundleRelease"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
     "@gsap/react": "^2.1.2",
+    "@tesseract.js-data/eng": "^1.0.0",
     "fast-xml-parser": "^5.11.0",
     "gsap": "^3.15.0",
     "idb-keyval": "^6.3.0",
@@ -20,9 +31,11 @@
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.2.108",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
     "@types/jszip": "^3.4.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",

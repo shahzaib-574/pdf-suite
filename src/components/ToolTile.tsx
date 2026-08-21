@@ -1,4 +1,4 @@
-import type { LucideIcon } from 'lucide-react';
+import { ArrowUpRight, type LucideIcon } from 'lucide-react';
 import '../motion/gsapSetup';
 import { usePress } from '../motion/press';
 
@@ -36,10 +36,13 @@ export function ToolTile({
         <span className="tile__icon" aria-hidden="true">
           <Icon size={18} strokeWidth={2.1} />
         </span>
-        {pro ? <span className="tile__pro">Pro</span> : null}
+        {pro ? <span className="tile__pro">Advanced</span> : null}
       </span>
       <span className="tile__title">{title}</span>
-      <span className="tile__blurb">{blurb}</span>
+      <span className="tile__bottom">
+        <span className="tile__blurb">{blurb}</span>
+        <ArrowUpRight className="tile__arrow" size={16} aria-hidden="true" />
+      </span>
     </button>
   );
 }

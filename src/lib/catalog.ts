@@ -10,6 +10,7 @@ export type ToolDef = {
   accept: 'pdf' | 'pdfs' | 'images' | 'docx' | 'none';
   minFiles: number;
   maxFilesFree: number;
+  available?: boolean;
 };
 
 export const TOOLS: ToolDef[] = [
@@ -112,6 +113,7 @@ export const TOOLS: ToolDef[] = [
     accept: 'pdf',
     minFiles: 1,
     maxFilesFree: 1,
+    available: false,
   },
   {
     id: 'view',

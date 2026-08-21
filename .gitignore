@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+tmp/
+/eng.traineddata
 
 # Local review notes and generated fixtures
 review-*.md

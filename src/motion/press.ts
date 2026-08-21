@@ -9,8 +9,8 @@ import { gsap, prefersReducedMotion, useGSAP } from './gsapSetup';
 
 export function pressIn(el: Element): void {
   gsap.to(el, {
-    scale: 0.96,
-    duration: prefersReducedMotion() ? 0 : 0.14,
+    scale: 0.98,
+    duration: prefersReducedMotion() ? 0 : 0.12,
     ease: 'power2.out',
     overwrite: 'auto',
   });
@@ -20,8 +20,8 @@ export function pressOut(el: Element): void {
   const reduced = prefersReducedMotion();
   gsap.to(el, {
     scale: 1,
-    duration: reduced ? 0 : 0.28,
-    ease: reduced ? 'power3.out' : 'back.out(1.4)',
+    duration: reduced ? 0 : 0.22,
+    ease: 'power3.out',
     overwrite: 'auto',
   });
 }

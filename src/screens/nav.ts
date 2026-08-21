@@ -12,6 +12,7 @@ export function parseHash(hash: string): Route {
   if (parts.length === 0) return { name: 'home' };
 
   const [head, rest] = parts;
+  if (head === 'recents') return { name: 'recents' };
   if (head === 'settings') return { name: 'settings' };
   if (head === 'result') return { name: 'result' };
   if (head === 'viewer') {

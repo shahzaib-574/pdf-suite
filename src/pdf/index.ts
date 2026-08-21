@@ -8,6 +8,7 @@ import type {
   JobResult,
   OrganizeOp,
   PageRange,
+  PdfToDocxProgress,
   PickedFile,
   ProtectInput,
   WatermarkInput,
@@ -36,7 +37,10 @@ export type PdfEngine = {
     width: number,
   ): Promise<Blob>;
   docxToPdf(file: PickedFile): Promise<JobResult>;
-  pdfToDocx(file: PickedFile): Promise<JobResult>;
+  pdfToDocx(
+    file: PickedFile,
+    onProgress?: (update: PdfToDocxProgress) => void,
+  ): Promise<JobResult>;
 };
 
 type Pending = {
@@ -222,10 +226,10 @@ export const engine: PdfEngine = {
       return { ok: false, message: humanError(err) };
     }
   },
-  async pdfToDocx(file) {
+  async pdfToDocx(file, onProgress) {
     try {
       const { pdfToDocx } = await import('./pdfToDocx');
-      return await pdfToDocx(file);
+      return await pdfToDocx(file, onProgress);
     } catch (err) {
       return { ok: false, message: humanError(err) };
     }

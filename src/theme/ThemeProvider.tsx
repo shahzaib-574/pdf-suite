@@ -20,8 +20,8 @@ export type ThemeContextValue = {
 };
 
 const STORAGE_KEY = 'pdf.theme';
-const DARK_THEME_COLOR = '#12110e';
-const LIGHT_THEME_COLOR = '#f3eee4';
+const DARK_THEME_COLOR = '#11101b';
+const LIGHT_THEME_COLOR = '#f7f6fb';
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
@@ -32,7 +32,7 @@ function readStoredTheme(): Theme {
   } catch {
     // private mode / blocked storage
   }
-  return 'dark';
+  return 'light';
 }
 
 function applyTheme(theme: Theme): void {

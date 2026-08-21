@@ -5,6 +5,7 @@ import type {
   CompressLevel,
   JobResult,
   OrganizeOp,
+  PdfToDocxProgress,
   PickedFile,
   ToolId,
 } from '../lib/types';
@@ -16,6 +17,7 @@ import {
   setLastJob,
 } from '../store/lastJob';
 import { saveRecent } from '../store/recents';
+import { takePendingScan, takePendingScanError } from '../store/pendingScan';
 import { navigate } from './nav';
 
 type ToolFlowProps = {
@@ -28,9 +30,9 @@ const TOOL_BY_ID = Object.fromEntries(TOOLS.map((t) => [t.id, t])) as Record<
 >;
 
 const LEVELS: { id: CompressLevel; label: string }[] = [
-  { id: 'strong', label: 'Strong' },
+  { id: 'strong', label: 'Small' },
   { id: 'balanced', label: 'Balanced' },
-  { id: 'keep', label: 'Keep' },
+  { id: 'keep', label: 'High quality' },
 ];
 
 function acceptAttr(accept: ToolDef['accept']): string {
@@ -65,6 +67,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const pro = usePro();
   const [picked, setPicked] = useState<PickedFile[]>([]);
   const [busy, setBusy] = useState(false);
+  const [jobProgress, setJobProgress] = useState<number | undefined>();
+  const [jobLabel, setJobLabel] = useState('Working on-device…');
   const [error, setError] = useState<string | null>(null);
   const [pageCount, setPageCount] = useState(0);
   const [startPage, setStartPage] = useState(1);
@@ -76,6 +80,11 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const [rotateAll, setRotateAll] = useState(false);
   const [reverse, setReverse] = useState(false);
   const [thumbs, setThumbs] = useState<string[]>([]);
+  const [pageOrder, setPageOrder] = useState<number[]>([]);
+  const [removedPages, setRemovedPages] = useState<number[]>([]);
+  const [pageRotations, setPageRotations] = useState<Record<number, 0 | 90 | 180 | 270>>(
+    {},
+  );
 
   const locked = !pro && tool.pro;
   const maxFiles = pro ? Number.POSITIVE_INFINITY : tool.maxFilesFree;
@@ -85,6 +94,14 @@ export function ToolFlow({ id }: ToolFlowProps) {
     () => picked.map((file) => ({ name: file.name, size: file.bytes.byteLength })),
     [picked],
   );
+
+  useEffect(() => {
+    if (id !== 'scan') return;
+    const cameraFiles = takePendingScan();
+    const cameraError = takePendingScanError();
+    if (cameraFiles.length > 0) setPicked(cameraFiles);
+    if (cameraError) setError(cameraError);
+  }, [id]);
 
   useEffect(() => {
     const file = picked[0];
@@ -100,6 +117,9 @@ export function ToolFlow({ id }: ToolFlowProps) {
         setPageCount(count);
         setStartPage(1);
         setEndPage(Math.max(1, count));
+        setPageOrder(Array.from({ length: count }, (_, index) => index));
+        setRemovedPages([]);
+        setPageRotations({});
       })
       .catch(() => {
         if (!cancelled) setPageCount(0);
@@ -118,7 +138,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
     const urls: string[] = [];
     const file = picked[0];
     void (async () => {
-      const n = Math.min(pageCount, 8);
+      const n = Math.min(pageCount, 30);
       for (let i = 0; i < n; i++) {
         try {
           const blob = await engine.renderPage(file, i, 96);
@@ -171,6 +191,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
       try {
         await saveRecent({ name: file.name, tool: 'view', bytes: file.bytes });
         if (cancelled) return;
+        setLastJob(null, null);
         setCurrentViewer(file.bytes, file.name);
         navigate('#/viewer');
       } catch (err) {
@@ -187,11 +208,18 @@ export function ToolFlow({ id }: ToolFlowProps) {
   function extraValid(): boolean {
     switch (tool.id) {
       case 'split':
-        return startPage >= 1 && endPage >= startPage;
+        return (
+          pageCount > 0 &&
+          startPage >= 1 &&
+          endPage >= startPage &&
+          endPage <= pageCount
+        );
       case 'watermark':
         return watermarkText.trim().length > 0;
       case 'protect':
         return password.length > 0;
+      case 'organize':
+        return pageCount > 0 && removedPages.length < pageCount;
       default:
         return true;
     }
@@ -199,18 +227,62 @@ export function ToolFlow({ id }: ToolFlowProps) {
 
   function buildOps(count: number): OrganizeOp[] {
     const ops: OrganizeOp[] = [];
-    if (rotateAll) {
-      for (let i = 0; i < count; i++) {
-        ops.push({ type: 'rotate', pageIndex: i, degrees: 90 });
+    const baseOrder =
+      pageOrder.length === count
+        ? pageOrder
+        : Array.from({ length: count }, (_, index) => index);
+    const removed = new Set(removedPages);
+    const order = baseOrder.filter((pageIndex) => !removed.has(pageIndex));
+    ops.push({ type: 'reorder', order });
+    order.forEach((originalPageIndex, outputIndex) => {
+      const degrees = pageRotations[originalPageIndex] ?? 0;
+      if (degrees !== 0) {
+        ops.push({ type: 'rotate', pageIndex: outputIndex, degrees });
       }
-    }
-    if (reverse && count > 0) {
-      ops.push({
-        type: 'reorder',
-        order: Array.from({ length: count }, (_, i) => count - 1 - i),
-      });
-    }
+    });
     return ops;
+  }
+
+  function movePage(pageIndex: number, direction: -1 | 1): void {
+    setPageOrder((current) => {
+      const at = current.indexOf(pageIndex);
+      const target = at + direction;
+      if (at < 0 || target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[at], next[target]] = [next[target]!, next[at]!];
+      return next;
+    });
+  }
+
+  function rotatePage(pageIndex: number): void {
+    setPageRotations((current) => {
+      const next = (((current[pageIndex] ?? 0) + 90) % 360) as 0 | 90 | 180 | 270;
+      return { ...current, [pageIndex]: next };
+    });
+  }
+
+  function toggleRemoved(pageIndex: number): void {
+    setRemovedPages((current) =>
+      current.includes(pageIndex)
+        ? current.filter((index) => index !== pageIndex)
+        : [...current, pageIndex],
+    );
+  }
+
+  function rotateEveryPage(): void {
+    setRotateAll((value) => !value);
+    setPageRotations((current) => {
+      const next = { ...current };
+      for (let index = 0; index < pageCount; index++) {
+        next[index] = (((next[index] ?? 0) + 90) % 360) as 0 | 90 | 180 | 270;
+      }
+      return next;
+    });
+  }
+
+  function reversePages(): void {
+    setReverse((value) => !value);
+    setPageOrder((current) => [...current].reverse());
   }
 
   async function run(): Promise<void> {
@@ -231,6 +303,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
     const first = picked[0];
     if (!first) return;
     setBusy(true);
+    setJobProgress(tool.id === 'pdf-docx' ? 0 : undefined);
+    setJobLabel(tool.id === 'pdf-docx' ? 'Reading PDF' : 'Working on-device…');
     setError(null);
     try {
       let result: JobResult;
@@ -273,7 +347,10 @@ export function ToolFlow({ id }: ToolFlowProps) {
           result = await engine.docxToPdf(first);
           break;
         case 'pdf-docx':
-          result = await engine.pdfToDocx(first);
+          result = await engine.pdfToDocx(first, (update: PdfToDocxProgress) => {
+            setJobProgress(update.progress);
+            setJobLabel(update.label);
+          });
           break;
       }
       if (!result.ok) {
@@ -307,6 +384,13 @@ export function ToolFlow({ id }: ToolFlowProps) {
         onBack={() => navigate('#/')}
       />
       <div className="ps-body">
+        <div className="ps-steps" aria-label="Progress">
+          <span className={picked.length > 0 ? 'ps-step is-complete' : 'ps-step is-active'}>
+            Select
+          </span>
+          <span className={picked.length > 0 ? 'ps-step is-active' : 'ps-step'}>Options</span>
+          <span className="ps-step">Export</span>
+        </div>
         {locked ? (
           <p className="ps-banner ps-banner--lock" role="status">
             Pro is off (dev toggle)
@@ -366,9 +450,9 @@ export function ToolFlow({ id }: ToolFlowProps) {
         ) : null}
         {tool.id === 'pdf-docx' ? (
           <p className="ps-note">
-            Rebuilds text, detected tables, and two-column layouts. Pages with
-            almost no text (scans) are inserted as page images. Not a perfect
-            copy of every PDF design.
+            Rebuilds styled text, detected tables, and two-column layouts.
+            Scanned pages use bundled English OCR entirely on-device; uncertain
+            pages stay as full-page images instead of returning unreliable text.
           </p>
         ) : null}
 
@@ -403,17 +487,24 @@ export function ToolFlow({ id }: ToolFlowProps) {
         ) : null}
 
         {tool.id === 'compress' ? (
-          <div className="ps-row">
-            {LEVELS.map((level) => (
-              <AnimatedButton
-                key={level.id}
-                variant={compressLevel === level.id ? 'brass' : 'ghost'}
-                onClick={() => setCompressLevel(level.id)}
-              >
-                {level.label}
-              </AnimatedButton>
-            ))}
-          </div>
+          <>
+            <div className="ps-row">
+              {LEVELS.map((level) => (
+                <AnimatedButton
+                  key={level.id}
+                  variant={compressLevel === level.id ? 'brass' : 'ghost'}
+                  onClick={() => setCompressLevel(level.id)}
+                >
+                  {level.label}
+                </AnimatedButton>
+              ))}
+            </div>
+            <p className="ps-note">
+              Compression flattens pages into images. Forms, links, signatures,
+              and selectable text are not retained. Ream keeps the original when
+              flattening would make the file larger.
+            </p>
+          </>
         ) : null}
 
         {tool.id === 'watermark' ? (
@@ -431,8 +522,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
               Opacity {Math.round(watermarkOpacity * 100)}%
               <input
                 type="range"
-                min={0.05}
-                max={1}
+                min={0.08}
+                max={0.35}
                 step={0.05}
                 value={watermarkOpacity}
                 onChange={(event) => setWatermarkOpacity(Number(event.target.value))}
@@ -465,22 +556,87 @@ export function ToolFlow({ id }: ToolFlowProps) {
               <p className="ps-muted tabular">{pageCount} pages</p>
             ) : null}
             {thumbs.length > 0 ? (
-              <div className="ps-thumbs">
-                {thumbs.map((url, index) => (
-                  <img key={url} src={url} alt={`Page ${index + 1}`} />
-                ))}
+              <div className="ps-organize-grid">
+                {pageOrder
+                  .filter((pageIndex) => pageIndex < thumbs.length)
+                  .map((pageIndex) => {
+                    const removed = removedPages.includes(pageIndex);
+                    const position = pageOrder.indexOf(pageIndex);
+                    const rotation = pageRotations[pageIndex] ?? 0;
+                    return (
+                      <article
+                        className={`ps-organize-card${removed ? ' is-removed' : ''}`}
+                        key={pageIndex}
+                      >
+                        <div className="ps-organize-card__header">
+                          <span>Page {pageIndex + 1}</span>
+                          <span className="tabular">#{position + 1}</span>
+                        </div>
+                        <div className="ps-organize-preview">
+                          <img
+                            src={thumbs[pageIndex]}
+                            alt={`Page ${pageIndex + 1}`}
+                            style={{ transform: `rotate(${rotation}deg)` }}
+                          />
+                        </div>
+                        <div className="ps-organize-controls">
+                          <AnimatedButton
+                            variant="ghost"
+                            disabled={position === 0}
+                            aria-label={`Move page ${pageIndex + 1} left`}
+                            onClick={() => movePage(pageIndex, -1)}
+                          >
+                            Left
+                          </AnimatedButton>
+                          <AnimatedButton
+                            variant="ghost"
+                            disabled={position === pageOrder.length - 1}
+                            aria-label={`Move page ${pageIndex + 1} right`}
+                            onClick={() => movePage(pageIndex, 1)}
+                          >
+                            Right
+                          </AnimatedButton>
+                          <AnimatedButton
+                            variant="ghost"
+                            aria-label={`Rotate page ${pageIndex + 1} clockwise`}
+                            onClick={() => rotatePage(pageIndex)}
+                          >
+                            Rotate
+                          </AnimatedButton>
+                          <AnimatedButton
+                            variant={removed ? 'brass' : 'danger'}
+                            aria-label={`${removed ? 'Restore' : 'Remove'} page ${pageIndex + 1}`}
+                            onClick={() => toggleRemoved(pageIndex)}
+                          >
+                            {removed ? 'Restore' : 'Remove'}
+                          </AnimatedButton>
+                        </div>
+                      </article>
+                    );
+                  })}
               </div>
+            ) : null}
+            {pageCount > 30 ? (
+              <p className="ps-note">
+                Showing previews for the first 30 source pages. Bulk actions apply
+                to all {pageCount} pages.
+              </p>
+            ) : null}
+            {removedPages.length === pageCount && pageCount > 0 ? (
+              <p className="ps-banner ps-banner--error" role="alert">
+                Restore at least one page before running.
+              </p>
             ) : null}
             <div className="ps-row">
               <AnimatedButton
                 variant={rotateAll ? 'brass' : 'ghost'}
-                onClick={() => setRotateAll((v) => !v)}
+                onClick={rotateEveryPage}
               >
                 Rotate all 90°
               </AnimatedButton>
               <AnimatedButton
                 variant={reverse ? 'brass' : 'ghost'}
-                onClick={() => setReverse((v) => !v)}
+                onClick={reversePages}
               >
                 Reverse order
               </AnimatedButton>
@@ -498,7 +654,11 @@ export function ToolFlow({ id }: ToolFlowProps) {
           <p className="ps-note">Pick a file to open it here.</p>
         )}
       </div>
-      <ProgressHud open={busy} label="Working on-device…" />
+      <ProgressHud
+        open={busy}
+        label={jobLabel}
+        progress={jobProgress}
+      />
     </div>
   );
 }

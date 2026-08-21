@@ -16,9 +16,11 @@ export function StaggerGrid({ children, className }: StaggerGridProps) {
         return;
       }
       gsap.from('[data-tile]', {
-        y: 16,
+        y: 10,
         autoAlpha: 0,
-        stagger: 0.05,
+        stagger: 0.035,
+        duration: 0.36,
+        ease: 'power3.out',
       });
     },
     { scope: ref },

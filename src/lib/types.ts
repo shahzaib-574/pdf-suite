@@ -58,9 +58,15 @@ export type JobErr = {
 
 export type JobResult = JobOk | JobErr;
 
+export type PdfToDocxProgress = {
+  progress: number;
+  label: string;
+};
+
 export type RecentItem = {
   id: string;
   name: string;
+  mime: string;
   tool: ToolId;
   createdAt: number;
   bytes: Uint8Array;
@@ -69,6 +75,7 @@ export type RecentItem = {
 
 export type Route =
   | { name: 'home' }
+  | { name: 'recents' }
   | { name: 'tool'; id: ToolId }
   | { name: 'viewer'; recentId?: string }
   | { name: 'result' }

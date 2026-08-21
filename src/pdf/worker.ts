@@ -301,7 +301,7 @@ async function pageCount(file: TransferFile): Promise<number> {
   return src.getPageCount();
 }
 
-async function run(
+export async function runWorkerOperation(
   req: WorkerRequest,
 ): Promise<Pick<WorkerSuccess, 'bytes' | 'filename' | 'pageCount'>> {
   switch (req.op) {
@@ -332,26 +332,28 @@ function post(response: WorkerResponse, transfer: ArrayBuffer[] = []): void {
   self.postMessage(response, { transfer });
 }
 
-self.addEventListener('message', (event: MessageEvent<unknown>) => {
-  const data = event.data;
-  if (!isRequest(data)) return;
-  void (async () => {
-    try {
-      const result = await run(data);
-      const transfer: ArrayBuffer[] = [];
-      if (result.bytes) transfer.push(result.bytes);
-      post(
-        {
-          id: data.id,
-          ok: true,
-          bytes: result.bytes,
-          filename: result.filename,
-          pageCount: result.pageCount,
-        },
-        transfer,
-      );
-    } catch (err) {
-      post({ id: data.id, ok: false, message: humanError(err) });
-    }
-  })();
-});
+if (typeof self !== 'undefined') {
+  self.addEventListener('message', (event: MessageEvent<unknown>) => {
+    const data = event.data;
+    if (!isRequest(data)) return;
+    void (async () => {
+      try {
+        const result = await runWorkerOperation(data);
+        const transfer: ArrayBuffer[] = [];
+        if (result.bytes) transfer.push(result.bytes);
+        post(
+          {
+            id: data.id,
+            ok: true,
+            bytes: result.bytes,
+            filename: result.filename,
+            pageCount: result.pageCount,
+          },
+          transfer,
+        );
+      } catch (err) {
+        post({ id: data.id, ok: false, message: humanError(err) });
+      }
+    })();
+  });
+}
