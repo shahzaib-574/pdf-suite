@@ -23,7 +23,7 @@ Open the local URL on your computer or phone (same Wi‑Fi).
 
 ## Current tools
 
-Merge, split, images→PDF, scan (camera), compress, organize, watermark, page numbers, PDF→images, Word → PDF (simplified), and PDF → Word (styled text, spacing, tables, columns, and English OCR for scanned pages).
+Merge, split, images→PDF, scan (camera), compress, organize, watermark, page numbers, PDF→images, Word → PDF (simplified), and PDF → Word. PDF → Word rebuilds editable margins, styled text, paragraph spacing and indents, real numbered/bulleted lists, ruled or borderless tables, numeric alignment, columns, embedded images, mixed page orientations, and English OCR for scanned pages. The result screen reports which content was rebuilt and warns when a page required an image fallback.
 
 The reader supports continuous lazy-rendered pages, selectable text, document search, page thumbnails, PDF outlines, page jump, zoom/fit controls, mobile pinch gestures, and direct save/share actions.
 

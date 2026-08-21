@@ -13,6 +13,20 @@ export type PdfTextRun = {
   italic?: boolean;
 };
 
+export type PdfListInfo = {
+  kind: 'bullet' | 'number';
+  level: number;
+  sequence: number;
+  start?: number;
+};
+
+export type PdfRuling = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+};
+
 export type PdfParagraphLine = {
   text: string;
   fontSize: number;
@@ -50,6 +64,8 @@ export type PdfBlock =
       lineSpacingPt?: number;
       alignment?: 'left' | 'center' | 'right';
       direction?: 'ltr' | 'rtl';
+      firstLineIndentPt?: number;
+      list?: PdfListInfo;
     }
   | {
       kind: 'table';
@@ -59,7 +75,9 @@ export type PdfBlock =
       bottom?: number;
       spaceBeforePt?: number;
       columnWidthsPt?: number[];
+      columnAlignments?: Array<'left' | 'center' | 'right'>;
       headerRows?: number;
+      bordered?: boolean;
     }
   | {
       kind: 'columns';
@@ -73,9 +91,13 @@ export type PdfBlock =
   | {
       kind: 'image';
       bytes: Uint8Array;
-      mime: 'image/jpeg';
+      mime: 'image/jpeg' | 'image/png';
       widthPt: number;
       heightPt: number;
+      x?: number;
+      top?: number;
+      bottom?: number;
+      spaceBeforePt?: number;
     };
 
 export type PdfTextPage = {

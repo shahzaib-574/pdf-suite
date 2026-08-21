@@ -17,8 +17,15 @@ import type {
   PickedFile,
 } from '../lib/types';
 import type { OcrSession } from './ocr';
-import { analyzeGlyphs, clusterLines, glyphFromPdfItem, pageCharCount } from './textLayout';
-import type { PdfTextPage } from './textTypes';
+import {
+  analyzeGlyphs,
+  clusterLines,
+  glyphFromPdfItem,
+  orderAndSpaceBlocks,
+  pageCharCount,
+  rulingsFromOperatorList,
+} from './textLayout';
+import type { PdfBlock, PdfTextPage } from './textTypes';
 import { copyBytes, humanError } from './util';
 
 export type { PdfTextPage };
@@ -315,6 +322,20 @@ async function renderPageToJpeg(
   scale: number,
   quality: number,
 ): Promise<Blob> {
+  const canvas = await renderPageCanvas(page, scale);
+  try {
+    return await canvasToJpeg(canvas, quality);
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
+    page.cleanup();
+  }
+}
+
+async function renderPageCanvas(
+  page: PDFPageProxy,
+  scale: number,
+): Promise<HTMLCanvasElement> {
   const viewport = page.getViewport({ scale: Math.max(scale, 0.05) });
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.ceil(viewport.width));
@@ -328,11 +349,11 @@ async function renderPageToJpeg(
   const task = page.render({ canvas, canvasContext, viewport });
   try {
     await task.promise;
-    return await canvasToJpeg(canvas, quality);
-  } finally {
+    return canvas;
+  } catch (error) {
     canvas.width = 0;
     canvas.height = 0;
-    page.cleanup();
+    throw error;
   }
 }
 
@@ -418,6 +439,156 @@ export async function compress(
   }
 }
 
+type PdfOperatorList = Awaited<ReturnType<PDFPageProxy['getOperatorList']>>;
+type Matrix = [number, number, number, number, number, number];
+type ImagePlacement = { x: number; top: number; bottom: number; width: number; height: number };
+
+function multiplyMatrix(left: Matrix, right: Matrix): Matrix {
+  return [
+    left[0] * right[0] + left[2] * right[1],
+    left[1] * right[0] + left[3] * right[1],
+    left[0] * right[2] + left[2] * right[3],
+    left[1] * right[2] + left[3] * right[3],
+    left[0] * right[4] + left[2] * right[5] + left[4],
+    left[1] * right[4] + left[3] * right[5] + left[5],
+  ];
+}
+
+function imagePlacementsFromOperatorList(
+  operatorList: PdfOperatorList,
+  viewport: ReturnType<PDFPageProxy['getViewport']>,
+): ImagePlacement[] {
+  const pageWidth = viewport.width;
+  const pageHeight = viewport.height;
+  const imageOps = new Set<number>(
+    [
+      pdfjs.OPS.paintImageXObject,
+      pdfjs.OPS.paintInlineImageXObject,
+    ].filter((value): value is number => typeof value === 'number'),
+  );
+  const identity: Matrix = [1, 0, 0, 1, 0, 0];
+  let transform: Matrix = identity;
+  const stack: Matrix[] = [];
+  const placements: ImagePlacement[] = [];
+  for (let index = 0; index < operatorList.fnArray.length; index++) {
+    const op = operatorList.fnArray[index];
+    if (op === pdfjs.OPS.save) {
+      stack.push([...transform] as Matrix);
+      continue;
+    }
+    if (op === pdfjs.OPS.restore) {
+      transform = stack.pop() ?? identity;
+      continue;
+    }
+    if (op === pdfjs.OPS.transform) {
+      const args = operatorList.argsArray[index];
+      if (Array.isArray(args) && args.length >= 6) {
+        const next = args.slice(0, 6).map(Number) as Matrix;
+        if (next.every(Number.isFinite)) transform = multiplyMatrix(transform, next);
+      }
+      continue;
+    }
+    if (!imageOps.has(op)) continue;
+    const corners = [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ].map(([x, y]) => ({
+      x: transform[0] * x! + transform[2] * y! + transform[4],
+      y: transform[1] * x! + transform[3] * y! + transform[5],
+    }));
+    const sourceLeft = Math.min(...corners.map((corner) => corner.x));
+    const sourceRight = Math.max(...corners.map((corner) => corner.x));
+    const sourceBottom = Math.min(...corners.map((corner) => corner.y));
+    const sourceTop = Math.max(...corners.map((corner) => corner.y));
+    const viewportCorners = [
+      viewport.convertToViewportPoint(sourceLeft, sourceBottom),
+      viewport.convertToViewportPoint(sourceRight, sourceBottom),
+      viewport.convertToViewportPoint(sourceLeft, sourceTop),
+      viewport.convertToViewportPoint(sourceRight, sourceTop),
+    ];
+    const left = Math.max(0, Math.min(...viewportCorners.map((point) => Number(point[0]))));
+    const right = Math.min(pageWidth, Math.max(...viewportCorners.map((point) => Number(point[0]))));
+    const viewportTop = Math.max(
+      0,
+      Math.min(...viewportCorners.map((point) => Number(point[1]))),
+    );
+    const viewportBottom = Math.min(
+      pageHeight,
+      Math.max(...viewportCorners.map((point) => Number(point[1]))),
+    );
+    const top = pageHeight - viewportTop;
+    const bottom = pageHeight - viewportBottom;
+    const width = right - left;
+    const height = top - bottom;
+    const areaRatio = (width * height) / Math.max(1, pageWidth * pageHeight);
+    if (width < 16 || height < 16 || areaRatio > 0.72) continue;
+    if (
+      placements.some(
+        (item) =>
+          Math.abs(item.x - left) < 2 &&
+          Math.abs(item.top - top) < 2 &&
+          Math.abs(item.width - width) < 2 &&
+          Math.abs(item.height - height) < 2,
+      )
+    ) {
+      continue;
+    }
+    placements.push({ x: left, top, bottom, width, height });
+  }
+  return placements.slice(0, 16);
+}
+
+async function extractPlacedImages(
+  page: PDFPageProxy,
+  placements: ImagePlacement[],
+  pageWidth: number,
+  pageHeight: number,
+): Promise<PdfBlock[]> {
+  if (placements.length === 0) return [];
+  const scale = Math.max(1.4, Math.min(2.4, 1800 / Math.max(1, pageWidth)));
+  const canvas = await renderPageCanvas(page, scale);
+  try {
+    const blocks: PdfBlock[] = [];
+    for (const placement of placements) {
+      const sx = Math.max(0, Math.floor(placement.x * scale));
+      const sy = Math.max(0, Math.floor((pageHeight - placement.top) * scale));
+      const sw = Math.min(canvas.width - sx, Math.max(1, Math.ceil(placement.width * scale)));
+      const sh = Math.min(canvas.height - sy, Math.max(1, Math.ceil(placement.height * scale)));
+      if (sw < 2 || sh < 2) continue;
+      const crop = document.createElement('canvas');
+      crop.width = sw;
+      crop.height = sh;
+      const context = crop.getContext('2d', { alpha: false });
+      if (!context) continue;
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, sw, sh);
+      context.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+      try {
+        const jpeg = await canvasToJpeg(crop, 0.9);
+        blocks.push({
+          kind: 'image',
+          bytes: new Uint8Array(await jpeg.arrayBuffer()),
+          mime: 'image/jpeg',
+          widthPt: placement.width,
+          heightPt: placement.height,
+          x: placement.x,
+          top: placement.top,
+          bottom: placement.bottom,
+        });
+      } finally {
+        crop.width = 0;
+        crop.height = 0;
+      }
+    }
+    return blocks;
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+}
+
 export async function extractPdfText(
   file: PickedFile,
   onProgress?: (update: PdfToDocxProgress) => void,
@@ -437,7 +608,7 @@ export async function extractPdfText(
         try {
         const viewport = page.getViewport({ scale: 1 });
         const content = await page.getTextContent();
-        await page.getOperatorList();
+        const operatorList = await page.getOperatorList();
         const styles = { ...content.styles } as Record<
           string,
           {
@@ -483,10 +654,44 @@ export async function extractPdfText(
         const lines = clusterLines(glyphs);
         const chars = pageCharCount(lines);
         if (chars >= 12) {
+          const rulings = rulingsFromOperatorList(
+            operatorList,
+            pdfjs.OPS.constructPath,
+          );
+          const textBlocks = analyzeGlyphs(
+            glyphs,
+            viewport.width,
+            viewport.height,
+            rulings,
+          );
+          let imageBlocks: PdfBlock[] = [];
+          const placements = imagePlacementsFromOperatorList(
+            operatorList,
+            viewport,
+          );
+          if (placements.length > 0) {
+            onProgress?.({
+              progress: (i - 0.35) / pdf.numPages,
+              label: `Preserving images on page ${i} of ${pdf.numPages}`,
+            });
+            try {
+              imageBlocks = await extractPlacedImages(
+                page,
+                placements,
+                viewport.width,
+                viewport.height,
+              );
+            } catch {
+              // Keep the editable text conversion usable if a malformed image cannot render.
+            }
+          }
           pages.push({
             width: viewport.width,
             height: viewport.height,
-            blocks: analyzeGlyphs(glyphs, viewport.width, viewport.height),
+            blocks: orderAndSpaceBlocks(
+              [...textBlocks, ...imageBlocks],
+              viewport.height,
+            ),
           });
           continue;
         }

@@ -19,6 +19,7 @@ let savedResult: typeof lastJob.result = null;
 export function Result() {
   const job = lastJob.result;
   const images = job?.extra?.images;
+  const conversion = job?.extra?.pdfToDocx;
   const [pageCount, setPageCount] = useState<number | undefined>(job?.pageCount);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -159,6 +160,34 @@ export function Result() {
             ) : null}
           </div>
         </div>
+        {conversion ? (
+          <section className="ps-conversion-report" aria-label="PDF to Word conversion quality">
+            <div>
+              <h3>Conversion quality</h3>
+              <p>
+                Editable structure was rebuilt on this device. Review complex fonts and forms
+                before sharing the Word file.
+              </p>
+            </div>
+            <div className="ps-meta">
+              <span>{conversion.editablePages} editable page{conversion.editablePages === 1 ? '' : 's'}</span>
+              {conversion.tables > 0 ? (
+                <span>{conversion.tables} table{conversion.tables === 1 ? '' : 's'}</span>
+              ) : null}
+              {conversion.columnGroups > 0 ? (
+                <span>{conversion.columnGroups} column group{conversion.columnGroups === 1 ? '' : 's'}</span>
+              ) : null}
+              {conversion.images > 0 ? (
+                <span>{conversion.images} image{conversion.images === 1 ? '' : 's'}</span>
+              ) : null}
+            </div>
+            {conversion.warnings.map((warning) => (
+              <p className="ps-conversion-report__warning" key={warning}>
+                {warning}
+              </p>
+            ))}
+          </section>
+        ) : null}
         {message ? (
           <p className="ps-banner ps-banner--error" role="alert">
             {message}

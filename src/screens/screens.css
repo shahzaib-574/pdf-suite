@@ -537,6 +537,41 @@
   white-space: nowrap;
 }
 
+.ps-conversion-report {
+  display: grid;
+  gap: 13px;
+  padding: 17px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 90%, var(--primary-soft));
+}
+
+.ps-conversion-report h3 {
+  font-size: 15px;
+  font-weight: 740;
+  letter-spacing: -0.02em;
+}
+
+.ps-conversion-report > div:first-child p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ps-conversion-report .ps-meta {
+  justify-content: flex-start;
+}
+
+.ps-conversion-report__warning {
+  padding: 9px 11px;
+  border-radius: 10px;
+  color: var(--ink);
+  background: color-mix(in srgb, #f5a524 12%, var(--surface));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .ps-viewer-frame {
   flex: 1;
   min-height: 0;

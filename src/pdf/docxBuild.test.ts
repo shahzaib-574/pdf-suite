@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import { pagesToDocx } from './docxBuild';
-import { analyzeGlyphs, clusterLines } from './textLayout';
+import { analyzeGlyphs, clusterLines, rulingsFromOperatorList } from './textLayout';
 
 export async function runPagesToDocxSelfCheck(): Promise<void> {
   const glued = clusterLines([
@@ -25,6 +25,44 @@ export async function runPagesToDocxSelfCheck(): Promise<void> {
   );
   if (!tableBlocks.some((b) => b.kind === 'table')) {
     throw new Error(`expected a table block, got ${JSON.stringify(tableBlocks)}`);
+  }
+  const inferredTable = tableBlocks.find((block) => block.kind === 'table');
+  if (inferredTable?.kind !== 'table' || inferredTable.bordered !== false) {
+    throw new Error('aligned text without drawn rules should remain a borderless table');
+  }
+
+  const pathOp = 99;
+  const pathBounds = [
+    [15, 370, 15, 410],
+    [150, 370, 150, 410],
+    [290, 370, 290, 410],
+    [350, 370, 350, 410],
+    [15, 410, 350, 410],
+    [15, 390, 350, 390],
+    [15, 370, 350, 370],
+  ];
+  const rulings = rulingsFromOperatorList(
+    {
+      fnArray: pathBounds.map(() => pathOp),
+      argsArray: pathBounds.map((bounds) => [[], [], bounds]),
+    },
+    pathOp,
+  );
+  const ruledTable = analyzeGlyphs(
+    [
+      { str: 'Name', x: 20, y: 400, width: 30, size: 11, eol: false },
+      { str: 'Qty', x: 160, y: 400, width: 24, size: 11, eol: false },
+      { str: 'Total', x: 300, y: 400, width: 30, size: 11, eol: false },
+      { str: 'Apples', x: 20, y: 380, width: 40, size: 11, eol: false },
+      { str: '3', x: 160, y: 380, width: 10, size: 11, eol: false },
+      { str: '12', x: 300, y: 380, width: 16, size: 11, eol: false },
+    ],
+    500,
+    600,
+    rulings,
+  ).find((block) => block.kind === 'table');
+  if (ruledTable?.kind !== 'table' || !ruledTable.bordered) {
+    throw new Error(`drawn PDF rules should produce a bordered table: ${JSON.stringify(ruledTable)}`);
   }
 
   const tightTable = analyzeGlyphs(
@@ -85,6 +123,39 @@ export async function runPagesToDocxSelfCheck(): Promise<void> {
     throw new Error(`paragraph gaps were collapsed: ${JSON.stringify(spacedParagraphs)}`);
   }
 
+  const indentedParagraph = analyzeGlyphs(
+    [
+      { str: 'Indented opening line with enough text to wrap', x: 90, y: 500, width: 245, size: 11, eol: false },
+      { str: 'continuation aligned to the paragraph body', x: 72, y: 485, width: 220, size: 11, eol: false },
+    ],
+    612,
+    792,
+  ).filter((block) => block.kind === 'para');
+  if (
+    indentedParagraph.length !== 1 ||
+    indentedParagraph[0]?.kind !== 'para' ||
+    indentedParagraph[0].firstLineIndentPt !== 18
+  ) {
+    throw new Error(`first-line indentation was not preserved: ${JSON.stringify(indentedParagraph)}`);
+  }
+
+  const listBlocks = analyzeGlyphs(
+    [
+      { str: '1. First item', x: 72, y: 410, width: 78, size: 11, eol: false },
+      { str: '2. Second item', x: 72, y: 394, width: 88, size: 11, eol: false },
+    ],
+    612,
+    792,
+  ).filter((block) => block.kind === 'para');
+  if (
+    listBlocks.length !== 2 ||
+    listBlocks.some((block) => block.kind !== 'para' || block.list?.kind !== 'number') ||
+    listBlocks[0]?.kind !== 'para' ||
+    listBlocks[0].lines[0]?.text !== 'First item'
+  ) {
+    throw new Error(`numbered PDF lines should become list items: ${JSON.stringify(listBlocks)}`);
+  }
+
   const bytes = await pagesToDocx([
     {
       width: 612,
@@ -109,6 +180,7 @@ export async function runPagesToDocxSelfCheck(): Promise<void> {
           kind: 'para',
           heading: false,
           x: 72,
+          firstLineIndentPt: 18,
           lines: [{ text: 'Revenue was up.', fontSize: 11 }],
         },
         {
@@ -116,7 +188,23 @@ export async function runPagesToDocxSelfCheck(): Promise<void> {
           rows: [['Name', 'Qty'], ['Apples', '3']],
           x: 72,
           columnWidthsPt: [300, 120],
+          columnAlignments: ['left', 'right'],
           headerRows: 1,
+          bordered: true,
+        },
+        {
+          kind: 'para',
+          heading: false,
+          x: 72,
+          list: { kind: 'number', level: 0, sequence: 1, start: 1 },
+          lines: [{ text: 'First numbered item', fontSize: 11 }],
+        },
+        {
+          kind: 'para',
+          heading: false,
+          x: 72,
+          list: { kind: 'number', level: 0, sequence: 1, start: 2 },
+          lines: [{ text: 'Second numbered item', fontSize: 11 }],
         },
       ],
     },
@@ -154,11 +242,24 @@ export async function runPagesToDocxSelfCheck(): Promise<void> {
   if (!xml.includes('<w:tbl>') || !xml.includes('Apples')) {
     throw new Error('expected a Word table with cell text');
   }
-  if (!xml.includes('<w:tblLayout w:type="fixed"/>') || !xml.includes('<w:tblInd w:w="1440"')) {
-    throw new Error('expected fixed table geometry and source-aligned indentation');
+  if (!xml.includes('<w:tblLayout w:type="fixed"/>') || !xml.includes('<w:tblInd w:w="0"')) {
+    throw new Error('expected fixed table geometry inside source-derived page margins');
+  }
+  if (!xml.includes('<w:pgMar w:top="640"') || !xml.includes('w:left="1440"')) {
+    throw new Error('expected source page whitespace to become editable Word page margins');
+  }
+  if (!xml.includes('w:firstLine="360"')) {
+    throw new Error('expected first-line paragraph indentation to survive');
+  }
+  if (!xml.includes('<w:tblHeader/>') || !xml.includes('<w:jc w:val="right"/>')) {
+    throw new Error('expected repeating headers and numeric-column alignment');
   }
   if (!xml.includes('<w:b/>') || !xml.includes('<w:i/>')) {
     throw new Error('expected bold and italic PDF runs to survive in DOCX');
+  }
+  const numberingXml = await zip.file('word/numbering.xml')?.async('string');
+  if (!numberingXml?.includes('<w:numFmt w:val="decimal"/>') || !xml.includes('<w:numPr>')) {
+    throw new Error('expected PDF list markers to become real Word numbering');
   }
 
   const empty = await pagesToDocx([{ width: 612, height: 792, blocks: [] }]);
@@ -189,5 +290,28 @@ export async function runPagesToDocxSelfCheck(): Promise<void> {
   );
   if (!scanXml?.includes('cx="7772400"')) {
     throw new Error('scan fallback should use the full source page width');
+  }
+
+  const landscape = await pagesToDocx([
+    {
+      width: 792,
+      height: 612,
+      blocks: [
+        {
+          kind: 'para',
+          heading: false,
+          x: 36,
+          top: 576,
+          bottom: 560,
+          lines: [{ text: 'Landscape page', fontSize: 11 }],
+        },
+      ],
+    },
+  ]);
+  const landscapeXml = await JSZip.loadAsync(landscape).then((z) =>
+    z.file('word/document.xml')?.async('string'),
+  );
+  if (!landscapeXml?.includes('w:orient="landscape"')) {
+    throw new Error('landscape PDF pages should remain landscape in Word');
   }
 }
