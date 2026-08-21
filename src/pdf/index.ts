@@ -13,6 +13,7 @@ import type {
   ProtectInput,
   WatermarkInput,
 } from '../lib/types';
+import type { PdfViewerSession } from './render';
 import type { TransferFile, WorkerOp, WorkerRequest, WorkerResponse } from './protocol';
 import { copyBuffer, humanError } from './util';
 
@@ -36,6 +37,10 @@ export type PdfEngine = {
     pageIndex: number,
     width: number,
   ): Promise<Blob>;
+  openViewer(
+    file: PickedFile,
+    onProgress?: (current: number, total: number) => void,
+  ): Promise<PdfViewerSession>;
   docxToPdf(file: PickedFile): Promise<JobResult>;
   pdfToDocx(
     file: PickedFile,
@@ -214,6 +219,14 @@ export const engine: PdfEngine = {
     try {
       const { renderPage } = await renderApi();
       return await renderPage(file, pageIndex, width);
+    } catch (err) {
+      throw new Error(humanError(err));
+    }
+  },
+  async openViewer(file, onProgress) {
+    try {
+      const { openPdfViewer } = await renderApi();
+      return await openPdfViewer(file, onProgress);
     } catch (err) {
       throw new Error(humanError(err));
     }

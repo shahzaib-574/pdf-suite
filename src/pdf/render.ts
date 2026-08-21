@@ -82,6 +82,41 @@ const COMPRESS: Record<CompressLevel, { scale: number; quality: number }> = {
   keep: { scale: 1, quality: 0.92 },
 };
 
+export type PdfViewerPage = {
+  width: number;
+  height: number;
+  text: string;
+};
+
+export type PdfViewerOutlineItem = {
+  title: string;
+  pageIndex: number;
+  depth: number;
+};
+
+export type PdfViewerDocument = {
+  pageCount: number;
+  pages: PdfViewerPage[];
+  outline: PdfViewerOutlineItem[];
+};
+
+export type PdfViewerTextLayer = {
+  cancel(): void;
+  textDivs: HTMLElement[];
+  textItems: string[];
+};
+
+export type PdfViewerSession = {
+  document: PdfViewerDocument;
+  renderPage(pageIndex: number, width: number): Promise<Blob>;
+  renderTextLayer(
+    pageIndex: number,
+    container: HTMLElement,
+    scale: number,
+  ): Promise<PdfViewerTextLayer>;
+  destroy(): Promise<void>;
+};
+
 function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
@@ -102,20 +137,176 @@ async function withPdfjs<T>(
   file: PickedFile,
   fn: (pdf: PDFDocumentProxy) => Promise<T>,
 ): Promise<T> {
-  const data = copyBytes(file.bytes);
-  const task = pdfjs.getDocument({
-    data,
-    useWorkerFetch: false,
-    useSystemFonts: true,
-    fontExtraProperties: true,
-    BinaryDataFactory: ViteBinaryDataFactory,
-  });
+  const task = createPdfTask(file);
   const pdf = await task.promise;
   try {
     return await fn(pdf);
   } finally {
     await pdf.cleanup();
     await task.destroy();
+  }
+}
+
+function createPdfTask(file: PickedFile) {
+  return pdfjs.getDocument({
+    data: copyBytes(file.bytes),
+    useWorkerFetch: false,
+    useSystemFonts: true,
+    fontExtraProperties: true,
+    BinaryDataFactory: ViteBinaryDataFactory,
+  });
+}
+
+type RawOutlineItem = {
+  title?: unknown;
+  dest?: unknown;
+  items?: unknown;
+};
+
+async function outlinePageIndex(
+  pdf: PDFDocumentProxy,
+  destination: unknown,
+): Promise<number | undefined> {
+  let resolved = destination;
+  if (typeof resolved === 'string') {
+    resolved = await pdf.getDestination(resolved);
+  }
+  if (!Array.isArray(resolved) || resolved.length === 0) return undefined;
+  const pageRef = resolved[0];
+  if (typeof pageRef === 'number') {
+    return pageRef >= 0 && pageRef < pdf.numPages ? pageRef : undefined;
+  }
+  if (typeof pageRef !== 'object' || pageRef === null) return undefined;
+  try {
+    return await pdf.getPageIndex(
+      pageRef as Parameters<PDFDocumentProxy['getPageIndex']>[0],
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+async function flattenOutline(
+  pdf: PDFDocumentProxy,
+  items: unknown,
+  depth = 0,
+): Promise<PdfViewerOutlineItem[]> {
+  if (!Array.isArray(items)) return [];
+  const flattened: PdfViewerOutlineItem[] = [];
+  for (const value of items) {
+    if (typeof value !== 'object' || value === null) continue;
+    const item = value as RawOutlineItem;
+    const title = typeof item.title === 'string' ? item.title.trim() : '';
+    const pageIndex = await outlinePageIndex(pdf, item.dest);
+    if (title && pageIndex != null) {
+      flattened.push({ title, pageIndex, depth: Math.min(depth, 3) });
+    }
+    flattened.push(...(await flattenOutline(pdf, item.items, depth + 1)));
+  }
+  return flattened;
+}
+
+function textOf(content: Awaited<ReturnType<PDFPageProxy['getTextContent']>>): string {
+  return content.items
+    .map((item) =>
+      typeof item === 'object' && item && 'str' in item && typeof item.str === 'string'
+        ? item.str
+        : '',
+    )
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export async function openPdfViewer(
+  file: PickedFile,
+  onProgress?: (current: number, total: number) => void,
+): Promise<PdfViewerSession> {
+  const task = createPdfTask(file);
+  const pdf = await task.promise;
+  let destroyed = false;
+  try {
+    const pages: PdfViewerPage[] = [];
+    for (let pageIndex = 0; pageIndex < pdf.numPages; pageIndex++) {
+      const page = await pdf.getPage(pageIndex + 1);
+      const viewport = page.getViewport({ scale: 1 });
+      const content = await page.getTextContent();
+      pages.push({
+        width: viewport.width,
+        height: viewport.height,
+        text: textOf(content),
+      });
+      page.cleanup();
+      onProgress?.(pageIndex + 1, pdf.numPages);
+    }
+    const outline = await flattenOutline(pdf, await pdf.getOutline());
+    const viewerDocument: PdfViewerDocument = {
+      pageCount: pdf.numPages,
+      pages,
+      outline,
+    };
+
+    return {
+      document: viewerDocument,
+      async renderPage(pageIndex, width) {
+        if (destroyed) throw new Error('This viewer session is closed.');
+        if (pageIndex < 0 || pageIndex >= pdf.numPages) {
+          throw new Error('That page is out of range.');
+        }
+        const page = await pdf.getPage(pageIndex + 1);
+        const base = page.getViewport({ scale: 1 });
+        const scale = base.width > 0 ? Math.max(0.1, width / base.width) : 1;
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.ceil(viewport.width));
+        canvas.height = Math.max(1, Math.ceil(viewport.height));
+        const canvasContext = canvas.getContext('2d', { alpha: false });
+        if (!canvasContext) {
+          throw new Error('Could not create a canvas to render this page.');
+        }
+        canvasContext.fillStyle = '#ffffff';
+        canvasContext.fillRect(0, 0, canvas.width, canvas.height);
+        const renderTask = page.render({ canvas, canvasContext, viewport });
+        try {
+          await renderTask.promise;
+          return await canvasToJpeg(canvas, 0.9);
+        } finally {
+          canvas.width = 0;
+          canvas.height = 0;
+        }
+      },
+      async renderTextLayer(pageIndex, container, scale) {
+        if (destroyed) throw new Error('This viewer session is closed.');
+        if (pageIndex < 0 || pageIndex >= pdf.numPages) {
+          throw new Error('That page is out of range.');
+        }
+        const page = await pdf.getPage(pageIndex + 1);
+        const viewport = page.getViewport({ scale: Math.max(0.1, scale) });
+        const textContent = await page.getTextContent();
+        const layer = new pdfjs.TextLayer({
+          textContentSource: textContent,
+          container,
+          viewport,
+        });
+        await layer.render();
+        return {
+          cancel: () => layer.cancel(),
+          textDivs: layer.textDivs,
+          textItems: layer.textContentItemsStr,
+        };
+      },
+      async destroy() {
+        if (destroyed) return;
+        destroyed = true;
+        await pdf.cleanup();
+        await task.destroy();
+      },
+    };
+  } catch (error) {
+    await pdf.cleanup();
+    await task.destroy();
+    throw error;
   }
 }
 

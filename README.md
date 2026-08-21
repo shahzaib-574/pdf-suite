@@ -23,7 +23,9 @@ Open the local URL on your computer or phone (same Wi‑Fi).
 
 ## Current tools
 
-Merge, split, images→PDF, scan (camera), compress, organize, watermark, page numbers, view, PDF→images, Word → PDF (simplified), PDF → Word (styled text, spacing, tables, columns, and English OCR for scanned pages).
+Merge, split, images→PDF, scan (camera), compress, organize, watermark, page numbers, PDF→images, Word → PDF (simplified), and PDF → Word (styled text, spacing, tables, columns, and English OCR for scanned pages).
+
+The reader supports continuous lazy-rendered pages, selectable text, document search, page thumbnails, PDF outlines, page jump, zoom/fit controls, mobile pinch gestures, and direct save/share actions.
 
 Protect is hidden because the bundled `pdf-lib` version cannot encrypt files. It should only be restored after an on-device encryption engine is added.
 
