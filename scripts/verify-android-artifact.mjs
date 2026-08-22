@@ -19,8 +19,9 @@ const EXPECTED = Object.freeze({
 // This is the complete permission contract for the merged release manifest.
 // INTERNET/ACCESS_NETWORK_STATE support the web shell and ads. AD_ID and the
 // AdServices entries come from Google Mobile Ads; WAKE_LOCK/FOREGROUND_SERVICE
-// come from its pinned WorkManager dependency. Dependency changes that alter
-// this list must be reviewed explicitly before updating it here.
+// come from its pinned WorkManager dependency. AndroidX Core adds the app-scoped
+// signature permission used to protect non-exported dynamic receivers. Dependency
+// changes that alter this list must be reviewed explicitly before updating it.
 const MERGED_PERMISSION_ALLOWLIST = Object.freeze([
   'android.permission.ACCESS_ADSERVICES_AD_ID',
   'android.permission.ACCESS_ADSERVICES_ATTRIBUTION',
@@ -30,6 +31,7 @@ const MERGED_PERMISSION_ALLOWLIST = Object.freeze([
   'android.permission.INTERNET',
   'android.permission.WAKE_LOCK',
   'com.google.android.gms.permission.AD_ID',
+  'com.reampdf.mobile.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
 ]);
 
 // High-impact permissions get a dedicated failure in addition to the exact

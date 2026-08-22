@@ -167,10 +167,13 @@ this as an exact packaged-APK allowlist rather than an expectation:
 - `android.permission.ACCESS_ADSERVICES_TOPICS`
 - `android.permission.FOREGROUND_SERVICE`
 - `android.permission.WAKE_LOCK`
+- `com.reampdf.mobile.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`
 
 The WorkManager manifest also declares `RECEIVE_BOOT_COMPLETED`, but Mobile Ads SDK
 25.4.0 explicitly removes it during manifest merge; the artifact gate fails if it
-reappears.
+reappears. AndroidX Core declares Ream's package-scoped dynamic-receiver permission
+with `signature` protection so only an app signed by the same certificate can use
+it; it is not a runtime prompt or access to user data.
 
 The app does **not** intentionally request `CAMERA`, `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, `READ_MEDIA_IMAGES`, precise/approximate location, microphone, contacts, phone, SMS, call log, or notification permission. Scan delegates capture to the system experience; import/export uses pickers and app-scoped cache. Android recommends these permission-minimizing patterns in [Minimize your permission requests](https://developer.android.com/privacy-and-security/minimize-permission-requests).
 
