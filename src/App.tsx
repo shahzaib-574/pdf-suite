@@ -19,7 +19,6 @@ export default function App() {
   const [route, setRoute] = useState<Route>(() =>
     parseHash(window.location.hash),
   );
-
   useEffect(() => {
     const onChange = () => setRoute(parseHash(window.location.hash));
     window.addEventListener('hashchange', onChange);
@@ -52,17 +51,21 @@ export default function App() {
   useEffect(() => {
     document.title = `${routeTitle(route)} · Ream`;
     window.scrollTo(0, 0);
-    const frame = window.requestAnimationFrame(() => {
-      const heading = document.querySelector<HTMLElement>('main h1, .ps-screen h1');
-      if (!heading) return;
-      heading.tabIndex = -1;
-      heading.focus({ preventScroll: true });
-    });
-    return () => window.cancelAnimationFrame(frame);
   }, [route]);
 
   return (
     <ThemeProvider>
+      <button
+        type="button"
+        className="skip-to-nav"
+        onClick={() => {
+          document
+            .querySelector<HTMLButtonElement>('#primary-navigation button:not(:disabled)')
+            ?.focus();
+        }}
+      >
+        Skip to primary navigation
+      </button>
       <div className="app-frame">
         <div className="route-stage" key={routeKey(route)}>
           <RouteView route={route} />

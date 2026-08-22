@@ -17,7 +17,8 @@
     "android:sync:debug": "tsc -b && vite build --mode android-debug && cap sync android",
     "android:open": "cap open android",
     "android:debug": "npm run android:sync:debug && cd android && gradlew.bat assembleDebug",
-    "android:bundle": "npm run android:sync && cd android && gradlew.bat bundleRelease"
+    "android:bundle": "npm run android:sync && cd android && gradlew.bat bundleRelease",
+    "verify:android-artifact": "node scripts/verify-android-artifact.mjs"
   },
   "dependencies": {
     "@capacitor-community/admob": "8.1.0",

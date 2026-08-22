@@ -42,7 +42,7 @@ export function BottomNav({ activeTab }: BottomNavProps) {
           void onCameraPick(event);
         }}
       />
-      <nav className="shell__nav" aria-label="Primary navigation">
+      <nav id="primary-navigation" className="shell__nav" aria-label="Primary navigation">
         <NavButton
           id="tools"
           label="Tools"

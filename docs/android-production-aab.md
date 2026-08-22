@@ -3,7 +3,10 @@
 The `Build signed production AAB` workflow is manual, runs only from `main`, and
 does not upload anything to Google Play. It builds a signed `.aab` and retains it
 as a GitHub Actions artifact for 14 days. Because release minification is enabled,
-it also retains R8's `mapping.txt` as a separate repository artifact for 90 days.
+it also retains R8's `mapping.txt` and a release-verification manifest (artifact
+hashes, package/version, and signing-certificate digest) as separate repository
+artifacts for 90 days. A signed APK is built only to inspect the final manifest,
+signature, and 16 KB alignment; it is not published or retained.
 Artifact downloads follow repository read permissions, so keep the repository
 private and restrict read access to release maintainers if the mapping must remain
 confidential.
@@ -20,16 +23,16 @@ confidential.
 
 | Secret | Exact value |
 | --- | --- |
-| `ADMOB_ANDROID_APP_ID` | Ream's Android AdMob app ID, shaped like `ca-app-pub-0000000000000000~0000000000` |
-| `ADMOB_ANDROID_BANNER_ID` | Ream's Android adaptive banner unit ID, shaped like `ca-app-pub-0000000000000000/0000000000` |
+| `ADMOB_ANDROID_APP_ID` | Ream's Android AdMob app ID: `ca-app-pub-` + 16-digit publisher ID + `~` + 10-digit app ID |
+| `ADMOB_ANDROID_BANNER_ID` | Ream's adaptive banner unit ID: `ca-app-pub-` + the same 16-digit publisher ID + `/` + 10-digit unit ID |
 | `ANDROID_UPLOAD_KEYSTORE_BASE64` | Base64 of the Play upload keystore file, with no data-URI prefix |
 | `ANDROID_UPLOAD_STORE_PASSWORD` | Upload keystore password |
 | `ANDROID_UPLOAD_KEY_ALIAS` | Upload key alias inside the keystore |
 | `ANDROID_UPLOAD_KEY_PASSWORD` | Upload key password |
 
 The two AdMob IDs must use the same 16-digit publisher ID. Google's sample app
-ID and test banner ID are rejected by both the workflow and the Gradle release
-gate. The sample app ID remains in the tracked debug resource; the workflow
+ID, test banner ID, and obvious documentation placeholders are rejected by both
+the workflow and the Gradle release gate. The sample app ID remains in the tracked debug resource; the workflow
 replaces it only in the ephemeral runner checkout.
 
 To save a keystore's base64 value directly with GitHub CLI in PowerShell, without
@@ -68,12 +71,15 @@ GitHub cannot recover secret values after they are saved.
 1. Commit the intended `appVersionCode` and `appVersionName` in
    `android/variables.gradle` and merge the release commit to `main`.
 2. Open **Actions → Build signed production AAB → Run workflow**.
-3. Select `main`, enable the production confirmation, and approve the protected
+3. Select `main`, enable the production confirmation, and enable the adult-only
+   audience confirmation only if the publisher has truthfully selected **Ages 18
+   and over** in Play Console. Then approve the protected
    `production` environment when prompted.
-4. After the job succeeds, download both `ream-production-aab-<run number>` and
-   `ream-production-r8-mapping-<run number>` from the workflow run's **Artifacts**
-   section.
-5. Archive the mapping with the matching AAB, `appVersionCode`, and
+4. After the job succeeds, download `ream-production-aab-<run number>`,
+   `ream-production-r8-mapping-<run number>`, and
+   `ream-production-release-manifest-<run number>` from the workflow run's
+   **Artifacts** section.
+5. Archive the mapping and verification manifest with the matching AAB, `appVersionCode`, and
    `appVersionName`. A mapping belongs to exactly one obfuscated build; keeping the
    wrong mapping makes production crash traces impossible to deobfuscate. Treat it
    as internal release material and upload it to Play Console for that release when
@@ -85,5 +91,8 @@ creates `.env.production.local` and `android/keystore.properties` only on that
 ephemeral runner, builds `bundleRelease` without the unsigned CI bypass, verifies
 that the resulting AAB is signed and the R8 mapping exists, uploads the AAB and
 mapping as separate artifacts, and removes the temporary keystore and configuration
-files even when the job fails. The mapping contains no signing passwords or key
-material.
+files even when the job fails. Before upload it also reruns web/PDF/DOCX checks,
+Android unit and release lint, validates the final APK's identity/SDKs/permissions,
+rejects sample or debug ad configuration, verifies APK/AAB signatures and 16 KB
+alignment, and records SHA-256 values. The mapping and verification manifest
+contain no signing passwords or key material.

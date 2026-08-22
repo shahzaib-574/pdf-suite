@@ -10,6 +10,11 @@ on:
         required: true
         type: boolean
         default: false
+      confirm_adults_only_audience:
+        description: Confirm Play target audience is Ages 18 and over only
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,7 +25,7 @@ concurrency:
 
 jobs:
   production-aab:
-    if: ${{ inputs.confirm_production && github.ref == 'refs/heads/main' }}
+    if: ${{ inputs.confirm_production && inputs.confirm_adults_only_audience && github.ref == 'refs/heads/main' }}
     environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -87,6 +92,16 @@ jobs:
             echo "::error::The Google test banner ID cannot be used for production."
             exit 1
           fi
+          if [[ "$ADMOB_ANDROID_APP_ID" == "ca-app-pub-0000000000000000~0000000000" ||
+                "$ADMOB_ANDROID_APP_ID" == "ca-app-pub-1234567890123456~1234567890" ]]; then
+            echo "::error::A documentation-placeholder AdMob app ID cannot be used for production."
+            exit 1
+          fi
+          if [[ "$ADMOB_ANDROID_BANNER_ID" == "ca-app-pub-0000000000000000/0000000000" ||
+                "$ADMOB_ANDROID_BANNER_ID" == "ca-app-pub-1234567890123456/1234567890" ]]; then
+            echo "::error::A documentation-placeholder AdMob banner ID cannot be used for production."
+            exit 1
+          fi
           if [[ "${ADMOB_ANDROID_APP_ID%%~*}" != "${ADMOB_ANDROID_BANNER_ID%%/*}" ]]; then
             echo "::error::The AdMob app and banner IDs must belong to the same publisher."
             exit 1
@@ -94,6 +109,12 @@ jobs:
 
       - name: Install exact dependencies
         run: npm ci
+
+      - name: Run production preflight checks
+        run: |
+          npm run lint
+          npm run docx-selfcheck
+          npm run pdf-selfcheck
 
       - name: Stage runner-only production configuration
         shell: bash
@@ -175,7 +196,7 @@ jobs:
 
           fs.writeFileSync(
             '.env.production.local',
-            `VITE_ADMOB_TEST_MODE=false\nVITE_ADMOB_BANNER_ID=${process.env.ADMOB_ANDROID_BANNER_ID}\n`,
+            `VITE_ADMOB_TEST_MODE=false\nVITE_ADMOB_BANNER_ID=${process.env.ADMOB_ANDROID_BANNER_ID}\nVITE_ADMOB_AUDIENCE_MODE=ADULTS_ONLY\n`,
             { encoding: 'utf8', mode: 0o600 },
           )
 
@@ -203,20 +224,22 @@ jobs:
       - name: Build and sync production web assets
         run: npm run android:sync
 
-      - name: Build signed production bundle
+      - name: Build signed production artifacts
         working-directory: android
         shell: bash
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew --no-daemon bundleRelease
+          ./gradlew --no-daemon testDebugUnitTest lintRelease assembleRelease bundleRelease
 
-      - name: Verify signed bundle
+      - name: Verify signed release artifacts
         shell: bash
         run: |
           set -euo pipefail
+          apk="android/app/build/outputs/apk/release/app-release.apk"
           aab="android/app/build/outputs/bundle/release/app-release.aab"
           mapping="android/app/build/outputs/mapping/release/mapping.txt"
+          test -f "$apk"
           test -f "$aab"
           if [[ ! -s "$mapping" ]]; then
             echo "::error::R8 did not produce the release mapping.txt file."
@@ -230,6 +253,24 @@ jobs:
             echo "::error::The production AAB signature verification failed."
             exit 1
           fi
+
+          apksigner_path="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          zipalign_path="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name zipalign -print | sort -V | tail -n 1)"
+          test -n "$apksigner_path"
+          test -n "$zipalign_path"
+          "$apksigner_path" verify "$apk"
+          "$zipalign_path" -c -P 16 -v 4 "$apk"
+          npm run verify:android-artifact -- --require-production-ads "$apk"
+
+          release_manifest="android/app/build/outputs/release-manifest.txt"
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "package=com.reampdf.mobile"
+            echo "versionCode=1"
+            echo "versionName=1.0.0"
+            sha256sum "$aab" "$apk" "$mapping"
+            "$apksigner_path" verify --print-certs "$apk"
+          } > "$release_manifest"
 
       - name: Upload signed production AAB
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -245,6 +286,15 @@ jobs:
         with:
           name: ream-production-r8-mapping-${{ github.run_number }}
           path: android/app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: error
+          compression-level: 9
+          retention-days: 90
+
+      - name: Upload release verification manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ream-production-release-manifest-${{ github.run_number }}
+          path: android/app/build/outputs/release-manifest.txt
           if-no-files-found: error
           compression-level: 9
           retention-days: 90

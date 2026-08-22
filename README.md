@@ -70,13 +70,22 @@ npm run android:bundle
 ```
 
 The debug command builds with Google's official test banner ID. Never use live ad
-units while developing or testing. Before syncing a production build, create the
-ignored `.env.production.local` file with the public production banner unit:
+units while developing or testing. Debug builds also support deterministic UMP
+EEA, regulated-US, and other-region checks; follow
+[`docs/admob-privacy-testing.md`](docs/admob-privacy-testing.md). Before syncing a
+production build, create the ignored `.env.production.local` file with the public
+production banner unit:
 
 ```dotenv
 VITE_ADMOB_TEST_MODE=false
 VITE_ADMOB_BANNER_ID=ca-app-pub-<publisher-id>/<banner-unit-id>
+VITE_ADMOB_AUDIENCE_MODE=ADULTS_ONLY
 ```
+
+Set `ADULTS_ONLY` only after the publisher has truthfully selected **Ages 18 and
+over** in Play Console. The current v1 release gate rejects an unspecified audience;
+teen- or child-inclusive distribution requires a fresh Families, consent, ad-SDK,
+content-rating, and store-presence review before changing this value.
 
 `npm run android:sync` emits release metadata from the same Vite environment and
 copies it with the compiled JavaScript. Every Android release task verifies that
@@ -85,7 +94,7 @@ ID, and actually include that ID in the JavaScript bundle.
 
 Launcher icons and light/dark splash screens are already generated from `assets/logo.svg`. Use a current Android Studio Image Asset workflow to regenerate them after changing the logo.
 
-For Play Store release, copy `android/keystore.properties.example` to `android/keystore.properties`, point it to an upload keystore stored outside this repository, and replace every example password locally. The release build validates all four signing fields and the keystore path. Signing files and credentials are ignored by Git. CI alone uses `-PallowUnsignedRelease=true` to test optimized unsigned APK and bundle artifacts without possessing production secrets. The flag is rejected outside CI and never applies the release signing configuration.
+For Play Store release, copy `android/keystore.properties.example` to `android/keystore.properties`, point it to an upload keystore stored outside this repository, and replace every example password locally. The release build validates all four signing fields and the keystore path. Signing files and credentials are ignored by Git. Verification CI stages a one-run disposable key and synthetic, non-live AdMob-shaped IDs to exercise the real signed production path without possessing production secrets; the files are removed after the job.
 
 After the production AdMob account and upload key are ready, the protected manual
 GitHub workflow can produce the signed AAB without committing configuration or
@@ -96,9 +105,10 @@ a separate manual step.
 
 The package ID is permanent after the first Play Console release. Increment `appVersionCode` in `android/variables.gradle` for every upload and update `appVersionName` for user-facing releases. For a local production build, replace the Google sample AdMob app ID in `android/app/src/main/res/values/strings.xml` with Ream's public AdMob app ID. The manual GitHub workflow instead injects that ID from its protected environment only on the runner; either path prevents the sample ID from reaching a production bundle.
 
-CI also runs Android build-tools `zipalign -c -P 16` against the optimized unsigned
-release APK so newly introduced native dependencies cannot silently regress the
-Play requirement for 16 KB page-size devices.
+CI also inspects the optimized signed test artifact's final manifest and web assets,
+verifies its signature, and runs Android build-tools `zipalign -c -P 16` so newly
+introduced dependencies cannot silently expand permissions or regress the Play
+requirement for 16 KB page-size devices.
 
 AdMob's `app-ads.txt` crawler checks the website host root, not a GitHub project
 subdirectory. Do not add `pdf-suite/app-ads.txt` and assume it is verified. Point the

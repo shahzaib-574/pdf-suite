@@ -1,17 +1,28 @@
 import { Capacitor } from '@capacitor/core';
 import {
   AdMob,
+  AdmobConsentDebugGeography,
   AdmobConsentStatus,
   BannerAdPluginEvents,
   BannerAdPosition,
   BannerAdSize,
   MaxAdContentRating,
+  type AdmobConsentRequestOptions,
 } from '@capacitor-community/admob';
 
 const GOOGLE_TEST_BANNER_ID = 'ca-app-pub-3940256099942544/9214589741';
 const productionBannerId = import.meta.env.VITE_ADMOB_BANNER_ID?.trim() ?? '';
 const testMode = import.meta.env.VITE_ADMOB_TEST_MODE === 'true';
 const bannerId = testMode ? GOOGLE_TEST_BANNER_ID : productionBannerId;
+const adultOnlyAudience =
+  import.meta.env.VITE_ADMOB_AUDIENCE_MODE?.trim().toUpperCase() ===
+  'ADULTS_ONLY';
+const umpDebugGeography = readUmpDebugGeography(
+  import.meta.env.VITE_UMP_DEBUG_GEOGRAPHY,
+);
+const umpTestDeviceIdentifiers = readTestDeviceIdentifiers(
+  import.meta.env.VITE_UMP_TEST_DEVICE_IDS,
+);
 
 let initialization: Promise<boolean> | null = null;
 let sdkInitialized = false;
@@ -25,6 +36,42 @@ let bannerOperations: Promise<void> = Promise.resolve();
 
 function isAndroidNative(): boolean {
   return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+}
+
+function readUmpDebugGeography(
+  value: string | undefined,
+): AdmobConsentDebugGeography | undefined {
+  if (!testMode) return undefined;
+  switch (value?.trim().toUpperCase()) {
+    case 'EEA':
+      return AdmobConsentDebugGeography.EEA;
+    case 'US':
+      return AdmobConsentDebugGeography.US;
+    case 'OTHER':
+      return AdmobConsentDebugGeography.OTHER;
+    default:
+      return undefined;
+  }
+}
+
+function readTestDeviceIdentifiers(value: string | undefined): string[] {
+  if (!testMode || !value) return [];
+  return [...new Set(value.split(',').map((id) => id.trim()).filter(Boolean))];
+}
+
+function consentRequestOptions(): AdmobConsentRequestOptions | undefined {
+  if (!testMode) return undefined;
+  const options: AdmobConsentRequestOptions = {};
+  if (umpDebugGeography !== undefined) {
+    options.debugGeography = umpDebugGeography;
+  }
+  if (umpTestDeviceIdentifiers.length > 0) {
+    options.testDeviceIdentifiers = umpTestDeviceIdentifiers;
+  }
+  if (adultOnlyAudience) {
+    options.tagForUnderAgeOfConsent = false;
+  }
+  return Object.keys(options).length > 0 ? options : undefined;
 }
 
 function setAdSpace(visible: boolean): void {
@@ -136,8 +183,12 @@ async function ensureSdkInitialized(): Promise<void> {
   if (sdkInitialized) return;
   await AdMob.initialize({
     initializeForTesting: testMode,
-    tagForChildDirectedTreatment: false,
-    tagForUnderAgeOfConsent: false,
+    ...(adultOnlyAudience
+      ? {
+          tagForChildDirectedTreatment: false,
+          tagForUnderAgeOfConsent: false,
+        }
+      : {}),
     maxAdContentRating: MaxAdContentRating.ParentalGuidance,
   });
   sdkInitialized = true;
@@ -151,7 +202,7 @@ export function initializeMobileAds(): Promise<boolean> {
     if (bannerRemovalPending) await removeCurrentBanner();
     await ensureBannerListeners();
 
-    let consent = await AdMob.requestConsentInfo();
+    let consent = await AdMob.requestConsentInfo(consentRequestOptions());
     publishPrivacyState(
       consent.privacyOptionsRequirementStatus === 'REQUIRED',
     );
@@ -229,7 +280,7 @@ export async function showAdPrivacyOptions(): Promise<void> {
   initialization = null;
   await removeCurrentBanner();
 
-  const consent = await AdMob.requestConsentInfo();
+  const consent = await AdMob.requestConsentInfo(consentRequestOptions());
   publishPrivacyState(
     consent.privacyOptionsRequirementStatus === 'REQUIRED',
   );

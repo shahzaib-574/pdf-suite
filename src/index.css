@@ -186,6 +186,31 @@ ol {
   border: 0;
 }
 
+.skip-to-nav {
+  position: fixed;
+  top: max(8px, var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));
+  left: 50%;
+  z-index: 100;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  border: 2px solid var(--primary-strong);
+  border-radius: 12px;
+  color: var(--brass-ink);
+  background: var(--primary);
+  box-shadow: var(--shadow-soft);
+  font-weight: 700;
+  text-decoration: none;
+  transform: translate(-50%, calc(-100% - 16px));
+  transition: transform 160ms ease;
+}
+
+.skip-to-nav:focus-visible {
+  transform: translate(-50%, 0);
+}
+
 .tabular {
   font-variant-numeric: tabular-nums;
 }
@@ -398,7 +423,7 @@ ol {
 }
 
 .shell__nav-camera.is-active .shell__nav-camera-icon {
-  color: #fff;
+  color: var(--brass-ink);
   background: linear-gradient(135deg, var(--primary), var(--primary-strong));
   box-shadow: 0 6px 14px color-mix(in srgb, var(--primary) 26%, transparent);
 }
@@ -755,6 +780,13 @@ ol {
   .shell {
     max-width: none;
     padding: 0 32px 34px;
+  }
+
+  html.has-native-ad .shell {
+    padding-bottom: calc(
+      var(--nav-height) + var(--ad-space) +
+        var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
+    );
   }
 
   .shell__nav {

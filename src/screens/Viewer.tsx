@@ -35,6 +35,7 @@ import {
   lastJob,
 } from '../store/lastJob';
 import { getRecent } from '../store/recents';
+import { useTheme } from '../theme/context';
 import { navigate } from './nav';
 
 type ViewerProps = {
@@ -76,6 +77,7 @@ function touchDistance(event: ReactTouchEvent): number {
 }
 
 export function Viewer({ recentId }: ViewerProps) {
+  const { reducedMotion } = useTheme();
   const [name, setName] = useState('document.pdf');
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
   const [session, setSession] = useState<PdfViewerSession | null>(null);
@@ -220,9 +222,12 @@ export function Viewer({ recentId }: ViewerProps) {
       Math.min(session?.document.pageCount ? session.document.pageCount - 1 : 0, pageIndex),
     );
     const page = viewport.querySelector<HTMLElement>(`[data-page-index="${bounded}"]`);
-    page?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
+    page?.scrollIntoView({
+      behavior: smooth && !reducedMotion ? 'smooth' : 'auto',
+      block: 'start',
+    });
     setActivePage(bounded);
-  }, [session]);
+  }, [reducedMotion, session]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

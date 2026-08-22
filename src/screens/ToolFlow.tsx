@@ -117,9 +117,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const [thumbs, setThumbs] = useState<string[]>([]);
   const [pageOrder, setPageOrder] = useState<number[]>([]);
   const [removedPages, setRemovedPages] = useState<number[]>([]);
-  const [pageRotations, setPageRotations] = useState<Record<number, 0 | 90 | 180 | 270>>(
-    {},
-  );
+  const [pageRotations, setPageRotations] = useState<Record<number, number>>({});
 
   const locked = !pro && tool.pro;
   const maxFiles = pro ? Number.POSITIVE_INFINITY : tool.maxFilesFree;
@@ -144,6 +142,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
         setPageOrder(Array.from({ length: count }, (_, index) => index));
         setRemovedPages([]);
         setPageRotations({});
+        setRotateAll(false);
+        setReverse(false);
       })
       .catch(() => {
         if (!cancelled) setPageCount(0);
@@ -271,7 +271,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
     const order = baseOrder.filter((pageIndex) => !removed.has(pageIndex));
     ops.push({ type: 'reorder', order });
     order.forEach((originalPageIndex, outputIndex) => {
-      const degrees = pageRotations[originalPageIndex] ?? 0;
+      const degrees = normalizeQuarterTurn(pageRotations[originalPageIndex] ?? 0);
       if (degrees !== 0) {
         ops.push({ type: 'rotate', pageIndex: outputIndex, degrees });
       }
@@ -280,21 +280,20 @@ export function ToolFlow({ id }: ToolFlowProps) {
   }
 
   function movePage(pageIndex: number, direction: -1 | 1): void {
-    setPageOrder((current) => {
-      const at = current.indexOf(pageIndex);
-      const target = at + direction;
-      if (at < 0 || target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[at], next[target]] = [next[target]!, next[at]!];
-      return next;
-    });
+    const at = pageOrder.indexOf(pageIndex);
+    const target = at + direction;
+    if (at < 0 || target < 0 || target >= pageOrder.length) return;
+    const next = [...pageOrder];
+    [next[at], next[target]] = [next[target]!, next[at]!];
+    setPageOrder(next);
+    setReverse(false);
   }
 
   function rotatePage(pageIndex: number): void {
-    setPageRotations((current) => {
-      const next = (((current[pageIndex] ?? 0) + 90) % 360) as 0 | 90 | 180 | 270;
-      return { ...current, [pageIndex]: next };
-    });
+    setPageRotations((current) => ({
+      ...current,
+      [pageIndex]: (current[pageIndex] ?? 0) + 90,
+    }));
   }
 
   function toggleRemoved(pageIndex: number): void {
@@ -306,11 +305,12 @@ export function ToolFlow({ id }: ToolFlowProps) {
   }
 
   function rotateEveryPage(): void {
+    const rotationDelta = rotateAll ? -90 : 90;
     setRotateAll((value) => !value);
     setPageRotations((current) => {
       const next = { ...current };
       for (let index = 0; index < pageCount; index++) {
-        next[index] = (((next[index] ?? 0) + 90) % 360) as 0 | 90 | 180 | 270;
+        next[index] = (next[index] ?? 0) + rotationDelta;
       }
       return next;
     });
@@ -414,7 +414,12 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const flowSteps = TOOLS_WITH_OPTIONS.has(tool.id)
     ? ['Select', 'Adjust', 'Create']
     : ['Select', 'Create'];
-  const activeStep = picked.length === 0 ? 0 : flowSteps.length - 1;
+  const activeStep =
+    picked.length < tool.minFiles
+      ? 0
+      : busy || flowSteps.length === 2
+        ? flowSteps.length - 1
+        : 1;
 
   return (
     <div className="ps-screen">
@@ -534,11 +539,12 @@ export function ToolFlow({ id }: ToolFlowProps) {
 
         {tool.id === 'compress' ? (
           <>
-            <div className="ps-row">
+            <div className="ps-row" role="group" aria-label="Compression level">
               {LEVELS.map((level) => (
                 <AnimatedButton
                   key={level.id}
                   variant={compressLevel === level.id ? 'brass' : 'ghost'}
+                  aria-pressed={compressLevel === level.id}
                   onClick={() => setCompressLevel(level.id)}
                 >
                   {level.label}
@@ -673,15 +679,19 @@ export function ToolFlow({ id }: ToolFlowProps) {
                 Restore at least one page before running.
               </p>
             ) : null}
-            <div className="ps-row">
+            <div className="ps-row" role="group" aria-label="Bulk page adjustments">
               <AnimatedButton
                 variant={rotateAll ? 'brass' : 'ghost'}
+                aria-pressed={rotateAll}
+                disabled={pageCount === 0}
                 onClick={rotateEveryPage}
               >
                 Rotate all 90°
               </AnimatedButton>
               <AnimatedButton
                 variant={reverse ? 'brass' : 'ghost'}
+                aria-pressed={reverse}
+                disabled={pageCount === 0}
                 onClick={reversePages}
               >
                 Reverse order
@@ -707,4 +717,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
       />
     </div>
   );
+}
+
+function normalizeQuarterTurn(degrees: number): 0 | 90 | 180 | 270 {
+  return (((degrees % 360) + 360) % 360) as 0 | 90 | 180 | 270;
 }

@@ -84,9 +84,9 @@ Google explains the SDK manifest merge and the resettable/deletable advertising 
 
 - Replace Google's sample AdMob app ID in `android/app/src/main/res/values/strings.xml` with Ream's production app ID.
 - Bake a valid production banner unit into the release build with `VITE_ADMOB_TEST_MODE=false`; the release Gradle task already rejects sample or mismatched IDs.
-- Create and publish the required privacy message in AdMob. The code-side UMP flow alone does not create an account-side message.
+- Create and publish the required European regulations message in AdMob. If Ream is distributed in covered US states, also configure the applicable US state regulations message. The code-side UMP flow alone does not create an account-side message.
 - Verify the Play developer website and make `/app-ads.txt` available at that website hostname's root. A file only at `/pdf-suite/app-ads.txt` is not sufficient. See [AdMob app-ads.txt setup](https://support.google.com/admob/answer/9363762).
-- Never click live ads during internal testing. Use Google's test mode/test devices for development builds.
+- Never click live ads during internal testing. Use Google's test mode/test devices for development builds and execute [`docs/admob-privacy-testing.md`](../docs/admob-privacy-testing.md) for deterministic EEA, regulated-US, and other-region paths.
 
 ## 3. App access
 
@@ -114,10 +114,11 @@ child-directed characters, activities, or language. Those facts support answerin
 **No** if the publisher confirms that the listing is not designed to appeal to
 children; they do not, by themselves, prove that the app is intended only for adults.
 
-The current ad initialization sets `tagForChildDirectedTreatment: false` and
-`tagForUnderAgeOfConsent: false`. Treat those flags as release configuration to be
-validated against the publisher's audience decision, not as evidence for that
-decision:
+The production workflow applies `tagForChildDirectedTreatment: false` and
+`tagForUnderAgeOfConsent: false` only when the release operator explicitly confirms
+an adult-only audience. Without that confirmation, the signed production job does
+not run and the Gradle gate rejects the synchronized assets. Treat this as a release
+safeguard, not as evidence for the publisher's audience decision:
 
 - If the publisher confirms that Ream was designed exclusively for adults, select
   **Ages 18 and over only** and retain the non-child/non-under-age ad treatment after
@@ -153,7 +154,10 @@ After Play assigns the rating, confirm that AdMob blocking controls and the SDK 
 
 ## 6. Permissions declaration
 
-The source manifest declares `android.permission.INTERNET`. The AdMob plugin adds `android.permission.ACCESS_NETWORK_STATE`, and Mobile Ads SDK 25.4.0 is expected to merge these normal permissions:
+The source manifest declares `android.permission.INTERNET`. The AdMob plugin adds
+`android.permission.ACCESS_NETWORK_STATE`; Mobile Ads SDK 25.4.0 and its pinned
+WorkManager dependency merge the remaining normal permissions below. CI enforces
+this as an exact packaged-APK allowlist rather than an expectation:
 
 - `android.permission.INTERNET`
 - `android.permission.ACCESS_NETWORK_STATE`
@@ -161,6 +165,12 @@ The source manifest declares `android.permission.INTERNET`. The AdMob plugin add
 - `android.permission.ACCESS_ADSERVICES_AD_ID`
 - `android.permission.ACCESS_ADSERVICES_ATTRIBUTION`
 - `android.permission.ACCESS_ADSERVICES_TOPICS`
+- `android.permission.FOREGROUND_SERVICE`
+- `android.permission.WAKE_LOCK`
+
+The WorkManager manifest also declares `RECEIVE_BOOT_COMPLETED`, but Mobile Ads SDK
+25.4.0 explicitly removes it during manifest merge; the artifact gate fails if it
+reappears.
 
 The app does **not** intentionally request `CAMERA`, `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, `READ_MEDIA_IMAGES`, precise/approximate location, microphone, contacts, phone, SMS, call log, or notification permission. Scan delegates capture to the system experience; import/export uses pickers and app-scoped cache. Android recommends these permission-minimizing patterns in [Minimize your permission requests](https://developer.android.com/privacy-and-security/minimize-permission-requests).
 
@@ -223,7 +233,7 @@ Internal testing supports up to 100 testers and is the recommended first Play-di
 - [ ] Verify Scan, PDF/DOCX/image import, every enabled tool, PDF reader/search, PDF-to-Word layout/OCR, Save, Share, Recents, and Clear Recents with synthetic non-confidential fixtures.
 - [ ] Confirm Android shows no camera, storage, photo-library, location, microphone, contacts, or phone runtime permission prompt.
 - [ ] Verify document tools remain usable in airplane mode and when ads fail or consent does not permit a request.
-- [ ] Test UMP first-launch and returning-user paths for applicable and non-applicable regions; verify Settings reopens privacy options only when required.
+- [ ] Run the full UMP matrix in [`docs/admob-privacy-testing.md`](../docs/admob-privacy-testing.md): EEA, regulated-US (when distributed there), and other-region first/returning launches; verify Settings reopens privacy options only when required.
 - [ ] Confirm the banner appears only on Tools/Recents, never overlays navigation or actions, survives rotation/resizing, and leaves no blank spacer after a load failure.
 - [ ] Do not click live ads. Use test-device/test-mode builds for ad interaction testing.
 - [ ] Verify light, dark, system theme, reduced motion, Android back behavior, 48 dp targets, TalkBack labels/focus order, and font scaling.

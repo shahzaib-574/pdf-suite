@@ -233,7 +233,7 @@
 }
 
 .ps-filter.is-active {
-  color: #fff;
+  color: var(--brass-ink);
   border-color: var(--primary);
   background: var(--primary);
   box-shadow: var(--shadow-inset);
@@ -788,7 +788,6 @@
   height: 34px;
   background: transparent;
   border: 0;
-  outline: 0;
 }
 
 .ps-reader-search__count {
