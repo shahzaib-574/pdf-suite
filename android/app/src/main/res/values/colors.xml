@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#5840CF</color>
+    <color name="colorPrimaryDark">#4630B8</color>
+    <color name="colorAccent">#067469</color>
+    <color name="window_background">#EEF1F7</color>
+    <color name="splash_background">#EEF1F7</color>
+    <!-- Android 7 uses light navigation icons, so its fallback bar stays dark. -->
+    <color name="navigation_bar_background">#181725</color>
+</resources>

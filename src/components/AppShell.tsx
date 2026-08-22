@@ -16,7 +16,7 @@ export function AppShell({
     <div className="shell">
       <header className="shell__bar">
         <div className="shell__brand">
-          <span className="shell__mark" aria-hidden="true" />
+          <img className="shell__mark" src="./favicon.svg" alt="" aria-hidden="true" />
           <div className="shell__titles">
             <p className="shell__name">{APP_SHORT_NAME}</p>
             <p className="shell__tag">{APP_TAGLINE}</p>

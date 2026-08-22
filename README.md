@@ -2,6 +2,9 @@
 
 On-device PDF tools for web and Android. Files never leave the phone or browser. The Android app ID is `com.reampdf.mobile`.
 
+Public privacy policy (available after the Pages workflow is enabled on `main`):
+<https://shahzaib-574.github.io/pdf-suite/privacy.html>
+
 ## Stack
 
 - Vite + React + TypeScript
@@ -66,11 +69,34 @@ npm run android:debug
 npm run android:bundle
 ```
 
+The debug command builds with Google's official test banner ID. Never use live ad
+units while developing or testing. Before syncing a production build, create the
+ignored `.env.production.local` file with the public production banner unit:
+
+```dotenv
+VITE_ADMOB_TEST_MODE=false
+VITE_ADMOB_BANNER_ID=ca-app-pub-<publisher-id>/<banner-unit-id>
+```
+
+`npm run android:sync` emits release metadata from the same Vite environment and
+copies it with the compiled JavaScript. Every Android release task verifies that
+the synchronized assets are a production build, contain a valid non-test banner
+ID, and actually include that ID in the JavaScript bundle.
+
 Launcher icons and light/dark splash screens are already generated from `assets/logo.svg`. Use a current Android Studio Image Asset workflow to regenerate them after changing the logo.
 
-For Play Store release, use **Build → Generate Signed Bundle / APK** in Android Studio, select Android App Bundle, and keep the upload keystore outside this repository. The Android project ignores `*.jks`, `*.keystore`, and `keystore.properties`.
+For Play Store release, copy `android/keystore.properties.example` to `android/keystore.properties`, point it to an upload keystore stored outside this repository, and replace every example password locally. The release build validates all four signing fields and the keystore path. Signing files and credentials are ignored by Git. CI alone uses `-PallowUnsignedRelease=true` to test optimized unsigned APK and bundle artifacts without possessing production secrets. The flag is rejected outside CI and never applies the release signing configuration.
 
-The package ID is permanent after the first Play Console release. Increment `versionCode` in `android/app/build.gradle` for every upload and update `versionName` for user-facing releases.
+The package ID is permanent after the first Play Console release. Increment `appVersionCode` in `android/variables.gradle` for every upload and update `appVersionName` for user-facing releases. Before publishing, replace the Google sample AdMob app ID in `android/app/src/main/res/values/strings.xml` with Ream's public AdMob app ID; never ship the sample ID in a production bundle.
+
+CI also runs Android build-tools `zipalign -c -P 16` against the optimized unsigned
+release APK so newly introduced native dependencies cannot silently regress the
+Play requirement for 16 KB page-size devices.
+
+AdMob's `app-ads.txt` crawler checks the website host root, not a GitHub project
+subdirectory. Do not add `pdf-suite/app-ads.txt` and assume it is verified. Point the
+Play developer website at a domain whose root can serve `/app-ads.txt`, then publish
+the exact publisher line supplied by AdMob.
 
 ## Next
 
