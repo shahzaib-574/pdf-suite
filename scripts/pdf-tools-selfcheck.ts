@@ -1,4 +1,9 @@
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
 import { PDFDocument, StandardFonts, degrees, toDegrees } from 'pdf-lib';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { TransferFile, WorkerRequest } from '../src/pdf/protocol.ts';
 import { runWorkerOperation } from '../src/pdf/worker.ts';
 
@@ -22,6 +27,69 @@ async function samplePdf(pages: number): Promise<Uint8Array> {
 
 async function invoke(request: WorkerRequest) {
   return runWorkerOperation(request);
+}
+
+const fixturePath = resolve('store-assets/fixtures/ream-screenshot-fixture.pdf');
+const fixtureBytes = new Uint8Array(await readFile(fixturePath));
+const fixtureHash = createHash('sha256').update(fixtureBytes).digest('hex').toUpperCase();
+if (fixtureHash !== '40965B6839DC2BE1C314CF7EF70732563C7AE78BBB6E487DA1DC73F2D39875A3') {
+  throw new Error(`screenshot fixture hash changed unexpectedly: ${fixtureHash}`);
+}
+
+const fixtureDocument = await PDFDocument.load(fixtureBytes);
+if (fixtureDocument.getPageCount() !== 5) {
+  throw new Error('screenshot fixture must contain exactly five pages');
+}
+if (fixtureDocument.getTitle() !== 'Ream Screenshot Fixture') {
+  throw new Error('screenshot fixture title metadata is missing');
+}
+const fixturePages = fixtureDocument.getPages();
+if (fixturePages.slice(0, 4).some((page) => page.getWidth() >= page.getHeight())) {
+  throw new Error('screenshot fixture pages one through four must be portrait');
+}
+if (fixturePages[4].getWidth() <= fixturePages[4].getHeight()) {
+  throw new Error('screenshot fixture page five must be landscape');
+}
+
+const fixtureTextTask = pdfjs.getDocument({
+  data: fixtureBytes.slice(),
+  useSystemFonts: true,
+});
+const fixtureTextDocument = await fixtureTextTask.promise;
+const extractedFixturePages: string[] = [];
+for (let pageNumber = 1; pageNumber <= fixtureTextDocument.numPages; pageNumber += 1) {
+  const page = await fixtureTextDocument.getPage(pageNumber);
+  const content = await page.getTextContent();
+  extractedFixturePages.push(
+    content.items
+      .flatMap((item) => (typeof item === 'object' && item && 'str' in item ? [String(item.str)] : []))
+      .join(' '),
+  );
+}
+await fixtureTextTask.destroy();
+
+const expectedFixturePhrases = [
+  ['A clean document for', 'real app screenshots'],
+  ['Product quality memo', 'Review workflow'],
+  ['Sample inventory table', 'Item', 'Category', 'Status', 'Synthetic non-confidential'],
+  ['Two-column extraction guide', 'Readable hierarchy', 'Extraction cues'],
+  ['Landscape operations summary', 'Android screenshots', 'Pending'],
+];
+for (const [pageIndex, phrases] of expectedFixturePhrases.entries()) {
+  for (const phrase of phrases) {
+    if (!extractedFixturePages[pageIndex].includes(phrase)) {
+      throw new Error(`screenshot fixture page ${pageIndex + 1} is missing text: ${phrase}`);
+    }
+  }
+}
+
+const fixtureCounted = await invoke({
+  id: 0,
+  op: 'pageCount',
+  file: transfer('ream-screenshot-fixture.pdf', 'application/pdf', fixtureBytes),
+});
+if (fixtureCounted.pageCount !== 5) {
+  throw new Error('PDF worker did not count all screenshot fixture pages');
 }
 
 const first = await samplePdf(2);
@@ -113,4 +181,4 @@ if (toDegrees(rotationCheck.getPage(0).getRotation()) !== 180) {
   throw new Error('PDF rotation primitive is unavailable');
 }
 
-console.log('PDF_TOOLS_SELF_CHECK_OK merge split images watermark numbers organize count');
+console.log('PDF_TOOLS_SELF_CHECK_OK fixture merge split images watermark numbers organize count');

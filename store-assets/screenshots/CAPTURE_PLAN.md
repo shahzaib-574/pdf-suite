@@ -7,11 +7,29 @@ Capture the release candidate itself. Do not substitute design mockups.
 - Install the signed release candidate or the exact internal-track build on an API 36 Android emulator for the guarded workflow below. Physical-device captures require a separate manual capture path and must still pass `-ValidateOnly`.
 - Use a 1080 x 1920 portrait viewport for all phone images.
 - Set display/font scaling to the Android defaults and keep one theme across the core sequence.
-- Use a synthetic, non-confidential PDF fixture with varied text, one table, and several pages.
+- Use the canonical synthetic fixture at `../fixtures/ream-screenshot-fixture.pdf`. It contains five non-confidential pages with varied text, a ruled table, two columns, and mixed orientation.
 - Remove developer overlays, notifications, personal account details, file paths, and service-provider names.
 - Show complete system status icons or crop the status bar consistently; never edit app content into the capture.
 - Do not show test ads. Capture the production presentation only after consent and ad behavior have passed QA, or use an approved screenshot build that hides the ad placement without changing app content.
 - Export each screenshot as a 24-bit RGB PNG with no alpha.
+
+Copy the canonical fixture into the emulator's Downloads directory before the
+capture session, adjusting the serial when needed:
+
+```powershell
+adb -s emulator-5554 push store-assets/fixtures/ream-screenshot-fixture.pdf /sdcard/Download/
+```
+
+The tracked fixture is deterministic. Install its pinned generator runtime once,
+byte-verify the committed PDF, and regenerate it only from the repository script.
+Then run `npm run pdf-selfcheck` and visually review every rendered page:
+
+```powershell
+python -m pip install -r store-assets/scripts/requirements-screenshot-fixture.txt
+python store-assets/scripts/generate_screenshot_fixture.py --check
+python store-assets/scripts/generate_screenshot_fixture.py
+npm run pdf-selfcheck
+```
 
 ## Guarded Windows capture workflow
 
