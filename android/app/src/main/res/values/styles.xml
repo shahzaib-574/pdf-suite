@@ -9,7 +9,7 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@color/navigation_bar_background</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="o">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:forceDarkAllowed" tools:targetApi="q">false</item>
     </style>
@@ -27,6 +27,6 @@
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
         <item name="android:navigationBarColor">@color/navigation_bar_background</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="o">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
     </style>
 </resources>
