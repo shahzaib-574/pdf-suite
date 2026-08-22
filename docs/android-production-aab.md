@@ -17,23 +17,24 @@ confidential.
    named exactly `production`.
 2. Add required reviewers, prevent self-review where available, and restrict the
    environment's deployment branches to `main`.
-3. Add the six secrets below under **Environment secrets**. Repository-level
+3. Add the five secrets below under **Environment secrets**. Repository-level
    Actions secrets with the same names also work, but environment secrets plus
    required reviewers are preferred.
 
 | Secret | Exact value |
 | --- | --- |
-| `ADMOB_ANDROID_APP_ID` | Ream's Android AdMob app ID: `ca-app-pub-` + 16-digit publisher ID + `~` + 10-digit app ID |
-| `ADMOB_ANDROID_BANNER_ID` | Ream's adaptive banner unit ID: `ca-app-pub-` + the same 16-digit publisher ID + `/` + 10-digit unit ID |
+| `ADMOB_ANDROID_BANNER_ID` | Ream's adaptive banner unit ID: `ca-app-pub-9959568404035601/` + its 10-digit unit ID |
 | `ANDROID_UPLOAD_KEYSTORE_BASE64` | Base64 of the Play upload keystore file, with no data-URI prefix |
 | `ANDROID_UPLOAD_STORE_PASSWORD` | Upload keystore password |
 | `ANDROID_UPLOAD_KEY_ALIAS` | Upload key alias inside the keystore |
 | `ANDROID_UPLOAD_KEY_PASSWORD` | Upload key password |
 
-The two AdMob IDs must use the same 16-digit publisher ID. Google's sample app
-ID, test banner ID, and obvious documentation placeholders are rejected by both
-the workflow and the Gradle release gate. The sample app ID remains in the tracked debug resource; the workflow
-replaces it only in the ephemeral runner checkout.
+The workflow injects Ream's public Android AdMob app ID,
+`ca-app-pub-9959568404035601~6472905937`, directly. The banner ID must use the same
+publisher. Google's test banner ID, obvious documentation placeholders, and any
+other app identity are rejected by the workflow, Gradle release gate, and packaged
+artifact verifier. The sample app ID remains in the tracked debug resource; the
+workflow replaces it only in the ephemeral runner checkout.
 
 To save a keystore's base64 value directly with GitHub CLI in PowerShell, without
 printing it or placing it in clipboard history:
@@ -52,11 +53,10 @@ command line or shell history:
 base64 -w 0 /secure/ream-upload.jks | gh secret set ANDROID_UPLOAD_KEYSTORE_BASE64 --env production
 ```
 
-For each of the other five values, run the following commands one at a time and
+For each of the other four values, run the following commands one at a time and
 enter the value at the hidden interactive prompt:
 
 ```bash
-gh secret set ADMOB_ANDROID_APP_ID --env production
 gh secret set ADMOB_ANDROID_BANNER_ID --env production
 gh secret set ANDROID_UPLOAD_STORE_PASSWORD --env production
 gh secret set ANDROID_UPLOAD_KEY_ALIAS --env production

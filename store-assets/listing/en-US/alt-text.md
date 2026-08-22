@@ -6,7 +6,7 @@ The purple-to-blue Ream lightning mark centered on a softly raised pale-gray squ
 
 ## Feature graphic
 
-Ream's purple-to-blue mark and the words “PDF work, kept on your device” beside a softly raised document panel with scan, convert, and organize controls.
+Ream’s mark beside “PDF work, kept on your device” and a raised panel showing scan, export, and tool controls.
 
 ## Screenshots
 

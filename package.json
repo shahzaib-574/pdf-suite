@@ -18,7 +18,8 @@
     "android:open": "cap open android",
     "android:debug": "npm run android:sync:debug && cd android && gradlew.bat assembleDebug",
     "android:bundle": "npm run android:sync && cd android && gradlew.bat bundleRelease",
-    "verify:android-artifact": "node scripts/verify-android-artifact.mjs"
+    "verify:android-artifact": "node scripts/verify-android-artifact.mjs",
+    "verify:store-assets": "node scripts/verify-store-assets.mjs"
   },
   "dependencies": {
     "@capacitor-community/admob": "8.1.0",

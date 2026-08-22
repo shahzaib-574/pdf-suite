@@ -44,6 +44,8 @@ jobs:
           npm run build
           npm run docx-selfcheck
           npm run pdf-selfcheck
+          npm run verify:store-assets
+          grep -Fqx 'google.com, pub-9959568404035601, DIRECT, f08c47fec0942fa0' store-assets/app-ads.txt
 
       - name: Sync Capacitor Android project
         run: npx cap sync android
@@ -60,8 +62,8 @@ jobs:
       - name: Stage disposable production-path configuration
         shell: bash
         env:
-          CI_ADMOB_APP_ID: ca-app-pub-1111222233334444~5555666677
-          CI_ADMOB_BANNER_ID: ca-app-pub-1111222233334444/8888999900
+          CI_ADMOB_APP_ID: ca-app-pub-9959568404035601~6472905937
+          CI_ADMOB_BANNER_ID: ca-app-pub-9959568404035601/8888999900
           CI_KEY_PASSWORD: ream-ci-only
         run: |
           set -euo pipefail

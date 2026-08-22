@@ -82,10 +82,10 @@ Google explains the SDK manifest merge and the resettable/deletable advertising 
 
 ### Ad release gates
 
-- Replace Google's sample AdMob app ID in `android/app/src/main/res/values/strings.xml` with Ream's production app ID.
+- Replace Google's sample AdMob app ID in `android/app/src/main/res/values/strings.xml` with Ream's exact production app ID, `ca-app-pub-9959568404035601~6472905937` (the protected workflow injects it automatically).
 - Bake a valid production banner unit into the release build with `VITE_ADMOB_TEST_MODE=false`; the release Gradle task already rejects sample or mismatched IDs.
 - Create and publish the required European regulations message in AdMob. If Ream is distributed in covered US states, also configure the applicable US state regulations message. The code-side UMP flow alone does not create an account-side message.
-- Verify the Play developer website and make `/app-ads.txt` available at that website hostname's root. A file only at `/pdf-suite/app-ads.txt` is not sufficient. See [AdMob app-ads.txt setup](https://support.google.com/admob/answer/9363762).
+- Verify the Play developer website and publish the tracked `store-assets/app-ads.txt` unchanged at that website hostname's root. A file only at `/pdf-suite/app-ads.txt` is not sufficient. See [AdMob app-ads.txt setup](https://support.google.com/admob/answer/9363762).
 - Never click live ads during internal testing. Use Google's test mode/test devices for development builds and execute [`docs/admob-privacy-testing.md`](../docs/admob-privacy-testing.md) for deterministic EEA, regulated-US, and other-region paths.
 
 ## 3. App access

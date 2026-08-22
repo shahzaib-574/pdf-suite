@@ -6,12 +6,8 @@ def keystorePropertiesFile = rootProject.file('keystore.properties')
 def keystoreProperties = new Properties()
 def hasReleaseKeystore = keystorePropertiesFile.exists()
 def allowUnsignedRelease = project.findProperty('allowUnsignedRelease')?.toString()?.toBoolean() ?: false
-def sampleAdMobAppId = 'ca-app-pub-3940256099942544~3347511713'
+def productionAdMobAppId = 'ca-app-pub-9959568404035601~6472905937'
 def sampleAdMobBannerId = 'ca-app-pub-3940256099942544/9214589741'
-def placeholderAdMobAppIds = [
-    'ca-app-pub-0000000000000000~0000000000',
-    'ca-app-pub-1234567890123456~1234567890',
-]
 def placeholderAdMobBannerIds = [
     'ca-app-pub-0000000000000000/0000000000',
     'ca-app-pub-1234567890123456/1234567890',
@@ -19,9 +15,6 @@ def placeholderAdMobBannerIds = [
 def adMobStringsXml = file('src/main/res/values/strings.xml').getText('UTF-8')
 def adMobAppIdMatcher = adMobStringsXml =~ /(?s)<string\b(?=[^>]*\bname=["']admob_app_id["'])[^>]*>\s*([^<]+?)\s*<\/string>/
 def configuredAdMobAppId = adMobAppIdMatcher.find() ? adMobAppIdMatcher.group(1).trim() : ''
-def validAdMobAppId = configuredAdMobAppId ==~ /ca-app-pub-\d{16}~\d{10}/
-def usesSampleAdMobAppId = configuredAdMobAppId == sampleAdMobAppId
-def usesPlaceholderAdMobAppId = placeholderAdMobAppIds.contains(configuredAdMobAppId)
 def releaseMetadataFile = file('src/main/assets/public/release-metadata.json')
 def webAssetDirectory = file('src/main/assets/public')
 
@@ -66,10 +59,10 @@ def validateProductionRelease = tasks.register('validateProductionRelease') {
                 'keystore.properties and provide the private upload-keystore values.'
             )
         }
-        if (!validAdMobAppId || usesSampleAdMobAppId || usesPlaceholderAdMobAppId) {
+        if (configuredAdMobAppId != productionAdMobAppId) {
             throw new GradleException(
-                'A valid production AdMob app ID is required; sample and placeholder IDs cannot be used. ' +
-                'Replace @string/admob_app_id with the Ream AdMob app ID.'
+                "Releases must use Ream's exact AdMob app ID (${productionAdMobAppId}). " +
+                'Replace @string/admob_app_id before building.'
             )
         }
 
@@ -100,7 +93,7 @@ def validateProductionRelease = tasks.register('validateProductionRelease') {
         def validBannerId = bakedBannerId && (bakedBannerId ==~ /ca-app-pub-\d{16}\/\d{10}/)
         def usesPlaceholderBannerId = placeholderAdMobBannerIds.contains(bakedBannerId)
         def matchingPublisher = validBannerId && (
-            bakedBannerId.tokenize('/').first() == configuredAdMobAppId.tokenize('~').first()
+            bakedBannerId.tokenize('/').first() == productionAdMobAppId.tokenize('~').first()
         )
 
         if (metadataSchemaVersion != 2 || metadataMode != 'production' || metadataTestMode != false) {

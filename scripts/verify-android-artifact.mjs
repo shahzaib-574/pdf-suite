@@ -1,19 +1,176 @@
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import JSZip from 'jszip';
 
 const DEFAULT_APK = 'android/app/build/outputs/apk/release/app-release.apk';
+const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const RELEASE_IDENTITY_PATH = path.join(REPOSITORY_ROOT, 'android', 'variables.gradle');
+
+const RELEASE_IDENTITY_FIELDS = Object.freeze({
+  versionCode: Object.freeze({ gradleName: 'appVersionCode', type: 'integer' }),
+  versionName: Object.freeze({ gradleName: 'appVersionName', type: 'string' }),
+  minSdk: Object.freeze({ gradleName: 'minSdkVersion', type: 'integer' }),
+  targetSdk: Object.freeze({ gradleName: 'targetSdkVersion', type: 'integer' }),
+});
+
+function stripGradleComments(source, sourceLabel) {
+  let output = '';
+  let quote;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const nextCharacter = source[index + 1];
+    if (lineComment) {
+      if (character === '\r' || character === '\n') {
+        lineComment = false;
+        output += character;
+      } else {
+        output += ' ';
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (character === '*' && nextCharacter === '/') {
+        blockComment = false;
+        output += '  ';
+        index += 1;
+      } else {
+        output += character === '\r' || character === '\n' ? character : ' ';
+      }
+      continue;
+    }
+    if (escaped) {
+      escaped = false;
+      output += character;
+      continue;
+    }
+    if (character === '\\' && quote) {
+      escaped = true;
+      output += character;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = undefined;
+      output += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      output += character;
+      continue;
+    }
+    if (character === '/' && nextCharacter === '/') {
+      lineComment = true;
+      output += '  ';
+      index += 1;
+      continue;
+    }
+    if (character === '/' && nextCharacter === '*') {
+      blockComment = true;
+      output += '  ';
+      index += 1;
+      continue;
+    }
+    output += character;
+  }
+
+  if (blockComment) throw new Error(`${sourceLabel} contains an unterminated block comment.`);
+  return output;
+}
+
+function parseReleaseIdentity(source, sourceLabel = 'android/variables.gradle') {
+  const lines = stripGradleComments(source, sourceLabel).split(/\r?\n/);
+  const identity = {};
+
+  for (const [outputName, definition] of Object.entries(RELEASE_IDENTITY_FIELDS)) {
+    const escapedGradleName = definition.gradleName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const startsWithField = new RegExp(`^\\s*(?:ext\\.)?${escapedGradleName}\\b`);
+    const assignment = new RegExp(
+      `^\\s*(?:ext\\.)?${escapedGradleName}\\s*=\\s*(.*?)\\s*;?\\s*$`,
+    );
+    const occurrences = [];
+
+    for (const [index, line] of lines.entries()) {
+      if (startsWithField.test(line)) occurrences.push({ line, lineNumber: index + 1 });
+    }
+
+    if (occurrences.length === 0) {
+      throw new Error(`${sourceLabel} is missing required assignment ${definition.gradleName}.`);
+    }
+    if (occurrences.length > 1) {
+      throw new Error(
+        `${sourceLabel} defines ${definition.gradleName} more than once (lines ${occurrences.map(({ lineNumber }) => lineNumber).join(', ')}).`,
+      );
+    }
+
+    const [{ line, lineNumber }] = occurrences;
+    const rawValue = line.match(assignment)?.[1];
+    if (!rawValue) {
+      throw new Error(
+        `${sourceLabel}:${lineNumber} has a malformed ${definition.gradleName} assignment.`,
+      );
+    }
+
+    if (definition.type === 'integer') {
+      if (!/^[1-9]\d*$/.test(rawValue)) {
+        throw new Error(
+          `${sourceLabel}:${lineNumber} requires ${definition.gradleName} to be a positive integer literal.`,
+        );
+      }
+      const numericValue = Number(rawValue);
+      if (!Number.isSafeInteger(numericValue)) {
+        throw new Error(
+          `${sourceLabel}:${lineNumber} has an out-of-range ${definition.gradleName} value.`,
+        );
+      }
+      identity[outputName] = rawValue;
+      continue;
+    }
+
+    const singleQuoted = rawValue.match(/^'([^'\\\r\n]+)'$/)?.[1];
+    const doubleQuoted = rawValue.match(/^"([^"\\\r\n]+)"$/)?.[1];
+    const stringValue = singleQuoted ?? doubleQuoted;
+    if (!stringValue || stringValue !== stringValue.trim()) {
+      throw new Error(
+        `${sourceLabel}:${lineNumber} requires ${definition.gradleName} to be a non-empty quoted string literal without escapes or surrounding whitespace.`,
+      );
+    }
+    identity[outputName] = stringValue;
+  }
+
+  if (Number(identity.targetSdk) < Number(identity.minSdk)) {
+    throw new Error(
+      `${sourceLabel} targetSdkVersion (${identity.targetSdk}) cannot be lower than minSdkVersion (${identity.minSdk}).`,
+    );
+  }
+
+  return Object.freeze(identity);
+}
+
+function readReleaseIdentity() {
+  let source;
+  try {
+    source = readFileSync(RELEASE_IDENTITY_PATH, 'utf8');
+  } catch (error) {
+    throw new Error(`Unable to read ${RELEASE_IDENTITY_PATH}: ${error.message}`);
+  }
+  return parseReleaseIdentity(source, RELEASE_IDENTITY_PATH);
+}
+
+const RELEASE_IDENTITY = readReleaseIdentity();
 
 const EXPECTED = Object.freeze({
   applicationId: 'com.reampdf.mobile',
-  versionCode: '1',
-  versionName: '1.0.0',
-  minSdk: '24',
-  targetSdk: '36',
+  ...RELEASE_IDENTITY,
+  adMobAppId: 'ca-app-pub-9959568404035601~6472905937',
 });
 
 // This is the complete permission contract for the merged release manifest.
@@ -97,6 +254,8 @@ const GOOGLE_SAMPLE_ADMOB_PUBLISHERS = Object.freeze([
 
 function usage() {
   return `Usage: node scripts/verify-android-artifact.mjs [--require-production-ads] [APK_PATH]
+       node scripts/verify-android-artifact.mjs --print-release-identity
+       node scripts/verify-android-artifact.mjs --self-test
 
 Verifies the packaged release manifest and Capacitor web assets. APK_PATH
 defaults to ${DEFAULT_APK}.
@@ -104,6 +263,8 @@ defaults to ${DEFAULT_APK}.
 Options:
   --require-production-ads  Require real-shaped, non-sample AdMob IDs and the
                             confirmed adult-only release marker.
+  --print-release-identity  Print versionCode and versionName from
+                            android/variables.gradle for release automation.
   --self-test  Exercise the parsers and policy checks without an Android SDK.
   --help       Show this help.`;
 }
@@ -318,6 +479,7 @@ async function checkWebBundle(apkPath, violations) {
 }
 
 function checkProductionAds(appId, metadata, violations) {
+  addMismatch(violations, 'packaged AdMob app ID', appId, EXPECTED.adMobAppId);
   addMismatch(
     violations,
     'web AdMob audience mode',
@@ -363,6 +525,42 @@ function checkProductionAds(appId, metadata, violations) {
 }
 
 function runSelfTest() {
+  const identityFixture = `ext {
+    /* Retired identity:
+    appVersionCode = 41
+    */
+    appVersionCode = 42
+    appVersionName = '2.3.4'
+    minSdkVersion = 24
+    targetSdkVersion = 36 // current Play target
+  }`;
+  assert.deepEqual(parseReleaseIdentity(identityFixture, 'fixture'), {
+    versionCode: '42',
+    versionName: '2.3.4',
+    minSdk: '24',
+    targetSdk: '36',
+  });
+  assert.throws(
+    () => parseReleaseIdentity(identityFixture.replace('    targetSdkVersion = 36 // current Play target\n', ''), 'fixture'),
+    /missing required assignment targetSdkVersion/,
+  );
+  assert.throws(
+    () => parseReleaseIdentity(identityFixture.replace('    appVersionCode = 42', '    appVersionCode = 42\n    appVersionCode = 43'), 'fixture'),
+    /defines appVersionCode more than once/,
+  );
+  assert.throws(
+    () => parseReleaseIdentity(identityFixture.replace("appVersionName = '2.3.4'", 'appVersionName = project.version'), 'fixture'),
+    /requires appVersionName to be a non-empty quoted string literal/,
+  );
+  assert.throws(
+    () => parseReleaseIdentity(identityFixture.replace('targetSdkVersion = 36', 'targetSdkVersion = 23'), 'fixture'),
+    /cannot be lower than minSdkVersion/,
+  );
+  assert.throws(
+    () => parseReleaseIdentity(`${identityFixture}\n/*`, 'fixture'),
+    /contains an unterminated block comment/,
+  );
+
   const xml = `<?xml version="1.0" encoding="utf-8"?>
     <manifest xmlns:android="http://schemas.android.com/apk/res/android">
       <application android:allowBackup="false" android:usesCleartextTraffic="false">
@@ -393,6 +591,19 @@ function runSelfTest() {
 
   const productionAdViolations = [];
   checkProductionAds(
+    EXPECTED.adMobAppId,
+    {
+      admob: {
+        audienceMode: 'ADULTS_ONLY',
+        bannerId: 'ca-app-pub-9959568404035601/8888999900',
+      },
+    },
+    productionAdViolations,
+  );
+  assert.deepEqual(productionAdViolations, []);
+
+  const wrongAppViolations = [];
+  checkProductionAds(
     'ca-app-pub-1111222233334444~5555666677',
     {
       admob: {
@@ -400,9 +611,9 @@ function runSelfTest() {
         bannerId: 'ca-app-pub-1111222233334444/8888999900',
       },
     },
-    productionAdViolations,
+    wrongAppViolations,
   );
-  assert.deepEqual(productionAdViolations, []);
+  assert.match(wrongAppViolations[0], /packaged AdMob app ID/);
 
   console.log('Android artifact verifier self-test passed.');
 }
@@ -414,8 +625,16 @@ async function main() {
     return;
   }
   if (args.includes('--self-test')) {
-    if (args.length !== 1) throw new Error('--self-test cannot be combined with an APK path');
+    if (args.length !== 1) throw new Error('--self-test cannot be combined with other arguments');
     runSelfTest();
+    return;
+  }
+  if (args.includes('--print-release-identity')) {
+    if (args.length !== 1) {
+      throw new Error('--print-release-identity cannot be combined with other arguments');
+    }
+    console.log(`versionCode=${EXPECTED.versionCode}`);
+    console.log(`versionName=${EXPECTED.versionName}`);
     return;
   }
   const requireProductionAds = args.includes('--require-production-ads');
