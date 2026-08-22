@@ -63,24 +63,38 @@
 
       <p class="notice">
         Ream processes the contents of your PDF, Word, and image files on your
-        device. Ream does not upload document contents to its developer.
+        device. Ream does not send document contents to the Ream developer,
+        Google, or AdMob. A document leaves the app only when you deliberately
+        save or share it to a destination you select.
       </p>
 
       <h2>Documents and recent files</h2>
       <p>
         Files you select, generated documents, OCR results, and recent-file history
-        stay in the app's local storage unless you choose to save or share them.
-        Clearing recent files removes those locally stored copies. Ream has no user
-        account or cloud document service.
+        stay in the app's local storage. Ream has no user account or cloud document
+        service. When you tap Save or Share, Android transfers the selected output to
+        the document provider or app you choose; that destination handles the file
+        under its own privacy terms. Ream does not send document contents, extracted
+        text, filenames, or recent-file contents to its developer or to AdMob.
       </p>
 
       <h2>Advertising</h2>
       <p>
-        The Android app may use Google AdMob to display ads. Google Mobile Ads may
-        process device identifiers, IP-derived general location, app interactions,
-        diagnostics, and fraud-prevention signals. Advertising requests are not sent
-        until the applicable consent flow permits them. Where required, you can reopen
-        Google's privacy choices from Settings.
+        The Android app uses Google AdMob to display adaptive banner ads on the Tools
+        and Recents pages. The Google Mobile Ads SDK automatically collects and shares
+        the following data with Google through AdMob: approximate location inferred
+        from the device's IP address; app interactions such as app launches, taps, and
+        ad views; diagnostic information such as launch time, hang rate, and energy
+        usage; and device or other identifiers such as the Android advertising ID and
+        app set ID.
+      </p>
+      <p>
+        Google processes those categories for advertising or marketing, analytics,
+        and fraud prevention, security, and compliance. Ream requests updated consent
+        information before requesting an ad and requests ads only when Google's consent
+        system says that it may. Depending on your region and choices, Google may serve
+        personalized, non-personalized, limited, or technical ads. Where required, you
+        can reopen Google's privacy choices from Ream's Settings page.
       </p>
 
       <h2>Permissions</h2>
@@ -92,9 +106,22 @@
 
       <h2>Security and retention</h2>
       <p>
-        Network traffic is restricted to encrypted connections. Local recent files
-        remain until you clear them, remove the app, or the operating system clears app
-        data. Files you export are retained wherever you choose to save them.
+        Google states that data collected by the Google Mobile Ads SDK is encrypted in
+        transit with Transport Layer Security (TLS), and Ream disables cleartext Android
+        network traffic. Local recent files remain until you clear them, remove the app,
+        or the operating system clears app data. Files you export are retained wherever
+        you choose to save them.
+      </p>
+
+      <h2>Deletion and advertising controls</h2>
+      <p>
+        Clear Recents removes Ream's locally stored recent files and history. It does
+        not delete advertising data already processed by Google. Ream has no account or
+        cloud document record to delete. You can reset or delete the Android advertising
+        ID in Android Settings under Privacy and Ads, use
+        <a href="https://myadcenter.google.com/" rel="noopener noreferrer">My Ad Center</a>,
+        and review how Google handles advertising data in the
+        <a href="https://policies.google.com/privacy" rel="noopener noreferrer">Google Privacy Policy</a>.
       </p>
 
       <h2>Your choices</h2>
@@ -107,7 +134,9 @@
       <h2>Contact</h2>
       <p>
         For privacy questions, open an issue in the
-        <a href="https://github.com/shahzaib-574/pdf-suite/issues">Ream support repository</a>.
+        <a href="https://github.com/shahzaib-574/pdf-suite/issues" rel="noopener noreferrer">Ream support repository</a>.
+        Issues are public, so do not attach documents or include personal or sensitive
+        information.
       </p>
     </main>
   </body>

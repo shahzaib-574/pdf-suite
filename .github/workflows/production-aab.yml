@@ -1,0 +1,259 @@
+name: Build signed production AAB
+
+run-name: "Production Android AAB · ${{ github.ref_name }} · #${{ github.run_number }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Confirm this is an approved production bundle build
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-android-aab
+  cancel-in-progress: false
+
+jobs:
+  production-aab:
+    if: ${{ inputs.confirm_production && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+
+      - name: Validate production secret configuration
+        shell: bash
+        env:
+          ADMOB_ANDROID_APP_ID: ${{ secrets.ADMOB_ANDROID_APP_ID }}
+          ADMOB_ANDROID_BANNER_ID: ${{ secrets.ADMOB_ANDROID_BANNER_ID }}
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          [[ -n "$ADMOB_ANDROID_APP_ID" ]] || missing+=(ADMOB_ANDROID_APP_ID)
+          [[ -n "$ADMOB_ANDROID_BANNER_ID" ]] || missing+=(ADMOB_ANDROID_BANNER_ID)
+          [[ -n "$ANDROID_UPLOAD_KEYSTORE_BASE64" ]] || missing+=(ANDROID_UPLOAD_KEYSTORE_BASE64)
+          [[ -n "$ANDROID_UPLOAD_STORE_PASSWORD" ]] || missing+=(ANDROID_UPLOAD_STORE_PASSWORD)
+          [[ -n "$ANDROID_UPLOAD_KEY_ALIAS" ]] || missing+=(ANDROID_UPLOAD_KEY_ALIAS)
+          [[ -n "$ANDROID_UPLOAD_KEY_PASSWORD" ]] || missing+=(ANDROID_UPLOAD_KEY_PASSWORD)
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required production secrets: ${missing[*]}"
+            exit 1
+          fi
+
+          if [[ ! "$ADMOB_ANDROID_APP_ID" =~ ^ca-app-pub-[0-9]{16}~[0-9]{10}$ ]]; then
+            echo "::error::ADMOB_ANDROID_APP_ID is not a valid Android AdMob app ID."
+            exit 1
+          fi
+          if [[ ! "$ADMOB_ANDROID_BANNER_ID" =~ ^ca-app-pub-[0-9]{16}/[0-9]{10}$ ]]; then
+            echo "::error::ADMOB_ANDROID_BANNER_ID is not a valid AdMob banner unit ID."
+            exit 1
+          fi
+          if [[ "$ADMOB_ANDROID_APP_ID" == "ca-app-pub-3940256099942544~3347511713" ]]; then
+            echo "::error::The Google sample AdMob app ID cannot be used for production."
+            exit 1
+          fi
+          if [[ "$ADMOB_ANDROID_BANNER_ID" == "ca-app-pub-3940256099942544/9214589741" ]]; then
+            echo "::error::The Google test banner ID cannot be used for production."
+            exit 1
+          fi
+          if [[ "${ADMOB_ANDROID_APP_ID%%~*}" != "${ADMOB_ANDROID_BANNER_ID%%/*}" ]]; then
+            echo "::error::The AdMob app and banner IDs must belong to the same publisher."
+            exit 1
+          fi
+
+      - name: Install exact dependencies
+        run: npm ci
+
+      - name: Stage runner-only production configuration
+        shell: bash
+        env:
+          ADMOB_ANDROID_APP_ID: ${{ secrets.ADMOB_ANDROID_APP_ID }}
+          ADMOB_ANDROID_BANNER_ID: ${{ secrets.ADMOB_ANDROID_BANNER_ID }}
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          keystore_path="$RUNNER_TEMP/ream-upload.jks"
+          if ! printf '%s' "$ANDROID_UPLOAD_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"; then
+            echo "::error::ANDROID_UPLOAD_KEYSTORE_BASE64 could not be decoded."
+            exit 1
+          fi
+          if [[ ! -s "$keystore_path" ]]; then
+            echo "::error::The decoded Android upload keystore is empty."
+            exit 1
+          fi
+          chmod 600 "$keystore_path"
+
+          if ! keytool -list \
+            -keystore "$keystore_path" \
+            -storepass:env ANDROID_UPLOAD_STORE_PASSWORD \
+            -alias "$ANDROID_UPLOAD_KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error::The upload keystore, store password, or key alias is invalid."
+            exit 1
+          fi
+
+          export RELEASE_KEYSTORE_PATH="$keystore_path"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+
+          const required = [
+            'ADMOB_ANDROID_APP_ID',
+            'ADMOB_ANDROID_BANNER_ID',
+            'RELEASE_KEYSTORE_PATH',
+            'ANDROID_UPLOAD_STORE_PASSWORD',
+            'ANDROID_UPLOAD_KEY_ALIAS',
+            'ANDROID_UPLOAD_KEY_PASSWORD',
+          ]
+          for (const name of required) {
+            if (!process.env[name]) throw new Error(`Required environment value ${name} is missing.`)
+          }
+
+          function escapeJavaProperty(value) {
+            let escaped = ''
+            for (let index = 0; index < value.length; index += 1) {
+              const character = value[index]
+              const code = value.charCodeAt(index)
+              if (character === '\\') escaped += '\\\\'
+              else if (character === '\t') escaped += '\\t'
+              else if (character === '\n') escaped += '\\n'
+              else if (character === '\r') escaped += '\\r'
+              else if (character === '\f') escaped += '\\f'
+              else if (code < 0x20 || code > 0x7e) {
+                escaped += `\\u${code.toString(16).padStart(4, '0')}`
+              } else if ('=:#!'.includes(character) || (index === 0 && character === ' ')) {
+                escaped += `\\${character}`
+              } else escaped += character
+            }
+            return escaped
+          }
+
+          const stringsPath = 'android/app/src/main/res/values/strings.xml'
+          const stringsXml = fs.readFileSync(stringsPath, 'utf8')
+          const appIdPattern = /(<string\b(?=[^>]*\bname=["']admob_app_id["'])[^>]*>)[^<]*(<\/string>)/s
+          let replacements = 0
+          const updatedStrings = stringsXml.replace(appIdPattern, (_match, open, close) => {
+            replacements += 1
+            return `${open}${process.env.ADMOB_ANDROID_APP_ID}${close}`
+          })
+          if (replacements !== 1) throw new Error('Could not update the Android AdMob app ID resource.')
+          fs.writeFileSync(stringsPath, updatedStrings, 'utf8')
+
+          fs.writeFileSync(
+            '.env.production.local',
+            `VITE_ADMOB_TEST_MODE=false\nVITE_ADMOB_BANNER_ID=${process.env.ADMOB_ANDROID_BANNER_ID}\n`,
+            { encoding: 'utf8', mode: 0o600 },
+          )
+
+          const signingProperties = [
+            ['storeFile', process.env.RELEASE_KEYSTORE_PATH],
+            ['storePassword', process.env.ANDROID_UPLOAD_STORE_PASSWORD],
+            ['keyAlias', process.env.ANDROID_UPLOAD_KEY_ALIAS],
+            ['keyPassword', process.env.ANDROID_UPLOAD_KEY_PASSWORD],
+          ]
+            .map(([key, value]) => `${key}=${escapeJavaProperty(value)}`)
+            .join('\n')
+          fs.writeFileSync(
+            'android/keystore.properties',
+            `${signingProperties}\n`,
+            { encoding: 'ascii', mode: 0o600 },
+          )
+          NODE
+
+          chmod 600 .env.production.local android/keystore.properties
+          unset ANDROID_UPLOAD_KEYSTORE_BASE64
+          unset ANDROID_UPLOAD_STORE_PASSWORD
+          unset ANDROID_UPLOAD_KEY_ALIAS
+          unset ANDROID_UPLOAD_KEY_PASSWORD
+
+      - name: Build and sync production web assets
+        run: npm run android:sync
+
+      - name: Build signed production bundle
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon bundleRelease
+
+      - name: Verify signed bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          aab="android/app/build/outputs/bundle/release/app-release.aab"
+          mapping="android/app/build/outputs/mapping/release/mapping.txt"
+          test -f "$aab"
+          if [[ ! -s "$mapping" ]]; then
+            echo "::error::R8 did not produce the release mapping.txt file."
+            exit 1
+          fi
+          if ! jar tf "$aab" | grep -E '^META-INF/[^/]+\.(RSA|DSA|EC)$' >/dev/null; then
+            echo "::error::The production AAB does not contain a signing certificate."
+            exit 1
+          fi
+          if ! jarsigner -verify "$aab" >/dev/null 2>&1; then
+            echo "::error::The production AAB signature verification failed."
+            exit 1
+          fi
+
+      - name: Upload signed production AAB
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ream-production-aab-${{ github.run_number }}
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload private R8 mapping
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ream-production-r8-mapping-${{ github.run_number }}
+          path: android/app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: error
+          compression-level: 9
+          retention-days: 90
+
+      - name: Clean runner-only production files
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [[ -n "${RUNNER_TEMP:-}" && -d "$RUNNER_TEMP" ]]; then
+            rm -f -- "$RUNNER_TEMP/ream-upload.jks"
+          fi
+          rm -f -- .env.production.local android/keystore.properties

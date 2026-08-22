@@ -87,7 +87,14 @@ Launcher icons and light/dark splash screens are already generated from `assets/
 
 For Play Store release, copy `android/keystore.properties.example` to `android/keystore.properties`, point it to an upload keystore stored outside this repository, and replace every example password locally. The release build validates all four signing fields and the keystore path. Signing files and credentials are ignored by Git. CI alone uses `-PallowUnsignedRelease=true` to test optimized unsigned APK and bundle artifacts without possessing production secrets. The flag is rejected outside CI and never applies the release signing configuration.
 
-The package ID is permanent after the first Play Console release. Increment `appVersionCode` in `android/variables.gradle` for every upload and update `appVersionName` for user-facing releases. Before publishing, replace the Google sample AdMob app ID in `android/app/src/main/res/values/strings.xml` with Ream's public AdMob app ID; never ship the sample ID in a production bundle.
+After the production AdMob account and upload key are ready, the protected manual
+GitHub workflow can produce the signed AAB without committing configuration or
+credentials. Follow the exact secret and environment setup in
+[`docs/android-production-aab.md`](docs/android-production-aab.md). It only uploads
+the AAB and its separate R8 mapping as workflow artifacts; Play submission remains
+a separate manual step.
+
+The package ID is permanent after the first Play Console release. Increment `appVersionCode` in `android/variables.gradle` for every upload and update `appVersionName` for user-facing releases. For a local production build, replace the Google sample AdMob app ID in `android/app/src/main/res/values/strings.xml` with Ream's public AdMob app ID. The manual GitHub workflow instead injects that ID from its protected environment only on the runner; either path prevents the sample ID from reaching a production bundle.
 
 CI also runs Android build-tools `zipalign -c -P 16` against the optimized unsigned
 release APK so newly introduced native dependencies cannot silently regress the

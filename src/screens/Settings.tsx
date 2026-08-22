@@ -24,6 +24,22 @@ export function Settings() {
   const [adPrivacyRequired, setAdPrivacyRequired] = useState(
     isAdPrivacyOptionsRequired,
   );
+  const [adPrivacyBusy, setAdPrivacyBusy] = useState(false);
+  const [adPrivacyError, setAdPrivacyError] = useState('');
+
+  async function openAdPrivacyOptions(): Promise<void> {
+    setAdPrivacyBusy(true);
+    setAdPrivacyError('');
+    try {
+      await showAdPrivacyOptions();
+    } catch {
+      setAdPrivacyError(
+        'Privacy choices could not be opened. Check your connection and try again.',
+      );
+    } finally {
+      setAdPrivacyBusy(false);
+    }
+  }
 
   useEffect(() => {
     const onPrivacyState = (event: Event) => {
@@ -121,10 +137,17 @@ export function Settings() {
                 variant="ghost"
                 block
                 icon={SlidersHorizontal}
-                onClick={() => void showAdPrivacyOptions()}
+                disabled={adPrivacyBusy}
+                aria-busy={adPrivacyBusy}
+                onClick={() => void openAdPrivacyOptions()}
               >
-                Privacy and cookie settings
+                {adPrivacyBusy ? 'Opening privacy choices…' : 'Privacy and cookie settings'}
               </AnimatedButton>
+            ) : null}
+            {adPrivacyError ? (
+              <p className="ps-banner ps-banner--error" role="alert">
+                {adPrivacyError}
+              </p>
             ) : null}
             {confirmClear ? (
               <div className="ps-confirm" role="group" aria-label="Confirm clear recent files">
