@@ -446,6 +446,36 @@ function validateStoreAssets(repoRoot) {
   const featureAlt = readSectionAltText(listingAltMarkdown, 'Feature graphic', 'Graphic alt-text file')
   results.push(`Graphic alt text: icon ${characterCount(iconAlt)}, feature ${characterCount(featureAlt)} characters`)
 
+  const listingRoot = join(storeRoot, 'listing', 'en-US')
+  const listingLimits = [
+    ['title.txt', 30],
+    ['short-description.txt', 80],
+    ['full-description.txt', 4000],
+    ['release-notes-1.0.0.txt', 500],
+  ]
+  for (const [fileName, maxChars] of listingLimits) {
+    const listingPath = join(listingRoot, fileName)
+    if (!existsSync(listingPath)) fail(`Missing Play listing file: listing/en-US/${fileName}`)
+    const listingText = readFileSync(listingPath, 'utf8').trim()
+    const count = characterCount(listingText)
+    if (!listingText) fail(`Play listing file listing/en-US/${fileName} is empty.`)
+    if (count > maxChars) {
+      fail(`listing/en-US/${fileName} is ${count} characters; maximum is ${maxChars}.`)
+    }
+  }
+  results.push('Play listing copy is within title, short, full, and release-note limits')
+
+  const privacyPath = join(repoRoot, 'public', 'privacy.html')
+  if (!existsSync(privacyPath)) fail('Missing shipped privacy policy at public/privacy.html.')
+  const privacyHtml = readFileSync(privacyPath, 'utf8')
+  if (!privacyHtml.includes('<h1>Privacy policy</h1>')) {
+    fail('public/privacy.html must contain <h1>Privacy policy</h1>.')
+  }
+  if (!privacyHtml.includes('Ream processes the contents')) {
+    fail('public/privacy.html must state that Ream processes document contents on-device.')
+  }
+  results.push('Shipped privacy policy is present with required policy heading')
+
   const imageEntries = readdirSync(screenshotsRoot, { withFileTypes: true })
     .filter((entry) => entry.isFile() && ['.png', '.jpg', '.jpeg', '.webp'].includes(extname(entry.name).toLowerCase()))
     .map((entry) => entry.name)

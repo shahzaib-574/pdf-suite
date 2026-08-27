@@ -9,7 +9,7 @@ Public privacy policy (available after the Pages workflow is enabled on `main`):
 
 - Vite + React + TypeScript
 - GSAP (`@gsap/react`) for press/stagger on transforms only
-- `pdf-lib` in a Web Worker (merge, split, images→PDF, watermark, numbers, organize)
+- `pdf-lib` in a Web Worker (merge, split, images→PDF, watermark, numbers, organize, protect, Word→PDF)
 - PDF.js on the main thread (view, compress, PDF→images)
 - Geometry-aware PDF text extraction and native DOCX packaging (styled runs, spacing, tables, columns, and bundled on-device English OCR)
 - Capacitor 8 Android shell targeting Android API 36
@@ -26,11 +26,9 @@ Open the local URL on your computer or phone (same Wi‑Fi).
 
 ## Current tools
 
-Merge, split, images→PDF, scan (camera), compress, organize, watermark, page numbers, PDF→images, Word → PDF (simplified), and PDF → Word. PDF → Word rebuilds editable margins, styled text, paragraph spacing and indents, real numbered/bulleted lists, ruled or borderless tables, numeric alignment, columns, embedded images, mixed page orientations, and English OCR for scanned pages. The result screen reports which content was rebuilt and warns when a page required an image fallback.
+Merge, split, images→PDF (JPEG, PNG, and WebP), scan (camera), compress, organize, watermark, page numbers, Protect (AES-256 user-password lock, on-device), PDF→images, Word → PDF (simplified), and PDF → Word. PDF → Word rebuilds editable margins, styled text, paragraph spacing and indents, real numbered/bulleted lists, ruled or borderless tables, numeric alignment, columns, embedded images, mixed page orientations, and English OCR for scanned pages. The result screen reports which content was rebuilt and warns when a page required an image fallback.
 
 The reader supports continuous lazy-rendered pages, selectable text, document search, page thumbnails, PDF outlines, page jump, zoom/fit controls, mobile pinch gestures, and direct save/share actions.
-
-Protect is hidden because the bundled `pdf-lib` version cannot encrypt files. It should only be restored after an on-device encryption engine is added.
 
 ## Checks
 
@@ -122,5 +120,3 @@ the tracked [`store-assets/app-ads.txt`](store-assets/app-ads.txt) file unchange
 
 - One-time Pro via Play Billing
 - Additional downloadable OCR languages
-- Real password encryption
-- ZIP export for PDF→images

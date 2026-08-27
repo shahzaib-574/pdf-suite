@@ -1,6 +1,6 @@
 Work with PDFs without uploading your documents.
 
-Ream brings practical PDF tools into one focused app. Scan pages with your camera, read and search PDFs, convert between PDF and Word, combine documents, extract page ranges, turn images into PDFs, export PDF pages as images, compress files, reorder pages, add watermarks, and number pages.
+Ream brings practical PDF tools into one focused app. Scan pages with your camera, read and search PDFs, convert between PDF and Word, combine documents, extract page ranges, turn JPEG, PNG, and WebP images into PDFs, export PDF pages as images, compress files, reorder pages, add watermarks, number pages, and password-protect a PDF on this device.
 
 YOUR DOCUMENTS STAY ON YOUR DEVICE
 
@@ -9,7 +9,7 @@ Ream processes document contents on your device. There is no Ream account, and y
 SCAN AND CREATE
 
 • Capture paper pages with the camera and build a PDF
-• Combine photos into one PDF
+• Combine JPEG, PNG, and WebP images into one PDF
 • Merge multiple PDFs in the order you choose
 
 CONVERT DOCUMENTS
@@ -31,6 +31,7 @@ ORGANIZE AND FINISH
 • Extract a page range
 • Rotate, reorder, or remove pages
 • Add text watermarks and page numbers
+• Password-protect a PDF on this device
 • Compress a PDF for easier sharing
 
 DESIGNED FOR QUICK WORK

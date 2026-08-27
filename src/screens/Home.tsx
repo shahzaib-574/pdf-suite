@@ -16,7 +16,7 @@ const FILTERS: { id: FilterId; label: string; tools?: ToolId[] }[] = [
   {
     id: 'edit',
     label: 'Edit',
-    tools: ['merge', 'split', 'compress', 'organize', 'watermark', 'numbers'],
+    tools: ['merge', 'split', 'compress', 'organize', 'watermark', 'numbers', 'protect'],
   },
   { id: 'capture', label: 'Scan & view', tools: ['scan', 'view'] },
 ];

@@ -20,6 +20,7 @@ export function Result() {
   const job = lastJob.result;
   const images = job?.extra?.images;
   const conversion = job?.extra?.pdfToDocx;
+  const wordNotes = job?.extra?.wordToPdf;
   const [pageCount, setPageCount] = useState<number | undefined>(job?.pageCount);
   const [message, setMessage] = useState<string | null>(null);
   const [activeExport, setActiveExport] = useState<'save' | 'share' | null>(null);
@@ -187,6 +188,18 @@ export function Result() {
               ) : null}
             </div>
             {conversion.warnings.map((warning) => (
+              <p className="ps-conversion-report__warning" key={warning}>
+                {warning}
+              </p>
+            ))}
+          </section>
+        ) : null}
+        {wordNotes && wordNotes.warnings.length > 0 ? (
+          <section className="ps-conversion-report" aria-label="Conversion notes">
+            <div>
+              <h3>Conversion notes</h3>
+            </div>
+            {wordNotes.warnings.map((warning) => (
               <p className="ps-conversion-report__warning" key={warning}>
                 {warning}
               </p>

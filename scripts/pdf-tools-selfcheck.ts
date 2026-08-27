@@ -4,8 +4,17 @@ import { resolve } from 'node:path';
 
 import { PDFDocument, StandardFonts, degrees, toDegrees } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import {
+  buildDocx,
+  buildMinimalDocx,
+  documentXml,
+  paragraphXml,
+} from '../src/pdf/docxToPdf.test.ts';
 import type { TransferFile, WorkerRequest } from '../src/pdf/protocol.ts';
 import { runWorkerOperation } from '../src/pdf/worker.ts';
+
+const DOCX_MIME =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 function transfer(name: string, mime: string, bytes: Uint8Array): TransferFile {
   return {
@@ -161,6 +170,95 @@ const counted = await invoke({
 });
 if (counted.pageCount !== 2) throw new Error('page count failed');
 
+const protectedPdf = await invoke({
+  id: 9,
+  op: 'protect',
+  file: transfer('first.pdf', 'application/pdf', first),
+  input: { userPassword: 'ream-test' },
+});
+if (!protectedPdf.bytes || protectedPdf.filename !== 'protected.pdf') {
+  throw new Error('protect did not return protected.pdf');
+}
+const encryptedBytes = new Uint8Array(protectedPdf.bytes);
+if (
+  encryptedBytes.length < 4 ||
+  encryptedBytes[0] !== 0x25 ||
+  encryptedBytes[1] !== 0x50 ||
+  encryptedBytes[2] !== 0x44 ||
+  encryptedBytes[3] !== 0x46
+) {
+  throw new Error('protect output does not start with %PDF');
+}
+const encryptedLatin1 = new TextDecoder('latin1').decode(encryptedBytes);
+if (!encryptedLatin1.includes('/Encrypt') || !encryptedLatin1.includes('/AESV3')) {
+  throw new Error('protect output is missing AES-256 encryption dictionaries');
+}
+let loadedWithoutPassword = false;
+try {
+  await PDFDocument.load(encryptedBytes);
+  loadedWithoutPassword = true;
+} catch {
+  // EncryptedPDFError (or equivalent) is required.
+}
+if (loadedWithoutPassword) {
+  throw new Error('encrypted PDF loaded in pdf-lib without a password');
+}
+
+let rejectedEmptyPassword = false;
+try {
+  await invoke({
+    id: 10,
+    op: 'protect',
+    file: transfer('first.pdf', 'application/pdf', first),
+    input: { userPassword: '   ' },
+  });
+} catch (err) {
+  rejectedEmptyPassword =
+    err instanceof Error && err.message === 'Enter a password to protect this PDF.';
+}
+if (!rejectedEmptyPassword) {
+  throw new Error('protect accepted an empty password');
+}
+
+let rejectedUnsupportedImage = false;
+try {
+  await invoke({
+    id: 11,
+    op: 'imagesToPdf',
+    files: [transfer('pixel.gif', 'image/gif', Uint8Array.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]))],
+  });
+} catch (err) {
+  rejectedUnsupportedImage =
+    err instanceof Error &&
+    err.message.includes('JPEG') &&
+    err.message.includes('PNG') &&
+    err.message.includes('WebP');
+}
+if (!rejectedUnsupportedImage) {
+  throw new Error('imagesToPdf error did not mention JPEG, PNG, and WebP');
+}
+
+const canDecodeWebp =
+  typeof Blob === 'function' &&
+  typeof createImageBitmap === 'function' &&
+  typeof OffscreenCanvas === 'function';
+if (canDecodeWebp) {
+  const webp = Uint8Array.from(
+    Buffer.from(
+      'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA',
+      'base64',
+    ),
+  );
+  const webpPdf = await invoke({
+    id: 12,
+    op: 'imagesToPdf',
+    files: [transfer('pixel.webp', 'image/webp', webp)],
+  });
+  if (!webpPdf.bytes || webpPdf.pageCount !== 1) {
+    throw new Error('WebP image conversion failed');
+  }
+}
+
 let rejectedEmpty = false;
 try {
   await invoke({
@@ -181,4 +279,76 @@ if (toDegrees(rotationCheck.getPage(0).getRotation()) !== 180) {
   throw new Error('PDF rotation primitive is unavailable');
 }
 
-console.log('PDF_TOOLS_SELF_CHECK_OK fixture merge split images watermark numbers organize count');
+const namedDocx = await invoke({
+  id: 13,
+  op: 'docxToPdf',
+  file: transfer(
+    'Invoice-2024.docx',
+    DOCX_MIME,
+    await buildMinimalDocx(['Named from worker']),
+  ),
+});
+if (
+  !namedDocx.bytes ||
+  namedDocx.filename !== 'Invoice-2024.pdf' ||
+  (namedDocx.pageCount ?? 0) < 1
+) {
+  throw new Error(
+    `docxToPdf worker op failed: ${JSON.stringify({
+      filename: namedDocx.filename,
+      pageCount: namedDocx.pageCount,
+    })}`,
+  );
+}
+const namedHeader = new Uint8Array(namedDocx.bytes).slice(0, 4);
+if (
+  namedHeader[0] !== 0x25 ||
+  namedHeader[1] !== 0x50 ||
+  namedHeader[2] !== 0x44 ||
+  namedHeader[3] !== 0x46
+) {
+  throw new Error('docxToPdf worker output does not start with %PDF');
+}
+if (namedDocx.extra?.wordToPdf?.warnings?.length) {
+  throw new Error('Latin-only worker conversion must not attach glyph warnings');
+}
+
+const cjkDocx = await invoke({
+  id: 14,
+  op: 'docxToPdf',
+  file: transfer(
+    'cjk.docx',
+    DOCX_MIME,
+    await buildDocx({
+      documentXml: documentXml(paragraphXml('你好世界')),
+    }),
+  ),
+});
+if (
+  !cjkDocx.bytes ||
+  !cjkDocx.extra?.wordToPdf ||
+  cjkDocx.extra.wordToPdf.replacedChars <= 0 ||
+  cjkDocx.extra.wordToPdf.warnings.length === 0
+) {
+  throw new Error(
+    `docxToPdf worker must report replaced glyphs, got ${JSON.stringify(cjkDocx.extra)}`,
+  );
+}
+
+let rejectedBadDocx = false;
+try {
+  await invoke({
+    id: 15,
+    op: 'docxToPdf',
+    file: transfer('nope.txt', 'text/plain', Uint8Array.from([1, 2, 3, 4])),
+  });
+} catch (err) {
+  rejectedBadDocx = err instanceof Error && /docx/i.test(err.message);
+}
+if (!rejectedBadDocx) {
+  throw new Error('docxToPdf worker accepted a non-docx payload');
+}
+
+console.log(
+  'PDF_TOOLS_SELF_CHECK_OK fixture merge split images watermark numbers organize count protect docx',
+);
