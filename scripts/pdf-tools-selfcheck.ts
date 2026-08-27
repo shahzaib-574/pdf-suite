@@ -4,8 +4,17 @@ import { resolve } from 'node:path';
 
 import { PDFDocument, StandardFonts, degrees, toDegrees } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import {
+  buildDocx,
+  buildMinimalDocx,
+  documentXml,
+  paragraphXml,
+} from '../src/pdf/docxToPdf.test.ts';
 import type { TransferFile, WorkerRequest } from '../src/pdf/protocol.ts';
 import { runWorkerOperation } from '../src/pdf/worker.ts';
+
+const DOCX_MIME =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 function transfer(name: string, mime: string, bytes: Uint8Array): TransferFile {
   return {
@@ -270,6 +279,76 @@ if (toDegrees(rotationCheck.getPage(0).getRotation()) !== 180) {
   throw new Error('PDF rotation primitive is unavailable');
 }
 
+const namedDocx = await invoke({
+  id: 13,
+  op: 'docxToPdf',
+  file: transfer(
+    'Invoice-2024.docx',
+    DOCX_MIME,
+    await buildMinimalDocx(['Named from worker']),
+  ),
+});
+if (
+  !namedDocx.bytes ||
+  namedDocx.filename !== 'Invoice-2024.pdf' ||
+  (namedDocx.pageCount ?? 0) < 1
+) {
+  throw new Error(
+    `docxToPdf worker op failed: ${JSON.stringify({
+      filename: namedDocx.filename,
+      pageCount: namedDocx.pageCount,
+    })}`,
+  );
+}
+const namedHeader = new Uint8Array(namedDocx.bytes).slice(0, 4);
+if (
+  namedHeader[0] !== 0x25 ||
+  namedHeader[1] !== 0x50 ||
+  namedHeader[2] !== 0x44 ||
+  namedHeader[3] !== 0x46
+) {
+  throw new Error('docxToPdf worker output does not start with %PDF');
+}
+if (namedDocx.extra?.wordToPdf?.warnings?.length) {
+  throw new Error('Latin-only worker conversion must not attach glyph warnings');
+}
+
+const cjkDocx = await invoke({
+  id: 14,
+  op: 'docxToPdf',
+  file: transfer(
+    'cjk.docx',
+    DOCX_MIME,
+    await buildDocx({
+      documentXml: documentXml(paragraphXml('你好世界')),
+    }),
+  ),
+});
+if (
+  !cjkDocx.bytes ||
+  !cjkDocx.extra?.wordToPdf ||
+  cjkDocx.extra.wordToPdf.replacedChars <= 0 ||
+  cjkDocx.extra.wordToPdf.warnings.length === 0
+) {
+  throw new Error(
+    `docxToPdf worker must report replaced glyphs, got ${JSON.stringify(cjkDocx.extra)}`,
+  );
+}
+
+let rejectedBadDocx = false;
+try {
+  await invoke({
+    id: 15,
+    op: 'docxToPdf',
+    file: transfer('nope.txt', 'text/plain', Uint8Array.from([1, 2, 3, 4])),
+  });
+} catch (err) {
+  rejectedBadDocx = err instanceof Error && /docx/i.test(err.message);
+}
+if (!rejectedBadDocx) {
+  throw new Error('docxToPdf worker accepted a non-docx payload');
+}
+
 console.log(
-  'PDF_TOOLS_SELF_CHECK_OK fixture merge split images watermark numbers organize count protect',
+  'PDF_TOOLS_SELF_CHECK_OK fixture merge split images watermark numbers organize count protect docx',
 );

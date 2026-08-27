@@ -9,7 +9,7 @@ Public privacy policy (available after the Pages workflow is enabled on `main`):
 
 - Vite + React + TypeScript
 - GSAP (`@gsap/react`) for press/stagger on transforms only
-- `pdf-lib` in a Web Worker (merge, split, images→PDF, watermark, numbers, organize, protect)
+- `pdf-lib` in a Web Worker (merge, split, images→PDF, watermark, numbers, organize, protect, Word→PDF)
 - PDF.js on the main thread (view, compress, PDF→images)
 - Geometry-aware PDF text extraction and native DOCX packaging (styled runs, spacing, tables, columns, and bundled on-device English OCR)
 - Capacitor 8 Android shell targeting Android API 36

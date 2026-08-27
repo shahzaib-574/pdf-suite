@@ -127,6 +127,7 @@ function toJobOk(
     bytes: new Uint8Array(res.bytes),
     filename: res.filename ?? fallbackName,
     pageCount: res.pageCount,
+    extra: res.extra,
   };
 }
 
@@ -231,13 +232,13 @@ export const engine: PdfEngine = {
       throw new Error(humanError(err));
     }
   },
-  async docxToPdf(file) {
-    try {
-      const { docxToPdf } = await import('./docxToPdf');
-      return await docxToPdf(file);
-    } catch (err) {
-      return { ok: false, message: humanError(err) };
-    }
+  docxToPdf(file) {
+    const packed = packFile(file);
+    return workerJob(
+      { op: 'docxToPdf', file: packed },
+      transferOf(packed),
+      'document.pdf',
+    );
   },
   async pdfToDocx(file, onProgress) {
     try {

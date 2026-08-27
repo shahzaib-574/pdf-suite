@@ -359,9 +359,33 @@ async function pageCount(file: TransferFile): Promise<number> {
   return src.getPageCount();
 }
 
+async function docxToPdfOp(
+  file: TransferFile,
+): Promise<Pick<WorkerSuccess, 'bytes' | 'filename' | 'pageCount' | 'extra'>> {
+  const { docxToPdf } = await import('./docxToPdf');
+  const result = await docxToPdf({
+    name: file.name,
+    mime: file.mime,
+    bytes: bytesOf(file),
+  });
+  if (!result.ok) {
+    throw new Error(result.message);
+  }
+  const copy = new Uint8Array(result.bytes.byteLength);
+  copy.set(result.bytes);
+  return {
+    bytes: copy.buffer as ArrayBuffer,
+    filename: result.filename,
+    pageCount: result.pageCount ?? 0,
+    extra: result.extra?.wordToPdf
+      ? { wordToPdf: result.extra.wordToPdf }
+      : undefined,
+  };
+}
+
 export async function runWorkerOperation(
   req: WorkerRequest,
-): Promise<Pick<WorkerSuccess, 'bytes' | 'filename' | 'pageCount'>> {
+): Promise<Pick<WorkerSuccess, 'bytes' | 'filename' | 'pageCount' | 'extra'>> {
   switch (req.op) {
     case 'merge':
       return merge(req.files);
@@ -379,6 +403,8 @@ export async function runWorkerOperation(
       return organize(req.file, req.ops);
     case 'pageCount':
       return { pageCount: await pageCount(req.file) };
+    case 'docxToPdf':
+      return docxToPdfOp(req.file);
     default: {
       const _never: never = req;
       throw new Error(`Unknown PDF worker operation: ${JSON.stringify(_never)}`);
@@ -406,6 +432,7 @@ if (typeof self !== 'undefined') {
             bytes: result.bytes,
             filename: result.filename,
             pageCount: result.pageCount,
+            extra: result.extra,
           },
           transfer,
         );
