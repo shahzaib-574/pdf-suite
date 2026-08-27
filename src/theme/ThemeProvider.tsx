@@ -1,38 +1,42 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
-
-export type Theme = 'dark' | 'light';
-
-export type ThemeContextValue = {
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
-  toggleTheme: () => void;
-  reducedMotion: boolean;
-  setReducedMotion: (on: boolean) => void;
-};
+import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core';
+import { ThemeContext, type Theme } from './context';
 
 const STORAGE_KEY = 'pdf.theme';
-const DARK_THEME_COLOR = '#11101b';
-const LIGHT_THEME_COLOR = '#f7f6fb';
-
-const ThemeContext = createContext<ThemeContextValue | null>(null);
+const MOTION_STORAGE_KEY = 'pdf.reducedMotion';
+const DARK_THEME_COLOR = '#13141d';
+const LIGHT_THEME_COLOR = '#eef1f7';
 
 function readStoredTheme(): Theme {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === 'light' || raw === 'dark') return raw;
+    if (raw === 'light' || raw === 'dark' || raw === 'system') return raw;
   } catch {
     // private mode / blocked storage
   }
-  return 'light';
+  return 'system';
+}
+
+function readSystemTheme(): Exclude<Theme, 'system'> {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function readStoredMotion(): boolean | null {
+  try {
+    const raw = localStorage.getItem(MOTION_STORAGE_KEY);
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+  } catch {
+    // private mode / blocked storage
+  }
+  return null;
 }
 
 function applyTheme(theme: Theme): void {
@@ -62,24 +66,44 @@ function applyReducedMotion(on: boolean, userSet: boolean): void {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
     const initial = readStoredTheme();
-    applyTheme(initial);
+    applyTheme(initial === 'system' ? readSystemTheme() : initial);
     return initial;
   });
-  const [reducedMotion, setReducedMotionState] = useState(() =>
-    typeof window !== 'undefined'
-      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      : false,
+  const [systemTheme, setSystemTheme] = useState<Exclude<Theme, 'system'>>(
+    readSystemTheme,
   );
-  const userMotion = useRef<boolean | null>(null);
+  const [storedMotion] = useState<boolean | null>(readStoredMotion);
+  const userMotion = useRef<boolean | null>(storedMotion);
+  const [reducedMotion, setReducedMotionState] = useState(() =>
+    storedMotion ??
+      (typeof window !== 'undefined'
+        ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        : false),
+  );
+
+  const resolvedTheme = theme === 'system' ? systemTheme : theme;
 
   useEffect(() => {
-    applyTheme(theme);
+    applyTheme(resolvedTheme);
+    if (Capacitor.isNativePlatform()) {
+      void SystemBars.setStyle({
+        style:
+          resolvedTheme === 'dark' ? SystemBarsStyle.Dark : SystemBarsStyle.Light,
+      }).catch(() => undefined);
+    }
     try {
       localStorage.setItem(STORAGE_KEY, theme);
     } catch {
       // ignore quota / private mode
     }
-  }, [theme]);
+  }, [resolvedTheme, theme]);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const sync = () => setSystemTheme(mq.matches ? 'dark' : 'light');
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -98,11 +122,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setThemeState((current) => (current === 'dark' ? 'light' : 'dark'));
-  }, []);
+    setThemeState(resolvedTheme === 'dark' ? 'light' : 'dark');
+  }, [resolvedTheme]);
 
   const setReducedMotion = useCallback((on: boolean) => {
     userMotion.current = on;
+    try {
+      localStorage.setItem(MOTION_STORAGE_KEY, String(on));
+    } catch {
+      // ignore quota / private mode
+    }
     applyReducedMotion(on, true);
     setReducedMotionState(on);
   }, []);
@@ -110,23 +139,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       theme,
+      resolvedTheme,
       setTheme,
       toggleTheme,
       reducedMotion,
       setReducedMotion,
     }),
-    [theme, setTheme, toggleTheme, reducedMotion, setReducedMotion],
+    [theme, resolvedTheme, setTheme, toggleTheme, reducedMotion, setReducedMotion],
   );
 
   return (
     <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
   );
-}
-
-export function useTheme(): ThemeContextValue {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) {
-    throw new Error('useTheme must be used within ThemeProvider');
-  }
-  return ctx;
 }

@@ -5,10 +5,10 @@ import { engine } from '../pdf';
 import type { PickedFile } from '../lib/types';
 import {
   formatBytes,
+  saveBytes,
+  saveImageBlobs,
   shareOrDownload,
   shareOrDownloadBlobs,
-  downloadBytes,
-  downloadBlob,
 } from '../store/files';
 import { lastJob, setCurrentViewer } from '../store/lastJob';
 import { saveRecent } from '../store/recents';
@@ -19,8 +19,11 @@ let savedResult: typeof lastJob.result = null;
 export function Result() {
   const job = lastJob.result;
   const images = job?.extra?.images;
+  const conversion = job?.extra?.pdfToDocx;
+  const wordNotes = job?.extra?.wordToPdf;
   const [pageCount, setPageCount] = useState<number | undefined>(job?.pageCount);
   const [message, setMessage] = useState<string | null>(null);
+  const [activeExport, setActiveExport] = useState<'save' | 'share' | null>(null);
 
   useEffect(() => {
     if (!job) return;
@@ -37,14 +40,7 @@ export function Result() {
         });
       }
     }
-    if (job.filename.toLowerCase().endsWith('.docx')) {
-      setPageCount(job.pageCount);
-      return;
-    }
-    if (job.pageCount != null) {
-      setPageCount(job.pageCount);
-      return;
-    }
+    if (job.filename.toLowerCase().endsWith('.docx') || job.pageCount != null) return;
     if (job.bytes.byteLength === 0) return;
     let cancelled = false;
     const file: PickedFile = {
@@ -102,38 +98,49 @@ export function Result() {
 
   async function onShare(): Promise<void> {
     setMessage(null);
+    setActiveExport('share');
     try {
       if (hasImages && images) {
-        await shareOrDownloadBlobs(images, 'page');
+        const result = await shareOrDownloadBlobs(images, done.filename);
+        if (result.status === 'cancelled') return;
         return;
       }
       if (hasFile) {
-        await shareOrDownload(
+        const result = await shareOrDownload(
           done.bytes,
           done.filename,
           isDocx ? docxMime : 'application/pdf',
         );
+        if (result.status === 'cancelled') return;
       }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Share failed');
+    } finally {
+      setActiveExport(null);
     }
   }
 
-  function onSave(): void {
-    if (hasImages && images) {
-      images.forEach((blob, index) => {
-        const type = blob.type || 'image/jpeg';
-        const ext = type.includes('png') ? 'png' : 'jpg';
-        downloadBlob(blob, `page-${String(index + 1).padStart(2, '0')}.${ext}`);
-      });
-      return;
-    }
-    if (hasFile) {
-      downloadBytes(
-        done.bytes,
-        done.filename,
-        isDocx ? docxMime : 'application/pdf',
-      );
+  async function onSave(): Promise<void> {
+    setMessage(null);
+    setActiveExport('save');
+    try {
+      if (hasImages && images) {
+        const result = await saveImageBlobs(images, done.filename);
+        if (result.status === 'cancelled') return;
+        return;
+      }
+      if (hasFile) {
+        const result = await saveBytes(
+          done.bytes,
+          done.filename,
+          isDocx ? docxMime : 'application/pdf',
+        );
+        if (result.status === 'cancelled') return;
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setActiveExport(null);
     }
   }
 
@@ -159,40 +166,98 @@ export function Result() {
             ) : null}
           </div>
         </div>
+        {conversion ? (
+          <section className="ps-conversion-report" aria-label="PDF to Word conversion quality">
+            <div>
+              <h3>Conversion quality</h3>
+              <p>
+                Editable structure was rebuilt on this device. Review complex fonts and forms
+                before sharing the Word file.
+              </p>
+            </div>
+            <div className="ps-meta">
+              <span>{conversion.editablePages} editable page{conversion.editablePages === 1 ? '' : 's'}</span>
+              {conversion.tables > 0 ? (
+                <span>{conversion.tables} table{conversion.tables === 1 ? '' : 's'}</span>
+              ) : null}
+              {conversion.columnGroups > 0 ? (
+                <span>{conversion.columnGroups} column group{conversion.columnGroups === 1 ? '' : 's'}</span>
+              ) : null}
+              {conversion.images > 0 ? (
+                <span>{conversion.images} image{conversion.images === 1 ? '' : 's'}</span>
+              ) : null}
+            </div>
+            {conversion.warnings.map((warning) => (
+              <p className="ps-conversion-report__warning" key={warning}>
+                {warning}
+              </p>
+            ))}
+          </section>
+        ) : null}
+        {wordNotes && wordNotes.warnings.length > 0 ? (
+          <section className="ps-conversion-report" aria-label="Conversion notes">
+            <div>
+              <h3>Conversion notes</h3>
+            </div>
+            {wordNotes.warnings.map((warning) => (
+              <p className="ps-conversion-report__warning" key={warning}>
+                {warning}
+              </p>
+            ))}
+          </section>
+        ) : null}
         {message ? (
           <p className="ps-banner ps-banner--error" role="alert">
             {message}
           </p>
         ) : null}
         <div className="ps-actions">
-          <AnimatedButton
-            block
-            icon={Eye}
-            disabled={!hasPdf}
-            onClick={openViewer}
-          >
-            Open
-          </AnimatedButton>
+          {hasPdf ? (
+            <AnimatedButton block icon={Eye} onClick={openViewer}>
+              Open PDF
+            </AnimatedButton>
+          ) : (
+            <AnimatedButton
+              block
+              icon={Download}
+              disabled={(!hasFile && !hasImages) || activeExport !== null}
+              onClick={() => {
+                void onSave();
+              }}
+            >
+              {activeExport === 'save'
+                ? 'Saving…'
+                : isDocx
+                  ? 'Save Word file'
+                  : hasImages
+                    ? 'Save images'
+                    : 'Save file'}
+            </AnimatedButton>
+          )}
           <AnimatedButton
             block
             variant="ghost"
             icon={Share2}
-            disabled={!hasFile && !hasImages}
+            disabled={(!hasFile && !hasImages) || activeExport !== null}
             onClick={() => {
               void onShare();
             }}
           >
-            Share
+            {activeExport === 'share' ? 'Sharing…' : 'Share'}
           </AnimatedButton>
-          <AnimatedButton
-            block
-            variant="ghost"
-            icon={Download}
-            disabled={!hasFile && !hasImages}
-            onClick={onSave}
-          >
-            Save
-          </AnimatedButton>
+          {hasPdf ? (
+            <AnimatedButton
+              block
+              variant="ghost"
+              icon={Download}
+              disabled={activeExport !== null}
+              onClick={() => {
+                void onSave();
+              }}
+            >
+              {activeExport === 'save' ? 'Saving…' : 'Save PDF'}
+            </AnimatedButton>
+          ) : null}
           <AnimatedButton
             block
             variant="ghost"

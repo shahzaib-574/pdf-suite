@@ -3,6 +3,7 @@ import type {
   PageRange,
   ProtectInput,
   WatermarkInput,
+  WordToPdfReport,
 } from '../lib/types';
 
 export type TransferFile = {
@@ -19,7 +20,8 @@ export type WorkerOp =
   | { op: 'pageNumbers'; file: TransferFile }
   | { op: 'protect'; file: TransferFile; input: ProtectInput }
   | { op: 'organize'; file: TransferFile; ops: OrganizeOp[] }
-  | { op: 'pageCount'; file: TransferFile };
+  | { op: 'pageCount'; file: TransferFile }
+  | { op: 'docxToPdf'; file: TransferFile };
 
 export type WorkerRequest = WorkerOp & { id: number };
 
@@ -29,6 +31,9 @@ export type WorkerSuccess = {
   bytes?: ArrayBuffer;
   filename?: string;
   pageCount: number;
+  extra?: {
+    wordToPdf?: WordToPdfReport;
+  };
 };
 
 export type WorkerFailure = {

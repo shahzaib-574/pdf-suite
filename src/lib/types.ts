@@ -48,7 +48,25 @@ export type JobOk = {
   filename: string;
   pageCount?: number;
   mime?: string;
-  extra?: { images?: Blob[] };
+  extra?: {
+    images?: Blob[];
+    pdfToDocx?: PdfToDocxReport;
+    wordToPdf?: WordToPdfReport;
+  };
+};
+
+export type PdfToDocxReport = {
+  editablePages: number;
+  imageOnlyPages: number;
+  tables: number;
+  columnGroups: number;
+  images: number;
+  warnings: string[];
+};
+
+export type WordToPdfReport = {
+  replacedChars: number;
+  warnings: string[];
 };
 
 export type JobErr = {

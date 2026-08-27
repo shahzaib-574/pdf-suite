@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Ream app icon">
+  <defs>
+    <radialGradient id="background" cx="0" cy="0" r="1" gradientTransform="translate(176 120) rotate(46) scale(550)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fbfbfe"/>
+      <stop offset="1" stop-color="#e7eaf3"/>
+    </radialGradient>
+    <linearGradient id="tile" x1="105" y1="89" x2="412" y2="431" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f9f9fd"/>
+      <stop offset="1" stop-color="#e9ebf4"/>
+    </linearGradient>
+    <filter id="tile-shadow" x="37" y="37" width="438" height="438" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="18" dy="20" stdDeviation="18" flood-color="#a8afc1" flood-opacity="0.42"/>
+      <feDropShadow dx="-14" dy="-14" stdDeviation="16" flood-color="#ffffff" flood-opacity="0.95"/>
+    </filter>
+    <filter id="mark-shadow" x="104" y="102" width="314" height="320" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="14" stdDeviation="11" flood-color="#5840cf" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#background)"/>
+  <circle cx="54" cy="84" r="92" fill="#dcd7ff" fill-opacity="0.38"/>
+  <circle cx="488" cy="452" r="130" fill="#bde8f8" fill-opacity="0.33"/>
+  <rect x="78" y="78" width="356" height="356" rx="92" fill="url(#tile)" stroke="#ffffff" stroke-width="2" filter="url(#tile-shadow)"/>
+  <image href="../../../assets/logo.svg" x="128" y="126" width="256" height="256" filter="url(#mark-shadow)"/>
+</svg>

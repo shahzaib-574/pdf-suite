@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="500" viewBox="0 0 1024 500" role="img" aria-label="Ream PDF tools feature graphic">
+  <defs>
+    <linearGradient id="background" x1="96" y1="18" x2="927" y2="496" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f6f5fc"/>
+      <stop offset="0.52" stop-color="#eef0f7"/>
+      <stop offset="1" stop-color="#e4e9f4"/>
+    </linearGradient>
+    <linearGradient id="action" x1="633" y1="346" x2="818" y2="411" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5840cf"/>
+      <stop offset="1" stop-color="#7869f2"/>
+    </linearGradient>
+    <filter id="raised" x="-20%" y="-20%" width="150%" height="160%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="14" dy="16" stdDeviation="15" flood-color="#aab2c4" flood-opacity="0.33"/>
+      <feDropShadow dx="-11" dy="-11" stdDeviation="13" flood-color="#ffffff" flood-opacity="0.88"/>
+    </filter>
+    <filter id="soft" x="-30%" y="-30%" width="170%" height="180%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="8" dy="10" stdDeviation="9" flood-color="#9da6bb" flood-opacity="0.28"/>
+      <feDropShadow dx="-7" dy="-7" stdDeviation="8" flood-color="#ffffff" flood-opacity="0.8"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="500" fill="url(#background)"/>
+  <circle cx="42" cy="46" r="154" fill="#d7d0ff" fill-opacity="0.42"/>
+  <circle cx="998" cy="458" r="184" fill="#bee9f8" fill-opacity="0.38"/>
+  <path d="M828 0h196v142c-55-8-108-40-196-92V0z" fill="#e0dcff" fill-opacity="0.42"/>
+
+  <g transform="translate(124 130)">
+    <rect width="60" height="60" rx="18" fill="#f4f5fa" stroke="#ffffff" stroke-width="2" filter="url(#soft)"/>
+    <image href="../../../assets/logo.svg" x="10" y="10" width="40" height="40"/>
+    <text x="78" y="41" fill="#242036" font-family="Arial, sans-serif" font-size="30" font-weight="700" letter-spacing="-1">Ream</text>
+  </g>
+
+  <text x="124" y="254" fill="#171526" font-family="Arial, sans-serif" font-size="52" font-weight="700" letter-spacing="-2.2">PDF work,</text>
+  <text x="124" y="314" fill="#171526" font-family="Arial, sans-serif" font-size="52" font-weight="700" letter-spacing="-2.2">kept on your device</text>
+  <text x="126" y="361" fill="#5b596b" font-family="Arial, sans-serif" font-size="20">Scan  ·  Convert  ·  Organize</text>
+
+  <g filter="url(#raised)">
+    <rect x="594" y="76" width="308" height="348" rx="42" fill="#f3f5fa" stroke="#ffffff" stroke-width="2"/>
+  </g>
+  <rect x="632" y="112" width="232" height="76" rx="21" fill="#e8eaf3" stroke="#d9deea"/>
+  <rect x="652" y="132" width="44" height="36" rx="10" fill="#ded8ff"/>
+  <path d="M666 143h16m-16 6h16m-16 6h10" fill="none" stroke="#5840cf" stroke-width="3" stroke-linecap="round"/>
+  <rect x="713" y="133" width="116" height="10" rx="5" fill="#222033" fill-opacity="0.86"/>
+  <rect x="713" y="153" width="84" height="8" rx="4" fill="#77778a"/>
+
+  <rect x="632" y="208" width="104" height="98" rx="22" fill="#eef0f6" stroke="#d9deea" filter="url(#soft)"/>
+  <rect x="760" y="208" width="104" height="98" rx="22" fill="#eef0f6" stroke="#d9deea" filter="url(#soft)"/>
+  <path d="M670 236h25v31h-25z" fill="none" stroke="#5840cf" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M688 236v8h7" fill="none" stroke="#5840cf" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M808 238v29m-12-12 12 12 12-12" fill="none" stroke="#197c74" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="656" y="289" fill="#626174" font-family="Arial, sans-serif" font-size="13" font-weight="700">SCAN</text>
+  <text x="778" y="289" fill="#626174" font-family="Arial, sans-serif" font-size="13" font-weight="700">EXPORT</text>
+
+  <rect x="632" y="334" width="232" height="54" rx="18" fill="url(#action)"/>
+  <text x="690" y="368" fill="#ffffff" font-family="Arial, sans-serif" font-size="17" font-weight="700">Choose a tool</text>
+  <path d="M818 353l9 8-9 8" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

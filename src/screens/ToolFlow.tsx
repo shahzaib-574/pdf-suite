@@ -18,7 +18,7 @@ import {
 } from '../store/lastJob';
 import { saveRecent } from '../store/recents';
 import { takePendingScan, takePendingScanError } from '../store/pendingScan';
-import { navigate } from './nav';
+import { goBack, navigate } from './nav';
 
 type ToolFlowProps = {
   id: ToolId;
@@ -34,6 +34,29 @@ const LEVELS: { id: CompressLevel; label: string }[] = [
   { id: 'balanced', label: 'Balanced' },
   { id: 'keep', label: 'High quality' },
 ];
+
+const TOOLS_WITH_OPTIONS = new Set<ToolId>([
+  'split',
+  'compress',
+  'organize',
+  'watermark',
+  'protect',
+]);
+
+const ACTION_LABELS: Record<Exclude<ToolId, 'view'>, string> = {
+  merge: 'Merge PDFs',
+  split: 'Extract pages',
+  images: 'Create PDF',
+  'pdf-images': 'Export images',
+  compress: 'Compress PDF',
+  scan: 'Create scanned PDF',
+  organize: 'Apply page changes',
+  watermark: 'Add watermark',
+  numbers: 'Add page numbers',
+  protect: 'Protect PDF',
+  'docx-pdf': 'Convert to PDF',
+  'pdf-docx': 'Convert to Word',
+};
 
 function acceptAttr(accept: ToolDef['accept']): string {
   if (accept === 'images') return 'image/*';
@@ -62,14 +85,26 @@ function wellCopy(id: ToolId, minFiles: number): { label: string; hint: string }
   }
 }
 
+function takeInitialScan(id: ToolId): {
+  files: PickedFile[];
+  error: string | null;
+} {
+  if (id !== 'scan') return { files: [], error: null };
+  return {
+    files: takePendingScan(),
+    error: takePendingScanError(),
+  };
+}
+
 export function ToolFlow({ id }: ToolFlowProps) {
   const tool = TOOL_BY_ID[id];
   const pro = usePro();
-  const [picked, setPicked] = useState<PickedFile[]>([]);
+  const [initialScan] = useState(() => takeInitialScan(id));
+  const [picked, setPicked] = useState<PickedFile[]>(initialScan.files);
   const [busy, setBusy] = useState(false);
   const [jobProgress, setJobProgress] = useState<number | undefined>();
   const [jobLabel, setJobLabel] = useState('Working on-device…');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialScan.error);
   const [pageCount, setPageCount] = useState(0);
   const [startPage, setStartPage] = useState(1);
   const [endPage, setEndPage] = useState(1);
@@ -82,9 +117,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const [thumbs, setThumbs] = useState<string[]>([]);
   const [pageOrder, setPageOrder] = useState<number[]>([]);
   const [removedPages, setRemovedPages] = useState<number[]>([]);
-  const [pageRotations, setPageRotations] = useState<Record<number, 0 | 90 | 180 | 270>>(
-    {},
-  );
+  const [pageRotations, setPageRotations] = useState<Record<number, number>>({});
 
   const locked = !pro && tool.pro;
   const maxFiles = pro ? Number.POSITIVE_INFINITY : tool.maxFilesFree;
@@ -96,19 +129,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
   );
 
   useEffect(() => {
-    if (id !== 'scan') return;
-    const cameraFiles = takePendingScan();
-    const cameraError = takePendingScanError();
-    if (cameraFiles.length > 0) setPicked(cameraFiles);
-    if (cameraError) setError(cameraError);
-  }, [id]);
-
-  useEffect(() => {
     const file = picked[0];
-    if (!file || (tool.id !== 'split' && tool.id !== 'organize')) {
-      setPageCount(0);
-      return;
-    }
+    if (!file || (tool.id !== 'split' && tool.id !== 'organize')) return;
     let cancelled = false;
     void engine
       .pageCount(file)
@@ -120,6 +142,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
         setPageOrder(Array.from({ length: count }, (_, index) => index));
         setRemovedPages([]);
         setPageRotations({});
+        setRotateAll(false);
+        setReverse(false);
       })
       .catch(() => {
         if (!cancelled) setPageCount(0);
@@ -130,10 +154,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
   }, [picked, tool.id]);
 
   useEffect(() => {
-    if (tool.id !== 'organize' || !picked[0] || pageCount < 1) {
-      setThumbs([]);
-      return;
-    }
+    if (tool.id !== 'organize' || !picked[0] || pageCount < 1) return;
     let cancelled = false;
     const urls: string[] = [];
     const file = picked[0];
@@ -169,9 +190,11 @@ export function ToolFlow({ id }: ToolFlowProps) {
         setError(
           `Free limit is ${tool.maxFilesFree} file${tool.maxFilesFree === 1 ? '' : 's'}.`,
         );
+        resetPageState();
         setPicked(combined.slice(0, maxFiles));
         return;
       }
+      resetPageState();
       setPicked(combined);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not read file');
@@ -179,7 +202,20 @@ export function ToolFlow({ id }: ToolFlowProps) {
   }
 
   function onRemove(index: number): void {
+    resetPageState();
     setPicked((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function resetPageState(): void {
+    setPageCount(0);
+    setStartPage(1);
+    setEndPage(1);
+    setThumbs([]);
+    setPageOrder([]);
+    setRemovedPages([]);
+    setPageRotations({});
+    setRotateAll(false);
+    setReverse(false);
   }
 
   useEffect(() => {
@@ -235,7 +271,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
     const order = baseOrder.filter((pageIndex) => !removed.has(pageIndex));
     ops.push({ type: 'reorder', order });
     order.forEach((originalPageIndex, outputIndex) => {
-      const degrees = pageRotations[originalPageIndex] ?? 0;
+      const degrees = normalizeQuarterTurn(pageRotations[originalPageIndex] ?? 0);
       if (degrees !== 0) {
         ops.push({ type: 'rotate', pageIndex: outputIndex, degrees });
       }
@@ -244,21 +280,20 @@ export function ToolFlow({ id }: ToolFlowProps) {
   }
 
   function movePage(pageIndex: number, direction: -1 | 1): void {
-    setPageOrder((current) => {
-      const at = current.indexOf(pageIndex);
-      const target = at + direction;
-      if (at < 0 || target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[at], next[target]] = [next[target]!, next[at]!];
-      return next;
-    });
+    const at = pageOrder.indexOf(pageIndex);
+    const target = at + direction;
+    if (at < 0 || target < 0 || target >= pageOrder.length) return;
+    const next = [...pageOrder];
+    [next[at], next[target]] = [next[target]!, next[at]!];
+    setPageOrder(next);
+    setReverse(false);
   }
 
   function rotatePage(pageIndex: number): void {
-    setPageRotations((current) => {
-      const next = (((current[pageIndex] ?? 0) + 90) % 360) as 0 | 90 | 180 | 270;
-      return { ...current, [pageIndex]: next };
-    });
+    setPageRotations((current) => ({
+      ...current,
+      [pageIndex]: (current[pageIndex] ?? 0) + 90,
+    }));
   }
 
   function toggleRemoved(pageIndex: number): void {
@@ -270,11 +305,12 @@ export function ToolFlow({ id }: ToolFlowProps) {
   }
 
   function rotateEveryPage(): void {
+    const rotationDelta = rotateAll ? -90 : 90;
     setRotateAll((value) => !value);
     setPageRotations((current) => {
       const next = { ...current };
       for (let index = 0; index < pageCount; index++) {
-        next[index] = (((next[index] ?? 0) + 90) % 360) as 0 | 90 | 180 | 270;
+        next[index] = (next[index] ?? 0) + rotationDelta;
       }
       return next;
     });
@@ -375,21 +411,36 @@ export function ToolFlow({ id }: ToolFlowProps) {
     tool.id !== 'view' &&
     picked.length >= tool.minFiles &&
     extraValid();
+  const flowSteps = TOOLS_WITH_OPTIONS.has(tool.id)
+    ? ['Select', 'Adjust', 'Create']
+    : ['Select', 'Create'];
+  const activeStep =
+    picked.length < tool.minFiles
+      ? 0
+      : busy || flowSteps.length === 2
+        ? flowSteps.length - 1
+        : 1;
 
   return (
     <div className="ps-screen">
       <PageHeader
         title={tool.title}
         subtitle={tool.blurb}
-        onBack={() => navigate('#/')}
+        onBack={() => goBack('#/')}
       />
       <div className="ps-body">
-        <div className="ps-steps" aria-label="Progress">
-          <span className={picked.length > 0 ? 'ps-step is-complete' : 'ps-step is-active'}>
-            Select
-          </span>
-          <span className={picked.length > 0 ? 'ps-step is-active' : 'ps-step'}>Options</span>
-          <span className="ps-step">Export</span>
+        <div className="ps-steps" aria-label="Tool progress">
+          {flowSteps.map((step, index) => (
+            <span
+              key={step}
+              className={`ps-step${index < activeStep ? ' is-complete' : ''}${
+                index === activeStep ? ' is-active' : ''
+              }`}
+              aria-current={index === activeStep ? 'step' : undefined}
+            >
+              {step}
+            </span>
+          ))}
         </div>
         {locked ? (
           <p className="ps-banner ps-banner--lock" role="status">
@@ -488,11 +539,12 @@ export function ToolFlow({ id }: ToolFlowProps) {
 
         {tool.id === 'compress' ? (
           <>
-            <div className="ps-row">
+            <div className="ps-row" role="group" aria-label="Compression level">
               {LEVELS.map((level) => (
                 <AnimatedButton
                   key={level.id}
                   variant={compressLevel === level.id ? 'brass' : 'ghost'}
+                  aria-pressed={compressLevel === level.id}
                   onClick={() => setCompressLevel(level.id)}
                 >
                   {level.label}
@@ -533,21 +585,15 @@ export function ToolFlow({ id }: ToolFlowProps) {
         ) : null}
 
         {tool.id === 'protect' ? (
-          <>
-            <p className="ps-banner ps-banner--lock" role="status">
-              Password lock is not in this engine yet. pdf-lib cannot encrypt
-              files. Run still explains this if you try.
-            </p>
-            <label className="ps-field">
-              Password
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-              />
-            </label>
-          </>
+          <label className="ps-field">
+            Password
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
         ) : null}
 
         {tool.id === 'organize' ? (
@@ -627,15 +673,19 @@ export function ToolFlow({ id }: ToolFlowProps) {
                 Restore at least one page before running.
               </p>
             ) : null}
-            <div className="ps-row">
+            <div className="ps-row" role="group" aria-label="Bulk page adjustments">
               <AnimatedButton
                 variant={rotateAll ? 'brass' : 'ghost'}
+                aria-pressed={rotateAll}
+                disabled={pageCount === 0}
                 onClick={rotateEveryPage}
               >
                 Rotate all 90°
               </AnimatedButton>
               <AnimatedButton
                 variant={reverse ? 'brass' : 'ghost'}
+                aria-pressed={reverse}
+                disabled={pageCount === 0}
                 onClick={reversePages}
               >
                 Reverse order
@@ -645,9 +695,9 @@ export function ToolFlow({ id }: ToolFlowProps) {
         ) : null}
 
         {tool.id !== 'view' ? (
-          <div className="ps-actions">
+          <div className="ps-actions ps-actions--sticky">
             <AnimatedButton block disabled={!canRun} onClick={() => void run()}>
-              Run
+              {ACTION_LABELS[tool.id as Exclude<ToolId, 'view'>]}
             </AnimatedButton>
           </div>
         ) : (
@@ -661,4 +711,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
       />
     </div>
   );
+}
+
+function normalizeQuarterTurn(degrees: number): 0 | 90 | 180 | 270 {
+  return (((degrees % 360) + 360) % 360) as 0 | 90 | 180 | 270;
 }

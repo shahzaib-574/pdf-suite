@@ -1,4 +1,140 @@
+import groovy.json.JsonSlurper
+
 apply plugin: 'com.android.application'
+
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+def hasReleaseKeystore = keystorePropertiesFile.exists()
+def allowUnsignedRelease = project.findProperty('allowUnsignedRelease')?.toString()?.toBoolean() ?: false
+def productionAdMobAppId = 'ca-app-pub-9959568404035601~6472905937'
+def sampleAdMobBannerId = 'ca-app-pub-3940256099942544/9214589741'
+def placeholderAdMobBannerIds = [
+    'ca-app-pub-0000000000000000/0000000000',
+    'ca-app-pub-1234567890123456/1234567890',
+]
+def adMobStringsXml = file('src/main/res/values/strings.xml').getText('UTF-8')
+def adMobAppIdMatcher = adMobStringsXml =~ /(?s)<string\b(?=[^>]*\bname=["']admob_app_id["'])[^>]*>\s*([^<]+?)\s*<\/string>/
+def configuredAdMobAppId = adMobAppIdMatcher.find() ? adMobAppIdMatcher.group(1).trim() : ''
+def releaseMetadataFile = file('src/main/assets/public/release-metadata.json')
+def webAssetDirectory = file('src/main/assets/public')
+
+if (allowUnsignedRelease && System.getenv('CI')?.toBoolean() != true) {
+    throw new GradleException(
+        '-PallowUnsignedRelease=true is reserved for CI verification builds. ' +
+        'Configure production signing and AdMob values for local release builds.'
+    )
+}
+
+if (hasReleaseKeystore) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+
+    def requiredSigningProperties = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
+    def missingSigningProperties = requiredSigningProperties.findAll {
+        !keystoreProperties.getProperty(it)?.trim()
+    }
+    if (!missingSigningProperties.isEmpty()) {
+        throw new GradleException("keystore.properties is missing: ${missingSigningProperties.join(', ')}")
+    }
+
+    def configuredStoreFile = rootProject.file(keystoreProperties.getProperty('storeFile'))
+    if (!configuredStoreFile.isFile()) {
+        throw new GradleException("Release keystore does not exist: ${configuredStoreFile}")
+    }
+}
+
+def validateProductionRelease = tasks.register('validateProductionRelease') {
+    group = 'verification'
+    description = 'Validates signing and production AdMob configuration before any release build.'
+
+    doLast {
+        // The bypass always produces unsigned artifacts and is reserved for CI's build checks.
+        if (allowUnsignedRelease) {
+            logger.lifecycle('Skipping production credentials check for the unsigned CI release build.')
+            return
+        }
+
+        if (!hasReleaseKeystore) {
+            throw new GradleException(
+                'Release signing is not configured. Copy keystore.properties.example to ' +
+                'keystore.properties and provide the private upload-keystore values.'
+            )
+        }
+        if (configuredAdMobAppId != productionAdMobAppId) {
+            throw new GradleException(
+                "Releases must use Ream's exact AdMob app ID (${productionAdMobAppId}). " +
+                'Replace @string/admob_app_id before building.'
+            )
+        }
+
+        if (!releaseMetadataFile.isFile()) {
+            throw new GradleException(
+                'Production web metadata is missing. Configure VITE_ADMOB_BANNER_ID, then run ' +
+                '`npm run android:sync` before building a release.'
+            )
+        }
+
+        def releaseMetadata
+        try {
+            releaseMetadata = new JsonSlurper().parseText(releaseMetadataFile.getText('UTF-8'))
+        } catch (Exception exception) {
+            throw new GradleException(
+                "Production web metadata is invalid: ${releaseMetadataFile}",
+                exception
+            )
+        }
+
+        def metadataSchemaVersion = releaseMetadata?.schemaVersion
+        def metadataMode = releaseMetadata?.mode?.toString()
+        def metadataTestMode = releaseMetadata?.admob?.testMode
+        def metadataAudienceMode = releaseMetadata?.admob?.audienceMode?.toString()
+        def metadataUmpDebugGeography = releaseMetadata?.admob?.umpDebugGeography?.toString()?.trim()
+        def metadataUmpTestDeviceCount = releaseMetadata?.admob?.umpTestDeviceCount
+        def bakedBannerId = releaseMetadata?.admob?.bannerId?.toString()?.trim()
+        def validBannerId = bakedBannerId && (bakedBannerId ==~ /ca-app-pub-\d{16}\/\d{10}/)
+        def usesPlaceholderBannerId = placeholderAdMobBannerIds.contains(bakedBannerId)
+        def matchingPublisher = validBannerId && (
+            bakedBannerId.tokenize('/').first() == productionAdMobAppId.tokenize('~').first()
+        )
+
+        if (metadataSchemaVersion != 2 || metadataMode != 'production' || metadataTestMode != false) {
+            throw new GradleException(
+                'The synchronized web assets are not the current production AdMob build. Set ' +
+                'VITE_ADMOB_TEST_MODE=false and run `npm run android:sync`.'
+            )
+        }
+        if (metadataUmpDebugGeography || metadataUmpTestDeviceCount != 0) {
+            throw new GradleException(
+                'UMP debug geography and test-device identifiers must not be baked into a production release.'
+            )
+        }
+        if (metadataAudienceMode != 'ADULTS_ONLY') {
+            throw new GradleException(
+                'The current ad configuration may be released only after the publisher confirms an ' +
+                'Ages 18 and over target audience and sets VITE_ADMOB_AUDIENCE_MODE=ADULTS_ONLY. ' +
+                'Teen- or child-inclusive distribution requires a fresh policy and SDK treatment review.'
+            )
+        }
+        if (!validBannerId || bakedBannerId == sampleAdMobBannerId || usesPlaceholderBannerId || !matchingPublisher) {
+            throw new GradleException(
+                'A valid non-test, non-placeholder VITE_ADMOB_BANNER_ID from the same AdMob publisher as the app ID ' +
+                'was not baked into the web build. Configure the production banner unit and run ' +
+                '`npm run android:sync`.'
+            )
+        }
+
+        def bannerPresentInBundle = fileTree(webAssetDirectory) {
+            include '**/*.js'
+        }.files.any { javascriptFile ->
+            javascriptFile.getText('UTF-8').contains(bakedBannerId)
+        }
+        if (!bannerPresentInBundle) {
+            throw new GradleException(
+                'The production banner ID metadata does not match the synchronized JavaScript assets. ' +
+                'Run `npm run android:sync` again before building a release.'
+            )
+        }
+    }
+}
 
 android {
     namespace = "com.reampdf.mobile"
@@ -7,8 +143,8 @@ android {
         applicationId "com.reampdf.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
+        versionCode rootProject.ext.appVersionCode
+        versionName rootProject.ext.appVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +152,24 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            release {
+                storeFile rootProject.file(keystoreProperties.getProperty('storeFile'))
+                storePassword keystoreProperties.getProperty('storePassword')
+                keyAlias keystoreProperties.getProperty('keyAlias')
+                keyPassword keystoreProperties.getProperty('keyPassword')
+            }
+        }
+    }
     buildTypes {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasReleaseKeystore && !allowUnsignedRelease) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
@@ -34,12 +184,19 @@ dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core:$androidxCoreVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+}
+
+// Every Android release-producing task passes through preReleaseBuild, including
+// direct/internal task invocation. This avoids task-name based validation gaps.
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach {
+    dependsOn(validateProductionRelease)
 }
 
 apply from: 'capacitor.build.gradle'

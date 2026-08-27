@@ -4,14 +4,14 @@ const config: CapacitorConfig = {
   appId: 'com.reampdf.mobile',
   appName: 'Ream',
   webDir: 'dist',
-  backgroundColor: '#f7f6fb',
+  backgroundColor: '#eef1f7',
   loggingBehavior: 'none',
   server: {
     androidScheme: 'https',
   },
   android: {
     allowMixedContent: false,
-    backgroundColor: '#f7f6fb',
+    backgroundColor: '#eef1f7',
   },
 };
 

@@ -1,0 +1,11 @@
+Welcome to Ream 1.0.0.
+
+• Scan, view, and search PDFs
+• Convert PDF to Word with on-device English OCR, and Word to PDF
+• Merge, extract, compress, reorder, rotate, remove, watermark, and number pages
+• Password-protect a PDF on this device
+• Build PDFs from JPEG, PNG, or WebP, or export pages as JPG
+• Reopen finished files from Recents
+• Choose light, dark, or reduced-motion preferences
+
+Document contents stay on your device unless you choose to save or share them.

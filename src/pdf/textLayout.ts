@@ -1,6 +1,8 @@
 import type {
   PdfBlock,
+  PdfListInfo,
   PdfParagraphLine,
+  PdfRuling,
   PdfTextLine,
   PdfTextRun,
   TextGlyph,
@@ -229,6 +231,50 @@ function paragraphLine(line: PdfTextLine): PdfParagraphLine {
   };
 }
 
+type ListMarker = {
+  kind: PdfListInfo['kind'];
+  prefixLength: number;
+  start?: number;
+};
+
+function listMarker(text: string): ListMarker | undefined {
+  const numbered = text.match(/^\s*(\d{1,3})[.)]\s+/);
+  if (numbered) {
+    return {
+      kind: 'number',
+      prefixLength: numbered[0].length,
+      start: Number(numbered[1]),
+    };
+  }
+  const bullet = text.match(/^\s*[•●◦▪‣]\s+/u) ?? text.match(/^\s*[-–—]\s+/u);
+  if (!bullet) return undefined;
+  return { kind: 'bullet', prefixLength: bullet[0].length };
+}
+
+function withoutLinePrefix(line: PdfTextLine, prefixLength: number): PdfParagraphLine {
+  let remaining = prefixLength;
+  const runs: PdfTextRun[] = [];
+  for (const run of line.runs) {
+    if (remaining >= run.text.length) {
+      remaining -= run.text.length;
+      continue;
+    }
+    const text = run.text.slice(remaining);
+    remaining = 0;
+    if (text.length > 0) runs.push({ ...run, text });
+  }
+  const text = line.text.slice(prefixLength).trimStart();
+  if (runs[0]) runs[0] = { ...runs[0], text: runs[0].text.trimStart() };
+  return {
+    text,
+    fontSize: line.fontSize,
+    runs: runs.filter((run) => run.text.length > 0),
+    x: line.x,
+    xEnd: line.xEnd,
+    y: line.y,
+  };
+}
+
 function alignmentOf(
   line: PdfTextLine,
   pageWidth: number,
@@ -254,23 +300,60 @@ function paraFromLines(lines: PdfTextLine[], pageWidth = 612): PdfBlock[] {
   }
   const normalLeading = median(candidateLeadings) || typical * 1.2;
   const groups: Extract<PdfBlock, { kind: 'para' }>[] = [];
+  const baseX = Math.min(...lines.map((line) => line.x));
+  let listSequence = 0;
   for (const line of lines) {
-    const heading =
-      line.text.length < 120 &&
-      (line.fontSize >= headingSize || (line.bold && line.fontSize >= typical * 1.16));
+    const marker = listMarker(line.text);
+    const heading = marker
+      ? false
+      : line.text.length < 120 &&
+        (line.fontSize >= headingSize || (line.bold && line.fontSize >= typical * 1.16));
     const alignment = alignmentOf(line, pageWidth);
     const prev = groups[groups.length - 1];
     const prevLine = prev?.lines[prev.lines.length - 1];
     const verticalGap = prevLine?.y != null ? prevLine.y - line.y : Number.POSITIVE_INFINITY;
+    let list: PdfListInfo | undefined;
+    if (marker) {
+      const restart =
+        !prev?.list ||
+        prev.list.kind !== marker.kind ||
+        marker.start === 1 ||
+        verticalGap > Math.max(normalLeading * 1.8, line.height * 2.1);
+      if (restart) listSequence += 1;
+      list = {
+        kind: marker.kind,
+        level: Math.max(0, Math.min(8, Math.round((line.x - baseX) / 24))),
+        sequence: listSequence,
+        start: marker.start,
+      };
+    }
     const sameIndent = prev
       ? Math.abs(prev.x - line.x) < Math.max(5, line.fontSize * 0.75)
       : false;
+    const compatibleFirstLineIndent =
+      prev != null &&
+      !prev.list &&
+      prev.lines.length === 1 &&
+      prev.x > line.x &&
+      Math.abs(prev.x - line.x) <= Math.max(28, line.fontSize * 2.8);
     const sameKind = prev ? prev.heading === heading : false;
     const sameFlow =
-      prev?.alignment === alignment && prev.direction === line.direction && sameIndent;
+      prev?.alignment === alignment &&
+      prev.direction === line.direction &&
+      (sameIndent || compatibleFirstLineIndent);
     const followsNormally =
       verticalGap > 0 && verticalGap <= Math.max(normalLeading * 1.42, line.height * 1.65);
-    if (prev && sameKind && sameFlow && followsNormally && !heading) {
+    const continuesList =
+      prev?.list != null &&
+      !list &&
+      followsNormally &&
+      line.x >= prev.x - 2 &&
+      line.x - prev.x <= Math.max(42, line.fontSize * 3.8);
+    if (prev && continuesList) {
+      prev.lines.push(paragraphLine(line));
+      prev.xEnd = Math.max(prev.xEnd ?? line.xEnd, line.xEnd);
+      prev.bottom = Math.min(prev.bottom ?? line.y, line.y - line.height * 0.25);
+    } else if (prev && !prev.list && !list && sameKind && sameFlow && followsNormally && !heading) {
       prev.lines.push(paragraphLine(line));
       prev.xEnd = Math.max(prev.xEnd ?? line.xEnd, line.xEnd);
       prev.bottom = Math.min(prev.bottom ?? line.y, line.y - line.height * 0.25);
@@ -283,7 +366,7 @@ function paraFromLines(lines: PdfTextLine[], pageWidth = 612): PdfBlock[] {
     } else {
       groups.push({
         kind: 'para',
-        lines: [paragraphLine(line)],
+        lines: [marker ? withoutLinePrefix(line, marker.prefixLength) : paragraphLine(line)],
         heading,
         x: line.x,
         xEnd: line.xEnd,
@@ -292,8 +375,18 @@ function paraFromLines(lines: PdfTextLine[], pageWidth = 612): PdfBlock[] {
         lineSpacingPt: normalLeading,
         alignment,
         direction: line.direction,
+        list,
       });
     }
+  }
+  for (const group of groups) {
+    if (group.list || group.lines.length < 2) continue;
+    const xValues = group.lines.flatMap((line) => (line.x == null ? [] : [line.x]));
+    if (xValues.length === 0) continue;
+    const left = Math.min(...xValues);
+    const first = group.lines[0]?.x ?? left;
+    group.x = left;
+    if (Math.abs(first - left) >= 2) group.firstLineIndentPt = first - left;
   }
   return groups;
 }
@@ -341,6 +434,84 @@ function tableGeometry(
   return { x: xs[0] ?? 0, widths };
 }
 
+function uniqueCoordinates(values: number[], tolerance = 2): number[] {
+  const sorted = [...values].sort((a, b) => a - b);
+  const out: number[] = [];
+  for (const value of sorted) {
+    const previous = out[out.length - 1];
+    if (previous == null || Math.abs(previous - value) > tolerance) out.push(value);
+    else out[out.length - 1] = (previous + value) / 2;
+  }
+  return out;
+}
+
+function ruledTableGeometry(
+  lines: PdfTextLine[],
+  anchors: { x: number }[],
+  pageWidth: number,
+  rulings: PdfRuling[],
+): { x: number; widths: number[]; bordered: boolean } {
+  const fallback = tableGeometry(lines, anchors, pageWidth);
+  if (rulings.length === 0) return { ...fallback, bordered: false };
+  const top = Math.max(...lines.map((line) => line.y + line.height));
+  const bottom = Math.min(...lines.map((line) => line.y - line.height * 0.35));
+  const left = Math.min(...lines.map((line) => line.x));
+  const right = Math.max(...lines.map((line) => line.xEnd));
+  const verticals = uniqueCoordinates(
+    rulings
+      .filter((rule) => {
+        const ruleTop = Math.max(rule.y1, rule.y2);
+        const ruleBottom = Math.min(rule.y1, rule.y2);
+        const x = (rule.x1 + rule.x2) / 2;
+        return (
+          Math.abs(rule.x1 - rule.x2) <= 2.5 &&
+          ruleTop >= top - 12 &&
+          ruleBottom <= bottom + 12 &&
+          x >= left - 36 &&
+          x <= right + 72
+        );
+      })
+      .map((rule) => (rule.x1 + rule.x2) / 2),
+  );
+  const horizontals = uniqueCoordinates(
+    rulings
+      .filter((rule) => {
+        const ruleLeft = Math.min(rule.x1, rule.x2);
+        const ruleRight = Math.max(rule.x1, rule.x2);
+        const y = (rule.y1 + rule.y2) / 2;
+        return (
+          Math.abs(rule.y1 - rule.y2) <= 2.5 &&
+          ruleLeft <= left + 12 &&
+          ruleRight >= right - 12 &&
+          y >= bottom - 18 &&
+          y <= top + 18
+        );
+      })
+      .map((rule) => (rule.y1 + rule.y2) / 2),
+  );
+  const bordered = verticals.length >= 2 && horizontals.length >= 2;
+  if (!bordered || verticals.length < anchors.length + 1) {
+    return { ...fallback, bordered };
+  }
+  const widths = verticals.slice(1).map((x, index) => Math.max(18, x - verticals[index]!));
+  return { x: verticals[0] ?? fallback.x, widths, bordered: true };
+}
+
+function tableColumnAlignments(
+  rows: string[][],
+  headerRows: number,
+): Array<'left' | 'center' | 'right'> {
+  const cols = Math.max(1, ...rows.map((row) => row.length));
+  return Array.from({ length: cols }, (_, column) => {
+    const values = rows.slice(headerRows).map((row) => row[column]?.trim() ?? '').filter(Boolean);
+    if (values.length === 0) return 'left';
+    const numeric = values.filter((value) =>
+      /^\(?\s*[-+]?[$£€¥]?\s*\d[\d\s,.%/-]*\)?$/u.test(value),
+    ).length;
+    return numeric / values.length >= 0.6 ? 'right' : 'left';
+  });
+}
+
 function assignCells(
   line: PdfTextLine,
   anchors: { x: number }[],
@@ -375,7 +546,11 @@ function inferredHeaderRows(rows: string[][], firstLineBold: boolean): number {
     : 0;
 }
 
-function alignedTable(lines: PdfTextLine[], pageWidth = 612): PdfBlock | undefined {
+function alignedTable(
+  lines: PdfTextLine[],
+  pageWidth = 612,
+  rulings: PdfRuling[] = [],
+): PdfBlock | undefined {
   const anchors = clusterLineAnchors(lines);
   if (anchors.length < 2) return undefined;
   const rows: string[][] = [];
@@ -400,7 +575,8 @@ function alignedTable(lines: PdfTextLine[], pageWidth = 612): PdfBlock | undefin
     return undefined;
   }
   if (rows.length === 0) return undefined;
-  const geometry = tableGeometry(lines, anchors, pageWidth);
+  const headerRows = inferredHeaderRows(rows, lines[0]?.bold === true);
+  const geometry = ruledTableGeometry(lines, anchors, pageWidth, rulings);
   return {
     kind: 'table',
     rows,
@@ -408,12 +584,18 @@ function alignedTable(lines: PdfTextLine[], pageWidth = 612): PdfBlock | undefin
     columnWidthsPt: geometry.widths,
     top: Math.max(...lines.map((line) => line.y + line.height * 0.82)),
     bottom: Math.min(...lines.map((line) => line.y - line.height * 0.25)),
-    headerRows: inferredHeaderRows(rows, lines[0]?.bold === true),
+    headerRows,
+    columnAlignments: tableColumnAlignments(rows, headerRows),
+    bordered: geometry.bordered,
   };
 }
 
-function tableFromRun(run: PdfTextLine[], pageWidth = 612): PdfBlock | undefined {
-  const aligned = alignedTable(run, pageWidth);
+function tableFromRun(
+  run: PdfTextLine[],
+  pageWidth = 612,
+  rulings: PdfRuling[] = [],
+): PdfBlock | undefined {
+  const aligned = alignedTable(run, pageWidth, rulings);
   if (aligned) return aligned;
   if (run.length === 0) return undefined;
   const colCount = Math.max(...run.map((l) => l.cells.length));
@@ -423,7 +605,14 @@ function tableFromRun(run: PdfTextLine[], pageWidth = 612): PdfBlock | undefined
     while (cells.length < colCount) cells.push('');
     return cells;
   });
-  return { kind: 'table', rows };
+  const headerRows = inferredHeaderRows(rows, run[0]?.bold === true);
+  return {
+    kind: 'table',
+    rows,
+    headerRows,
+    columnAlignments: tableColumnAlignments(rows, headerRows),
+    bordered: false,
+  };
 }
 
 function consumeTable(
@@ -431,6 +620,7 @@ function consumeTable(
   start: number,
   anchors: { x: number; count: number }[],
   pageWidth: number,
+  rulings: PdfRuling[],
 ): { table: PdfBlock; next: number } | undefined {
   const rows: string[][] = [];
   let i = start;
@@ -466,7 +656,8 @@ function consumeTable(
   const cols = rows[0]?.filter(Boolean).length ?? 0;
   if (rows.length < 2 && cols < 3) return undefined;
   const used = lines.slice(start, i);
-  const geometry = tableGeometry(used, anchors, pageWidth);
+  const headerRows = inferredHeaderRows(rows, used[0]?.bold === true);
+  const geometry = ruledTableGeometry(used, anchors, pageWidth, rulings);
   return {
     table: {
       kind: 'table',
@@ -475,17 +666,23 @@ function consumeTable(
       columnWidthsPt: geometry.widths,
       top: Math.max(...used.map((line) => line.y + line.height * 0.82)),
       bottom: Math.min(...used.map((line) => line.y - line.height * 0.25)),
-      headerRows: inferredHeaderRows(rows, used[0]?.bold === true),
+      headerRows,
+      columnAlignments: tableColumnAlignments(rows, headerRows),
+      bordered: geometry.bordered,
     },
     next: i,
   };
 }
 
-export function blocksFromLines(lines: PdfTextLine[], pageWidth = 612): PdfBlock[] {
+export function blocksFromLines(
+  lines: PdfTextLine[],
+  pageWidth = 612,
+  rulings: PdfRuling[] = [],
+): PdfBlock[] {
   const ordered = [...lines].sort((a, b) => b.y - a.y || a.x - b.x);
   const anchors = clusterLineAnchors(ordered);
   if (anchors.length < 2) {
-    const fallback = tableFromRun(ordered, pageWidth);
+    const fallback = tableFromRun(ordered, pageWidth, rulings);
     if (fallback) return [fallback];
     return paraFromLines(ordered, pageWidth);
   }
@@ -495,7 +692,7 @@ export function blocksFromLines(lines: PdfTextLine[], pageWidth = 612): PdfBlock
     const cells = assignCells(ordered[i]!, anchors);
     const filled = cells.filter((c) => c.length > 0).length;
     if (filled >= 2) {
-      const taken = consumeTable(ordered, i, anchors, pageWidth);
+      const taken = consumeTable(ordered, i, anchors, pageWidth, rulings);
       if (taken) {
         out.push(taken.table);
         i = taken.next;
@@ -675,19 +872,16 @@ function splitColumns(
 }
 
 function blockTop(block: PdfBlock): number | undefined {
-  if (block.kind === 'image') return undefined;
   return block.top;
 }
 
 function blockBottom(block: PdfBlock): number | undefined {
-  if (block.kind === 'image') return undefined;
   return block.bottom;
 }
 
 function addBlockSpacing(blocks: PdfBlock[], pageHeight: number): PdfBlock[] {
   let previousBottom = pageHeight;
   for (const block of blocks) {
-    if (block.kind === 'image') continue;
     const top = blockTop(block);
     const bottom = blockBottom(block);
     if (top != null) {
@@ -699,6 +893,13 @@ function addBlockSpacing(blocks: PdfBlock[], pageHeight: number): PdfBlock[] {
     if (bottom != null) previousBottom = bottom;
   }
   return blocks;
+}
+
+export function orderAndSpaceBlocks(blocks: PdfBlock[], pageHeight: number): PdfBlock[] {
+  const ordered = [...blocks].sort(
+    (a, b) => (blockTop(b) ?? Number.NEGATIVE_INFINITY) - (blockTop(a) ?? Number.NEGATIVE_INFINITY),
+  );
+  return addBlockSpacing(ordered, pageHeight);
 }
 
 export function analyzePage(
@@ -730,15 +931,18 @@ export function analyzeGlyphs(
   glyphs: TextGlyph[],
   pageWidth: number,
   pageHeight = 792,
+  rulings: PdfRuling[] = [],
 ): PdfBlock[] {
   if (glyphs.length === 0) return [];
   const { header, columns, widthsPt, x } = splitGlyphColumns(glyphs, pageWidth);
   const blocks: PdfBlock[] = [...paraFromLines(clusterLines(header), pageWidth)];
   if (columns.length <= 1) {
-    blocks.push(...blocksFromLines(clusterLines(columns[0] ?? glyphs), pageWidth));
+    blocks.push(...blocksFromLines(clusterLines(columns[0] ?? glyphs), pageWidth, rulings));
     return addBlockSpacing(blocks, pageHeight);
   }
-  const columnBlocks = columns.map((col) => blocksFromLines(clusterLines(col), pageWidth));
+  const columnBlocks = columns.map((col) =>
+    blocksFromLines(clusterLines(col), pageWidth, rulings),
+  );
   const allColumnBlocks = columnBlocks.flat();
   blocks.push({
     kind: 'columns',
@@ -753,4 +957,35 @@ export function analyzeGlyphs(
 
 export function pageCharCount(lines: PdfTextLine[]): number {
   return lines.reduce((n, line) => n + line.text.replace(/\s/g, '').length, 0);
+}
+
+function coordinate(value: unknown, index: number): number | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const item = (value as Record<number, unknown>)[index];
+  const parsed = Number(item);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function rulingsFromOperatorList(
+  operatorList: { fnArray: ArrayLike<number>; argsArray: unknown[] },
+  constructPathOp: number,
+): PdfRuling[] {
+  const rulings: PdfRuling[] = [];
+  for (let index = 0; index < operatorList.fnArray.length; index++) {
+    if (operatorList.fnArray[index] !== constructPathOp) continue;
+    const args = operatorList.argsArray[index];
+    if (!Array.isArray(args)) continue;
+    const bounds = args[2];
+    const x1 = coordinate(bounds, 0);
+    const y1 = coordinate(bounds, 1);
+    const x2 = coordinate(bounds, 2);
+    const y2 = coordinate(bounds, 3);
+    if (x1 == null || y1 == null || x2 == null || y2 == null) continue;
+    const width = Math.abs(x2 - x1);
+    const height = Math.abs(y2 - y1);
+    if ((width <= 2.5 && height >= 8) || (height <= 2.5 && width >= 8)) {
+      rulings.push({ x1, y1, x2, y2 });
+    }
+  }
+  return rulings;
 }

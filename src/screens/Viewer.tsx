@@ -28,13 +28,14 @@ import type {
   PdfViewerSession,
   PdfViewerTextLayer,
 } from '../pdf/render';
-import { downloadBytes, shareOrDownload } from '../store/files';
+import { saveBytes, shareOrDownload } from '../store/files';
 import {
   currentViewerBytes,
   currentViewerName,
   lastJob,
 } from '../store/lastJob';
 import { getRecent } from '../store/recents';
+import { useTheme } from '../theme/context';
 import { navigate } from './nav';
 
 type ViewerProps = {
@@ -76,6 +77,7 @@ function touchDistance(event: ReactTouchEvent): number {
 }
 
 export function Viewer({ recentId }: ViewerProps) {
+  const { reducedMotion } = useTheme();
   const [name, setName] = useState('document.pdf');
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
   const [session, setSession] = useState<PdfViewerSession | null>(null);
@@ -89,6 +91,7 @@ export function Viewer({ recentId }: ViewerProps) {
   const [query, setQuery] = useState('');
   const [searchCursor, setSearchCursor] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
+  const [activeExport, setActiveExport] = useState<'save' | 'share' | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
@@ -219,9 +222,12 @@ export function Viewer({ recentId }: ViewerProps) {
       Math.min(session?.document.pageCount ? session.document.pageCount - 1 : 0, pageIndex),
     );
     const page = viewport.querySelector<HTMLElement>(`[data-page-index="${bounded}"]`);
-    page?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
+    page?.scrollIntoView({
+      behavior: smooth && !reducedMotion ? 'smooth' : 'auto',
+      block: 'start',
+    });
     setActivePage(bounded);
-  }, [session]);
+  }, [reducedMotion, session]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -279,10 +285,28 @@ export function Viewer({ recentId }: ViewerProps) {
   async function onShare(): Promise<void> {
     if (!bytes) return;
     setMessage(null);
+    setActiveExport('share');
     try {
-      await shareOrDownload(bytes, name, 'application/pdf');
+      const result = await shareOrDownload(bytes, name, 'application/pdf');
+      if (result.status === 'cancelled') return;
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Could not share this PDF');
+    } finally {
+      setActiveExport(null);
+    }
+  }
+
+  async function onSave(): Promise<void> {
+    if (!bytes) return;
+    setMessage(null);
+    setActiveExport('save');
+    try {
+      const result = await saveBytes(bytes, name, 'application/pdf');
+      if (result.status === 'cancelled') return;
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Could not save this PDF');
+    } finally {
+      setActiveExport(null);
     }
   }
 
@@ -383,12 +407,17 @@ export function Viewer({ recentId }: ViewerProps) {
               >
                 <Search size={18} />
               </ReaderIconButton>
-              <ReaderIconButton label="Share PDF" onClick={() => void onShare()}>
+              <ReaderIconButton
+                label={activeExport === 'share' ? 'Sharing PDF' : 'Share PDF'}
+                disabled={activeExport !== null}
+                onClick={() => void onShare()}
+              >
                 <Share2 size={18} />
               </ReaderIconButton>
               <ReaderIconButton
-                label="Save PDF"
-                onClick={() => bytes && downloadBytes(bytes, name, 'application/pdf')}
+                label={activeExport === 'save' ? 'Saving PDF' : 'Save PDF'}
+                disabled={!bytes || activeExport !== null}
+                onClick={() => void onSave()}
               >
                 <Download size={18} />
               </ReaderIconButton>

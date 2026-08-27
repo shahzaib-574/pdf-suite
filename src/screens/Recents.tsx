@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Clock3, Download, FileText, FolderOpen } from 'lucide-react';
 import { AnimatedButton, AppShell } from '../components';
 import type { RecentItem } from '../lib/types';
-import { downloadBytes, formatBytes } from '../store/files';
+import { formatBytes, saveBytes } from '../store/files';
 import { listRecents } from '../store/recents';
 import { navigate } from './nav';
 
@@ -23,6 +23,8 @@ function relativeDate(timestamp: number): string {
 
 export function Recents() {
   const [items, setItems] = useState<RecentItem[]>([]);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +35,19 @@ export function Recents() {
       cancelled = true;
     };
   }, []);
+
+  async function saveRecentFile(item: RecentItem): Promise<void> {
+    setExportError(null);
+    setSavingId(item.id);
+    try {
+      const result = await saveBytes(item.bytes, item.name, item.mime);
+      if (result.status === 'cancelled') return;
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : `Could not save ${item.name}`);
+    } finally {
+      setSavingId(null);
+    }
+  }
 
   return (
     <AppShell
@@ -56,39 +71,53 @@ export function Recents() {
             </AnimatedButton>
           </div>
         ) : (
-          <ul className="ps-library-list">
-            {items.map((item) => {
-              const isPdf =
-                item.mime === 'application/pdf' || item.name.toLowerCase().endsWith('.pdf');
-              const canOpen = isPdf && item.bytes.byteLength > 0;
-              return (
-                <li key={item.id} className="ps-library-item">
-                  <span className="ps-file-icon" aria-hidden="true">
-                    <FileText size={20} />
-                  </span>
-                  <button
-                    type="button"
-                    className="ps-library-item__main"
-                    disabled={!canOpen}
-                    onClick={() => navigate(`#/viewer?id=${encodeURIComponent(item.id)}`)}
-                  >
-                    <span className="ps-library-item__name">{item.name}</span>
-                    <span className="ps-library-item__meta tabular">
-                      {formatBytes(item.size)} · {relativeDate(item.createdAt)}
+          <>
+            {exportError ? (
+              <p className="ps-banner ps-banner--error" role="alert">
+                {exportError}
+              </p>
+            ) : null}
+            <ul className="ps-library-list">
+              {items.map((item) => {
+                const isPdf =
+                  item.mime === 'application/pdf' || item.name.toLowerCase().endsWith('.pdf');
+                const canOpen = item.bytes.byteLength > 0;
+                const saving = savingId === item.id;
+                return (
+                  <li key={item.id} className="ps-library-item">
+                    <span className="ps-file-icon" aria-hidden="true">
+                      <FileText size={20} />
                     </span>
-                  </button>
-                  <AnimatedButton
-                    variant="ghost"
-                    className="btn--icon ps-library-item__action"
-                    icon={Download}
-                    aria-label={`Save ${item.name}`}
-                    disabled={item.bytes.byteLength === 0}
-                    onClick={() => downloadBytes(item.bytes, item.name, item.mime)}
-                  />
-                </li>
-              );
-            })}
-          </ul>
+                    <button
+                      type="button"
+                      className="ps-library-item__main"
+                      disabled={!canOpen || savingId !== null}
+                      onClick={() => {
+                        if (!canOpen) return;
+                        if (isPdf) navigate(`#/viewer?id=${encodeURIComponent(item.id)}`);
+                        else void saveRecentFile(item);
+                      }}
+                    >
+                      <span className="ps-library-item__name">{item.name}</span>
+                      <span className="ps-library-item__meta tabular">
+                        {saving ? 'Saving…' : `${formatBytes(item.size)} · ${relativeDate(item.createdAt)}`}
+                      </span>
+                    </button>
+                    <AnimatedButton
+                      variant="ghost"
+                      className="btn--icon ps-library-item__action"
+                      icon={Download}
+                      aria-label={saving ? `Saving ${item.name}` : `Save ${item.name}`}
+                      disabled={item.bytes.byteLength === 0 || savingId !== null}
+                      onClick={() => {
+                        void saveRecentFile(item);
+                      }}
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         )}
       </section>
     </AppShell>

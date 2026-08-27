@@ -36,15 +36,13 @@ export function usePress<T extends HTMLElement>(enabled = true): {
   };
 } {
   const ref = useRef<T>(null);
-  const enabledRef = useRef(enabled);
-  enabledRef.current = enabled;
   const { contextSafe } = useGSAP({ scope: ref });
 
   const bind = useMemo(() => {
     const run = (fn: (el: Element) => void): PointerEventHandler<T> =>
       contextSafe((event: PointerEvent<T>) => {
-        if (!enabledRef.current || event.button > 0) return;
-        if (ref.current) fn(ref.current);
+        if (!enabled || event.button > 0) return;
+        fn(event.currentTarget);
       });
 
     return {
@@ -53,7 +51,7 @@ export function usePress<T extends HTMLElement>(enabled = true): {
       onPointerLeave: run(pressOut),
       onPointerCancel: run(pressOut),
     };
-  }, [contextSafe]);
+  }, [contextSafe, enabled]);
 
   return { ref, bind };
 }

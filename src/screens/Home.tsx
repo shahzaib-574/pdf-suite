@@ -3,12 +3,12 @@ import { ArrowRight, Clock3, Search, ShieldCheck, Sparkles } from 'lucide-react'
 import { AppShell, StaggerGrid, ToolTile } from '../components';
 import { TOOLS } from '../lib/catalog';
 import type { RecentItem, ToolId } from '../lib/types';
-import { downloadBytes, formatBytes } from '../store/files';
+import { formatBytes, saveBytes } from '../store/files';
 import { listRecents } from '../store/recents';
 import { TOOL_ICONS } from './icons';
 import { navigate } from './nav';
 
-type FilterId = 'all' | 'convert' | 'edit' | 'create';
+type FilterId = 'all' | 'convert' | 'edit' | 'capture';
 
 const FILTERS: { id: FilterId; label: string; tools?: ToolId[] }[] = [
   { id: 'all', label: 'All' },
@@ -16,15 +16,17 @@ const FILTERS: { id: FilterId; label: string; tools?: ToolId[] }[] = [
   {
     id: 'edit',
     label: 'Edit',
-    tools: ['merge', 'split', 'compress', 'organize', 'watermark', 'numbers'],
+    tools: ['merge', 'split', 'compress', 'organize', 'watermark', 'numbers', 'protect'],
   },
-  { id: 'create', label: 'Create', tools: ['scan', 'view'] },
+  { id: 'capture', label: 'Scan & view', tools: ['scan', 'view'] },
 ];
 
 export function Home() {
   const [recents, setRecents] = useState<RecentItem[]>([]);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<FilterId>('all');
+  const [savingRecentId, setSavingRecentId] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,6 +50,19 @@ export function Home() {
           tool.blurb.toLowerCase().includes(normalized),
       );
   }, [filter, query]);
+
+  async function saveRecentFile(item: RecentItem): Promise<void> {
+    setExportError(null);
+    setSavingRecentId(item.id);
+    try {
+      const result = await saveBytes(item.bytes, item.name, item.mime);
+      if (result.status === 'cancelled') return;
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : `Could not save ${item.name}`);
+    } finally {
+      setSavingRecentId(null);
+    }
+  }
 
   return (
     <AppShell
@@ -98,13 +113,12 @@ export function Home() {
             />
           </label>
 
-          <div className="ps-filter-rail" role="tablist" aria-label="Tool categories">
+          <div className="ps-filter-rail" aria-label="Filter tools by category">
             {FILTERS.map((item) => (
               <button
                 key={item.id}
                 type="button"
-                role="tab"
-                aria-selected={filter === item.id}
+                aria-pressed={filter === item.id}
                 className={filter === item.id ? 'ps-filter is-active' : 'ps-filter'}
                 onClick={() => setFilter(item.id)}
               >
@@ -148,30 +162,39 @@ export function Home() {
               <span>Finished files will appear here.</span>
             </div>
           ) : (
-            <ul className="ps-recent-list">
-              {recents.map((item) => {
-                const canView = item.bytes.byteLength > 0;
-                const isPdf =
-                  item.mime === 'application/pdf' || item.name.toLowerCase().endsWith('.pdf');
-                return (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      className="ps-recent"
-                      disabled={!canView}
-                      onClick={() => {
-                        if (!canView) return;
-                        if (isPdf) navigate(`#/viewer?id=${encodeURIComponent(item.id)}`);
-                        else downloadBytes(item.bytes, item.name, item.mime);
-                      }}
-                    >
-                      <span className="ps-recent__name">{item.name}</span>
-                      <span className="ps-recent__action tabular">{formatBytes(item.size)}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <>
+              {exportError ? (
+                <p className="ps-banner ps-banner--error" role="alert">
+                  {exportError}
+                </p>
+              ) : null}
+              <ul className="ps-recent-list">
+                {recents.map((item) => {
+                  const canView = item.bytes.byteLength > 0;
+                  const isPdf =
+                    item.mime === 'application/pdf' || item.name.toLowerCase().endsWith('.pdf');
+                  return (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        className="ps-recent"
+                        disabled={!canView || savingRecentId !== null}
+                        onClick={() => {
+                          if (!canView) return;
+                          if (isPdf) navigate(`#/viewer?id=${encodeURIComponent(item.id)}`);
+                          else void saveRecentFile(item);
+                        }}
+                      >
+                        <span className="ps-recent__name">{item.name}</span>
+                        <span className="ps-recent__action tabular">
+                          {savingRecentId === item.id ? 'Saving…' : formatBytes(item.size)}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           )}
         </section>
       </div>

@@ -306,4 +306,51 @@ export async function runDocxToPdfSelfCheck(): Promise<void> {
   if (!topHeavy.ok || !topHeavy.pageCount) {
     throw new Error('top blank lines / large top margin failed');
   }
+
+  const manyShort = Array.from({ length: 48 }, (_, i) => {
+    return (
+      `<w:p><w:pPr><w:spacing w:after="480"/></w:pPr>` +
+      `<w:r><w:t>Line ${i + 1}</w:t></w:r></w:p>`
+    );
+  }).join('');
+  const onePageSpaced = await docxToPdf(
+    pickedDocx(await buildDocx({ documentXml: documentXml(manyShort) })),
+  );
+  if (!onePageSpaced.ok || (onePageSpaced.pageCount ?? 0) !== 1) {
+    throw new Error(
+      `short lines with after-spacing must stay 1 page, got ${
+        onePageSpaced.ok ? onePageSpaced.pageCount : 'err'
+      }`,
+    );
+  }
+
+  const trailingBlanks = await docxToPdf(
+    pickedDocx(
+      await buildDocx({
+        documentXml: documentXml(paragraphXml('Only line') + '<w:p/>'.repeat(80)),
+      }),
+    ),
+  );
+  if (!trailingBlanks.ok || (trailingBlanks.pageCount ?? 0) !== 1) {
+    throw new Error(
+      `empty trailing paragraphs must not add a blank page, got ${
+        trailingBlanks.ok ? trailingBlanks.pageCount : 'err'
+      }`,
+    );
+  }
+
+  if (named.extra?.wordToPdf?.warnings?.length) {
+    throw new Error('Latin-only doc must not set wordToPdf warnings');
+  }
+
+  const cjk = await docxToPdf(
+    pickedDocx(await buildDocx({ documentXml: documentXml(paragraphXml('你好世界')) })),
+  );
+  if (!cjk.ok || !cjk.pageCount) {
+    throw new Error(`CJK doc should still produce a PDF, got ${JSON.stringify(cjk)}`);
+  }
+  const report = cjk.extra?.wordToPdf;
+  if (!report || report.replacedChars <= 0 || report.warnings.length === 0) {
+    throw new Error(`expected replacement warning, got ${JSON.stringify(cjk.ok ? cjk.extra : cjk)}`);
+  }
 }

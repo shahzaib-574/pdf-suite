@@ -1,0 +1,2 @@
+# PDF artifacts are binary. Never apply platform line-ending conversion.
+*.pdf binary

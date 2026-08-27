@@ -1,5 +1,6 @@
-import type { ChangeEvent } from 'react';
+import { useRef, type ChangeEvent } from 'react';
 import { Camera, Clock3, FileOutput, House, Settings } from 'lucide-react';
+import { navigate } from '../screens/nav';
 import { fileListToPicked } from '../store/files';
 import { stagePendingScan, stagePendingScanError } from '../store/pendingScan';
 
@@ -10,6 +11,8 @@ export type BottomNavProps = {
 };
 
 export function BottomNav({ activeTab }: BottomNavProps) {
+  const cameraInput = useRef<HTMLInputElement>(null);
+
   async function onCameraPick(event: ChangeEvent<HTMLInputElement>): Promise<void> {
     const input = event.currentTarget;
     const files = input.files;
@@ -23,73 +26,70 @@ export function BottomNav({ activeTab }: BottomNavProps) {
       );
     } finally {
       input.value = '';
-      window.location.hash = '#/tool/scan';
+      navigate('#/tool/scan');
     }
   }
 
   return (
-    <nav className="shell__nav" aria-label="Primary navigation">
-      <NavButton
-        id="tools"
-        label="Tools"
-        activeTab={activeTab}
-        icon={House}
-        onClick={() => {
-          window.location.hash = '#/';
+    <>
+      <input
+        ref={cameraInput}
+        hidden
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={(event) => {
+          void onCameraPick(event);
         }}
       />
-      <label
-        className={
-          activeTab === 'camera'
-            ? 'shell__nav-item shell__nav-camera is-active'
-            : 'shell__nav-item shell__nav-camera'
-        }
-        aria-current={activeTab === 'camera' ? 'page' : undefined}
-      >
-        <input
-          className="sr-only"
-          type="file"
-          accept="image/*"
-          capture="environment"
-          aria-label="Scan with camera"
-          onChange={(event) => {
-            void onCameraPick(event);
-          }}
+      <nav id="primary-navigation" className="shell__nav" aria-label="Primary navigation">
+        <NavButton
+          id="tools"
+          label="Tools"
+          activeTab={activeTab}
+          icon={House}
+          onClick={() => navigate('#/')}
         />
-        <span className="shell__nav-camera-icon" aria-hidden="true">
-          <Camera size={21} strokeWidth={2.2} />
-        </span>
-        <span>Camera</span>
-      </label>
-      <NavButton
-        id="extract"
-        label="Extract"
-        ariaLabel="Extract PDF to Word"
-        activeTab={activeTab}
-        icon={FileOutput}
-        onClick={() => {
-          window.location.hash = '#/tool/pdf-docx';
-        }}
-      />
-      <NavButton
-        id="recents"
-        label="Recents"
-        activeTab={activeTab}
-        icon={Clock3}
-        onClick={() => {
-          window.location.hash = '#/recents';
-        }}
-      />
-      <NavButton
-        id="settings"
-        label="Settings"
-        activeTab={activeTab}
-        icon={Settings}
-        onClick={() => {
-          window.location.hash = '#/settings';
-        }}
-      />
-    </nav>
+        <button
+          type="button"
+          className={
+            activeTab === 'camera'
+              ? 'shell__nav-item shell__nav-camera is-active'
+              : 'shell__nav-item shell__nav-camera'
+          }
+          aria-current={activeTab === 'camera' ? 'page' : undefined}
+          aria-label="Scan with camera"
+          onClick={() => cameraInput.current?.click()}
+        >
+          <span className="shell__nav-camera-icon" aria-hidden="true">
+            <Camera size={21} strokeWidth={2.2} />
+          </span>
+          <span>Scan</span>
+        </button>
+        <NavButton
+          id="extract"
+          label="Extract"
+          ariaLabel="Extract PDF to Word"
+          activeTab={activeTab}
+          icon={FileOutput}
+          onClick={() => navigate('#/tool/pdf-docx')}
+        />
+        <NavButton
+          id="recents"
+          label="Recents"
+          activeTab={activeTab}
+          icon={Clock3}
+          onClick={() => navigate('#/recents')}
+        />
+        <NavButton
+          id="settings"
+          label="Settings"
+          activeTab={activeTab}
+          icon={Settings}
+          onClick={() => navigate('#/settings')}
+        />
+      </nav>
+    </>
   );
 }
 

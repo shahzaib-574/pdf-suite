@@ -29,3 +29,8 @@ scripts/*.png
 *.njsproj
 *.sln
 *.sw?
+
+# Android release signing material must never enter source control.
+android/keystore.properties
+*.jks
+*.keystore

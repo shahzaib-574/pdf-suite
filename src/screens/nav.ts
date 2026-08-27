@@ -31,5 +31,20 @@ export function navigate(hash: string): void {
     window.dispatchEvent(new HashChangeEvent('hashchange'));
     return;
   }
-  window.location.hash = next;
+  const currentDepth = Number(window.history.state?.reamDepth ?? 0);
+  window.history.pushState(
+    { ...window.history.state, reamDepth: currentDepth + 1 },
+    '',
+    next,
+  );
+  window.dispatchEvent(new HashChangeEvent('hashchange'));
+}
+
+export function goBack(fallback = '#/'): void {
+  const currentDepth = Number(window.history.state?.reamDepth ?? 0);
+  if (currentDepth > 0) {
+    window.history.back();
+    return;
+  }
+  navigate(fallback);
 }

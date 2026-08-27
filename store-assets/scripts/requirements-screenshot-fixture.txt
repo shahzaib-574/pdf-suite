@@ -1,0 +1,4 @@
+# Exact third-party packages used by local and CI byte-for-byte verification.
+charset-normalizer==3.5.0
+pillow==12.3.0
+reportlab==4.4.9

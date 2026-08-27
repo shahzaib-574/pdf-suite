@@ -4,7 +4,13 @@ import { pathToFileURL } from 'node:url';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { pagesToDocx } from '../src/pdf/docxBuild.ts';
-import { analyzeGlyphs, clusterLines, glyphFromPdfItem } from '../src/pdf/textLayout.ts';
+import {
+  analyzeGlyphs,
+  clusterLines,
+  glyphFromPdfItem,
+  orderAndSpaceBlocks,
+  rulingsFromOperatorList,
+} from '../src/pdf/textLayout.ts';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
   join(process.cwd(), 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'),
@@ -17,6 +23,13 @@ const source = await PDFDocument.create();
 const regular = await source.embedFont(StandardFonts.Helvetica);
 const bold = await source.embedFont(StandardFonts.HelveticaBold);
 const italic = await source.embedFont(StandardFonts.HelveticaOblique);
+const samplePng = Uint8Array.from(
+  Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64',
+  ),
+);
+const embeddedImage = await source.embedPng(samplePng);
 
 const page = source.addPage([595.28, 841.89]);
 page.drawText('Quarterly Operations Report', { x: 72, y: 785, size: 22, font: bold });
@@ -98,6 +111,13 @@ page.drawText('2. The output should retain headings, table geometry, and paragra
   size: 10.5,
   font: regular,
 });
+page.drawImage(embeddedImage, { x: 72, y: 330, width: 200, height: 60 });
+page.drawText('Embedded figure preserved between editable text blocks.', {
+  x: 72,
+  y: 307,
+  size: 9.5,
+  font: italic,
+});
 
 const page2 = source.addPage([595.28, 841.89]);
 page2.drawText('Regional commentary', { x: 72, y: 785, size: 20, font: bold });
@@ -144,7 +164,7 @@ for (let i = 1; i <= pdf.numPages; i++) {
       italic?: boolean;
     }
   >;
-  await pdfPage.getOperatorList();
+  const operatorList = await pdfPage.getOperatorList();
   const fontNames = Array.from(
     new Set(
       content.items.flatMap((item) =>
@@ -171,7 +191,26 @@ for (let i = 1; i <= pdf.numPages; i++) {
     if (glyph) glyphs.push(glyph);
   }
   const lines = clusterLines(glyphs);
-  const blocks = analyzeGlyphs(glyphs, viewport.width, viewport.height);
+  const rulings = rulingsFromOperatorList(operatorList, pdfjs.OPS.constructPath);
+  const textBlocks = analyzeGlyphs(glyphs, viewport.width, viewport.height, rulings);
+  const blocks = orderAndSpaceBlocks(
+    i === 1
+      ? [
+          ...textBlocks,
+          {
+            kind: 'image' as const,
+            bytes: samplePng,
+            mime: 'image/png' as const,
+            widthPt: 200,
+            heightPt: 60,
+            x: 72,
+            top: 390,
+            bottom: 330,
+          },
+        ]
+      : textBlocks,
+    viewport.height,
+  );
   console.log(
     `PAGE ${i} lines=${lines.length} blocks=${blocks.map((block) => block.kind).join(',')}`,
   );

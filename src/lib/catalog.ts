@@ -113,7 +113,6 @@ export const TOOLS: ToolDef[] = [
     accept: 'pdf',
     minFiles: 1,
     maxFilesFree: 1,
-    available: false,
   },
   {
     id: 'view',

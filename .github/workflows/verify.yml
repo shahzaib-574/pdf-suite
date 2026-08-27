@@ -1,0 +1,174 @@
+name: Verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  web-and-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: 3.12.13
+          cache: pip
+          cache-dependency-path: store-assets/scripts/requirements-screenshot-fixture.txt
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+
+      - name: Install exact dependencies
+        run: npm ci
+
+      - name: Verify deterministic screenshot fixture
+        run: |
+          python -m pip install --disable-pip-version-check -r store-assets/scripts/requirements-screenshot-fixture.txt
+          python store-assets/scripts/generate_screenshot_fixture.py --check
+
+      - name: Verify web application
+        run: |
+          npm run lint
+          npm run build
+          npm run docx-selfcheck
+          npm run pdf-selfcheck
+          npm run verify:store-assets
+          grep -Fqx 'google.com, pub-9959568404035601, DIRECT, f08c47fec0942fa0' store-assets/app-ads.txt
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Verify generated Android plugin files are current
+        run: git diff --exit-code -- android/app/capacitor.build.gradle android/capacitor.settings.gradle
+
+      - name: Verify Android debug build
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug
+
+      - name: Stage disposable production-path configuration
+        shell: bash
+        env:
+          CI_ADMOB_APP_ID: ca-app-pub-9959568404035601~6472905937
+          CI_ADMOB_BANNER_ID: ca-app-pub-9959568404035601/8888999900
+          CI_KEY_PASSWORD: ream-ci-only
+        run: |
+          set -euo pipefail
+          umask 077
+
+          keystore_path="$RUNNER_TEMP/ream-ci-upload.jks"
+          keytool -genkeypair -noprompt \
+            -keystore "$keystore_path" \
+            -storetype JKS \
+            -storepass "$CI_KEY_PASSWORD" \
+            -keypass "$CI_KEY_PASSWORD" \
+            -alias ream-ci-upload \
+            -dname "CN=Ream CI, OU=Disposable, O=CI, C=US" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 1
+
+          export CI_KEYSTORE_PATH="$keystore_path"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+
+          const stringsPath = 'android/app/src/main/res/values/strings.xml'
+          const stringsXml = fs.readFileSync(stringsPath, 'utf8')
+          let replacements = 0
+          const updatedStrings = stringsXml.replace(
+            /(<string\b(?=[^>]*\bname=["']admob_app_id["'])[^>]*>)[^<]*(<\/string>)/s,
+            (_match, open, close) => {
+              replacements += 1
+              return `${open}${process.env.CI_ADMOB_APP_ID}${close}`
+            },
+          )
+          if (replacements !== 1) throw new Error('Could not stage the CI AdMob app ID.')
+          fs.writeFileSync(stringsPath, updatedStrings, 'utf8')
+
+          fs.writeFileSync(
+            '.env.production.local',
+            [
+              'VITE_ADMOB_TEST_MODE=false',
+              `VITE_ADMOB_BANNER_ID=${process.env.CI_ADMOB_BANNER_ID}`,
+              'VITE_ADMOB_AUDIENCE_MODE=ADULTS_ONLY',
+              '',
+            ].join('\n'),
+            { encoding: 'utf8', mode: 0o600 },
+          )
+          fs.writeFileSync(
+            'android/keystore.properties',
+            [
+              `storeFile=${process.env.CI_KEYSTORE_PATH}`,
+              `storePassword=${process.env.CI_KEY_PASSWORD}`,
+              'keyAlias=ream-ci-upload',
+              `keyPassword=${process.env.CI_KEY_PASSWORD}`,
+              '',
+            ].join('\n'),
+            { encoding: 'ascii', mode: 0o600 },
+          )
+          NODE
+
+          npm run android:sync
+
+      - name: Verify optimized signed production path
+        working-directory: android
+        shell: bash
+        run: ./gradlew --no-daemon lintRelease assembleRelease bundleRelease
+
+      - name: Verify signed release artifact compliance
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/release/app-release.apk"
+          aab="android/app/build/outputs/bundle/release/app-release.aab"
+          test -f "$apk"
+          test -f "$aab"
+          apksigner_path="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          test -n "$apksigner_path"
+          "$apksigner_path" verify "$apk"
+          jarsigner -verify "$aab" >/dev/null
+          npm run verify:android-artifact -- --require-production-ads "$apk"
+
+      - name: Verify release APK 16 KB page alignment
+        working-directory: android
+        shell: bash
+        run: |
+          apk="app/build/outputs/apk/release/app-release.apk"
+          test -f "$apk"
+          zipalign_path="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name zipalign -print | sort -V | tail -n 1)"
+          test -n "$zipalign_path"
+          "$zipalign_path" -c -P 16 -v 4 "$apk"
+
+      - name: Clean disposable production-path files
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f -- .env.production.local android/keystore.properties
+          if [[ -n "${RUNNER_TEMP:-}" && -d "$RUNNER_TEMP" ]]; then
+            rm -f -- "$RUNNER_TEMP/ream-ci-upload.jks"
+          fi
