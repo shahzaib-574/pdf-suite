@@ -17,7 +17,8 @@ import type {
   WorkerResponse,
   WorkerSuccess,
 } from './protocol';
-import { clamp, humanError } from './util';
+import { protectPdf } from './protectPdf';
+import { clamp, copyBuffer, humanError } from './util';
 
 const A4_WIDTH = 595.28;
 const A4_HEIGHT = 841.89;
@@ -68,10 +69,27 @@ function hasPngMagic(bytes: Uint8Array): boolean {
   );
 }
 
-function imageKind(bytes: Uint8Array, name: string, mime: string): 'jpg' | 'png' | 'other' {
+function hasWebpMagic(bytes: Uint8Array): boolean {
+  return (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  );
+}
+
+type ImageKind = 'jpg' | 'png' | 'webp' | 'other';
+type EmbedKind = 'jpg' | 'png';
+
+function imageKind(bytes: Uint8Array, name: string, mime: string): ImageKind {
   if (hasJpegMagic(bytes)) return 'jpg';
   if (hasPngMagic(bytes)) return 'png';
-  if (bytes.length >= 8) return 'other';
+  if (hasWebpMagic(bytes)) return 'webp';
   const lowerMime = mime.toLowerCase();
   const lowerName = name.toLowerCase();
   if (
@@ -83,7 +101,38 @@ function imageKind(bytes: Uint8Array, name: string, mime: string): 'jpg' | 'png'
     return 'jpg';
   }
   if (lowerMime === 'image/png' || lowerName.endsWith('.png')) return 'png';
+  if (lowerMime === 'image/webp' || lowerName.endsWith('.webp')) return 'webp';
   return 'other';
+}
+
+function canRasterizeWebp(): boolean {
+  return (
+    typeof Blob === 'function' &&
+    typeof createImageBitmap === 'function' &&
+    typeof OffscreenCanvas === 'function'
+  );
+}
+
+async function webpToEmbeddable(bytes: Uint8Array): Promise<{ kind: EmbedKind; bytes: Uint8Array }> {
+  if (!canRasterizeWebp()) {
+    throw new Error(
+      'WebP conversion needs a browser that can decode images on-device. JPEG, PNG, and WebP are supported.',
+    );
+  }
+  const blob = new Blob([copyBuffer(bytes)], { type: 'image/webp' });
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const canvas = new OffscreenCanvas(Math.max(1, bitmap.width), Math.max(1, bitmap.height));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Could not convert this WebP image on-device.');
+    }
+    ctx.drawImage(bitmap, 0, 0);
+    const out = await canvas.convertToBlob({ type: 'image/png' });
+    return { kind: 'png', bytes: new Uint8Array(await out.arrayBuffer()) };
+  } finally {
+    bitmap.close();
+  }
 }
 
 async function merge(files: TransferFile[]) {
@@ -122,31 +171,34 @@ async function split(file: TransferFile, range: PageRange) {
 
 async function imagesToPdf(files: TransferFile[]) {
   if (files.length === 0) {
-    throw new Error('Choose at least one JPEG or PNG image.');
+    throw new Error('Choose at least one JPEG, PNG, or WebP image.');
   }
   const unsupported: string[] = [];
-  const kinds: Array<'jpg' | 'png'> = [];
+  const kinds: Array<Exclude<ImageKind, 'other'>> = [];
   for (const file of files) {
-    const bytes = bytesOf(file);
-    const kind = imageKind(bytes, file.name, file.mime);
+    const kind = imageKind(bytesOf(file), file.name, file.mime);
     if (kind === 'other') unsupported.push(file.name || 'unnamed');
     else kinds.push(kind);
   }
   if (unsupported.length > 0) {
     throw new Error(
-      `Only JPEG and PNG can be converted here. Unsupported: ${unsupported.join(', ')}.`,
+      `Only JPEG, PNG, and WebP can be converted here. Unsupported: ${unsupported.join(', ')}.`,
     );
   }
-  const out = await PDFDocument.create();
-  const maxW = A4_WIDTH - IMAGE_MARGIN * 2;
-  const maxH = A4_HEIGHT - IMAGE_MARGIN * 2;
+  const prepared: Array<{ kind: EmbedKind; bytes: Uint8Array }> = [];
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     const kind = kinds[i];
     if (!file || !kind) continue;
     const bytes = bytesOf(file);
+    prepared.push(kind === 'webp' ? await webpToEmbeddable(bytes) : { kind, bytes });
+  }
+  const out = await PDFDocument.create();
+  const maxW = A4_WIDTH - IMAGE_MARGIN * 2;
+  const maxH = A4_HEIGHT - IMAGE_MARGIN * 2;
+  for (const item of prepared) {
     const image =
-      kind === 'jpg' ? await out.embedJpg(bytes) : await out.embedPng(bytes);
+      item.kind === 'jpg' ? await out.embedJpg(item.bytes) : await out.embedPng(item.bytes);
     const dims = image.scaleToFit(maxW, maxH);
     const page = out.addPage([A4_WIDTH, A4_HEIGHT]);
     page.drawImage(image, {
@@ -229,16 +281,22 @@ async function pageNumbers(file: TransferFile) {
 }
 
 async function protect(
-  _file: TransferFile,
+  file: TransferFile,
   input: ProtectInput,
 ): Promise<Pick<WorkerSuccess, 'bytes' | 'filename' | 'pageCount'>> {
-  if (!input.userPassword.trim()) {
+  const password = input.userPassword.trim();
+  if (!password) {
     throw new Error('Enter a password to protect this PDF.');
   }
-  // pdf-lib 1.17 SaveOptions has no userPassword / encrypt API.
-  throw new Error(
-    'Password protection is not supported: pdf-lib 1.17 cannot encrypt PDFs, and no extra encryption library is bundled.',
-  );
+  const src = await loadPdf(file);
+  const encrypted = await protectPdf(bytesOf(file), password);
+  const copy = new Uint8Array(encrypted.byteLength);
+  copy.set(encrypted);
+  return {
+    bytes: copy.buffer as ArrayBuffer,
+    filename: 'protected.pdf',
+    pageCount: src.getPageCount(),
+  };
 }
 
 async function organize(file: TransferFile, ops: OrganizeOp[]) {

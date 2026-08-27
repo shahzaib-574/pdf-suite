@@ -161,6 +161,95 @@ const counted = await invoke({
 });
 if (counted.pageCount !== 2) throw new Error('page count failed');
 
+const protectedPdf = await invoke({
+  id: 9,
+  op: 'protect',
+  file: transfer('first.pdf', 'application/pdf', first),
+  input: { userPassword: 'ream-test' },
+});
+if (!protectedPdf.bytes || protectedPdf.filename !== 'protected.pdf') {
+  throw new Error('protect did not return protected.pdf');
+}
+const encryptedBytes = new Uint8Array(protectedPdf.bytes);
+if (
+  encryptedBytes.length < 4 ||
+  encryptedBytes[0] !== 0x25 ||
+  encryptedBytes[1] !== 0x50 ||
+  encryptedBytes[2] !== 0x44 ||
+  encryptedBytes[3] !== 0x46
+) {
+  throw new Error('protect output does not start with %PDF');
+}
+const encryptedLatin1 = new TextDecoder('latin1').decode(encryptedBytes);
+if (!encryptedLatin1.includes('/Encrypt') || !encryptedLatin1.includes('/AESV3')) {
+  throw new Error('protect output is missing AES-256 encryption dictionaries');
+}
+let loadedWithoutPassword = false;
+try {
+  await PDFDocument.load(encryptedBytes);
+  loadedWithoutPassword = true;
+} catch {
+  // EncryptedPDFError (or equivalent) is required.
+}
+if (loadedWithoutPassword) {
+  throw new Error('encrypted PDF loaded in pdf-lib without a password');
+}
+
+let rejectedEmptyPassword = false;
+try {
+  await invoke({
+    id: 10,
+    op: 'protect',
+    file: transfer('first.pdf', 'application/pdf', first),
+    input: { userPassword: '   ' },
+  });
+} catch (err) {
+  rejectedEmptyPassword =
+    err instanceof Error && err.message === 'Enter a password to protect this PDF.';
+}
+if (!rejectedEmptyPassword) {
+  throw new Error('protect accepted an empty password');
+}
+
+let rejectedUnsupportedImage = false;
+try {
+  await invoke({
+    id: 11,
+    op: 'imagesToPdf',
+    files: [transfer('pixel.gif', 'image/gif', Uint8Array.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]))],
+  });
+} catch (err) {
+  rejectedUnsupportedImage =
+    err instanceof Error &&
+    err.message.includes('JPEG') &&
+    err.message.includes('PNG') &&
+    err.message.includes('WebP');
+}
+if (!rejectedUnsupportedImage) {
+  throw new Error('imagesToPdf error did not mention JPEG, PNG, and WebP');
+}
+
+const canDecodeWebp =
+  typeof Blob === 'function' &&
+  typeof createImageBitmap === 'function' &&
+  typeof OffscreenCanvas === 'function';
+if (canDecodeWebp) {
+  const webp = Uint8Array.from(
+    Buffer.from(
+      'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA',
+      'base64',
+    ),
+  );
+  const webpPdf = await invoke({
+    id: 12,
+    op: 'imagesToPdf',
+    files: [transfer('pixel.webp', 'image/webp', webp)],
+  });
+  if (!webpPdf.bytes || webpPdf.pageCount !== 1) {
+    throw new Error('WebP image conversion failed');
+  }
+}
+
 let rejectedEmpty = false;
 try {
   await invoke({
@@ -181,4 +270,6 @@ if (toDegrees(rotationCheck.getPage(0).getRotation()) !== 180) {
   throw new Error('PDF rotation primitive is unavailable');
 }
 
-console.log('PDF_TOOLS_SELF_CHECK_OK fixture merge split images watermark numbers organize count');
+console.log(
+  'PDF_TOOLS_SELF_CHECK_OK fixture merge split images watermark numbers organize count protect',
+);

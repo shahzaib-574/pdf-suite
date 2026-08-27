@@ -585,21 +585,15 @@ export function ToolFlow({ id }: ToolFlowProps) {
         ) : null}
 
         {tool.id === 'protect' ? (
-          <>
-            <p className="ps-banner ps-banner--lock" role="status">
-              Password lock is not in this engine yet. pdf-lib cannot encrypt
-              files. Run still explains this if you try.
-            </p>
-            <label className="ps-field">
-              Password
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-              />
-            </label>
-          </>
+          <label className="ps-field">
+            Password
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
         ) : null}
 
         {tool.id === 'organize' ? (
