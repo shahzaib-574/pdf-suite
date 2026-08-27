@@ -5,7 +5,7 @@ import { XMLParser } from 'fast-xml-parser';
 import JSZip from 'jszip';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { PDFFont, PDFImage, PDFPage } from 'pdf-lib';
-import type { JobResult, PickedFile } from '../lib/types';
+import type { JobOk, JobResult, PickedFile } from '../lib/types';
 import { clamp, humanError } from './util';
 
 const PAGE_W = 595.28;
@@ -1194,28 +1194,104 @@ function resolveSize(runPt: number | undefined, paraPt: number, heading?: Headin
   return clamp(runPt, 8, 28);
 }
 
+const REPLACED_GLYPH_WARNING =
+  'This PDF uses standard fonts; some characters were replaced.';
+
+type GlyphStats = { letters: number; replaced: number };
+
 function isWinAnsi(cp: number): boolean {
   if (cp >= 0x20 && cp <= 0x7e) return true;
   if (cp >= 0xa0 && cp <= 0xff) return true;
   return WIN1252_EXTRA.has(cp);
 }
 
-function toPdfText(text: string): string {
+function isLetterLike(ch: string): boolean {
+  return /\p{L}/u.test(ch);
+}
+
+function toPdfText(text: string, stats?: GlyphStats): string {
   let out = '';
   for (const ch of text) {
     if (ch === '\n' || ch === '\r') {
       out += ch === '\n' ? '\n' : '';
       continue;
     }
+    const letter = isLetterLike(ch);
     const mapped = TEXT_MAP[ch] ?? ch;
+    let replacedLetter = false;
     for (const unit of mapped) {
       const cp = unit.codePointAt(0);
       if (cp === undefined) continue;
       if (cp < 0x20) continue;
-      out += isWinAnsi(cp) ? unit : '?';
+      if (isWinAnsi(cp)) {
+        out += unit;
+      } else {
+        out += '?';
+        if (letter) replacedLetter = true;
+      }
+    }
+    if (stats && letter) {
+      stats.letters += 1;
+      if (replacedLetter) stats.replaced += 1;
     }
   }
   return out;
+}
+
+function collectGlyphStats(blocks: Block[]): GlyphStats {
+  const stats: GlyphStats = { letters: 0, replaced: 0 };
+  const addRuns = (runs: Run[]): void => {
+    for (const run of runs) toPdfText(run.text, stats);
+  };
+  for (const block of blocks) {
+    if (block.kind === 'para') addRuns(block.runs);
+    else if (block.kind === 'table') {
+      for (const row of block.rows) {
+        for (const cell of row) {
+          for (const para of cell.paras) addRuns(para.runs);
+        }
+      }
+    }
+  }
+  return stats;
+}
+
+function wordToPdfExtra(stats: GlyphStats): JobOk['extra'] | undefined {
+  if (stats.replaced <= 0) return undefined;
+  const fraction = stats.letters > 0 ? stats.replaced / stats.letters : 0;
+  if (stats.replaced < 4 && fraction < 0.1) return undefined;
+  return {
+    wordToPdf: {
+      replacedChars: stats.replaced,
+      warnings: [REPLACED_GLYPH_WARNING],
+    },
+  };
+}
+
+function followingInkReserve(
+  blocks: Block[],
+  index: number,
+  y: number,
+  bottom: number,
+): number {
+  let reserved = 0;
+  const available = y - bottom;
+  if (available <= 0) return 0;
+  for (let i = index + 1; i < blocks.length; i++) {
+    const next = blocks[i];
+    if (!next) continue;
+    if (next.kind === 'break') break;
+    let h = 0;
+    if (next.kind === 'para') {
+      if (next.empty) continue;
+      h = next.size * next.lineMult;
+    } else if (next.kind === 'image') h = 8;
+    else if (next.kind === 'table') h = 16;
+    if (h <= 0) continue;
+    if (reserved + h > available) break;
+    reserved += h;
+  }
+  return reserved;
 }
 
 function pickFont(fonts: Fonts, bold: boolean, italic: boolean): PDFFont {
@@ -1425,6 +1501,7 @@ function drawTable(
     ensurePage: () => PDFPage;
     getY: () => number;
     setY: (y: number) => void;
+    markInk: () => void;
   },
 ): boolean {
   const colCount = table.rows.reduce(
@@ -1458,6 +1535,7 @@ function drawTable(
     ctx.ensurePage();
     if (ctx.getY() - rowH < ctx.layout.bottom) ctx.newPage();
     const dest = ctx.ensurePage();
+    ctx.markInk();
     let x = ctx.layout.left;
     const top = ctx.getY();
     const bottom = top - rowH;
@@ -1556,11 +1634,19 @@ async function renderPdf(
   let y = 0;
   let hadText = false;
   let hadImage = false;
+  const pageInk: boolean[] = [];
   const imageCache = new Map<string, PDFImage | null>();
+  const glyphStats = collectGlyphStats(blocks);
+  const extra = wordToPdfExtra(glyphStats);
 
   const newPage = (): void => {
     page = pdf.addPage([layout.width, layout.height]);
     y = layout.height - layout.top;
+    pageInk.push(false);
+  };
+
+  const markInk = (): void => {
+    if (pageInk.length > 0) pageInk[pageInk.length - 1] = true;
   };
 
   const ensurePage = (): PDFPage => {
@@ -1575,6 +1661,11 @@ async function renderPdf(
       return page as PDFPage;
     }
     return current;
+  };
+
+  const tryAdvanceY = (gap: number, reserved = 0): void => {
+    if (!page || gap <= 0) return;
+    if (y - gap - reserved >= layout.bottom) y -= gap;
   };
 
   const embedImage = async (relId: string): Promise<PDFImage | undefined> => {
@@ -1599,7 +1690,7 @@ async function renderPdf(
     }
   };
 
-  for (const block of blocks) {
+  for (const [i, block] of blocks.entries()) {
     if (block.kind === 'table') {
       const painted = drawTable(block, {
         fonts,
@@ -1610,6 +1701,7 @@ async function renderPdf(
         setY: (next) => {
           y = next;
         },
+        markInk,
       });
       if (painted) hadText = true;
       continue;
@@ -1641,6 +1733,7 @@ async function renderPdf(
         width: drawW,
         height: drawH,
       });
+      markInk();
       y -= drawH + 8;
       continue;
     }
@@ -1648,26 +1741,24 @@ async function renderPdf(
     if (block.empty) {
       const gap =
         block.spaceBefore + block.spaceAfter + block.size * block.lineMult;
-      ensurePage();
-      if (y - gap < layout.bottom) newPage();
-      y -= gap;
+      tryAdvanceY(gap, followingInkReserve(blocks, i, y, layout.bottom));
       continue;
-    }
-
-    if (block.spaceBefore > 0) {
-      ensurePage();
-      if (y - block.spaceBefore < layout.bottom) newPage();
-      y -= block.spaceBefore;
     }
 
     const maxW = Math.max(40, inner - block.indent);
     const lines = wrapLine(block.runs, maxW, fonts, block.lineMult);
+    const firstH = lines[0]?.height ?? block.size * block.lineMult;
+    tryAdvanceY(
+      block.spaceBefore,
+      firstH + followingInkReserve(blocks, i, y - firstH, layout.bottom),
+    );
+
     let lineIndex = 0;
     for (const line of lines) {
       const target = ensureSpace(line.height);
       const baseline = y - line.height + line.height * 0.2;
-      const extra = lineIndex === 0 ? block.firstIndent : 0;
-      let x = layout.left + block.indent + extra;
+      const indentExtra = lineIndex === 0 ? block.firstIndent : 0;
+      let x = layout.left + block.indent + indentExtra;
       if (block.align === 'center') {
         x = layout.left + block.indent + (maxW - line.width) / 2;
       } else if (block.align === 'right') {
@@ -1683,15 +1774,14 @@ async function renderPdf(
           font: pickFont(fonts, part.bold, part.italic),
           color: INK,
         });
+        markInk();
         cursor += part.width;
         if (part.text.replace(/\s/g, '').length > 0) hadText = true;
       }
       y -= line.height;
       lineIndex += 1;
     }
-    if (page && block.spaceAfter > 0 && y - block.spaceAfter >= layout.bottom) {
-      y -= block.spaceAfter;
-    }
+    tryAdvanceY(block.spaceAfter, followingInkReserve(blocks, i, y, layout.bottom));
   }
 
   if (!hadText && !hadImage) {
@@ -1714,12 +1804,24 @@ async function renderPdf(
     };
   }
 
+  while (pageInk.length > 1 && pageInk[pageInk.length - 1] === false) {
+    pdf.removePage(pageInk.length - 1);
+    pageInk.pop();
+  }
   if (pdf.getPageCount() === 0) newPage();
   const written = await pdf.save();
-  return {
-    ok: true,
-    bytes: written.slice(),
-    filename,
-    pageCount: pdf.getPageCount(),
-  };
+  return extra
+    ? {
+        ok: true,
+        bytes: written.slice(),
+        filename,
+        pageCount: pdf.getPageCount(),
+        extra,
+      }
+    : {
+        ok: true,
+        bytes: written.slice(),
+        filename,
+        pageCount: pdf.getPageCount(),
+      };
 }

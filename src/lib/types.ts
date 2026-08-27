@@ -51,6 +51,7 @@ export type JobOk = {
   extra?: {
     images?: Blob[];
     pdfToDocx?: PdfToDocxReport;
+    wordToPdf?: WordToPdfReport;
   };
 };
 
@@ -60,6 +61,11 @@ export type PdfToDocxReport = {
   tables: number;
   columnGroups: number;
   images: number;
+  warnings: string[];
+};
+
+export type WordToPdfReport = {
+  replacedChars: number;
   warnings: string[];
 };
 
