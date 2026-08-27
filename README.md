@@ -2,7 +2,7 @@
 
 On-device PDF tools for web and Android. Files never leave the phone or browser. The Android app ID is `com.reampdf.mobile`.
 
-Public privacy policy (available after the Pages workflow is enabled on `main`):
+Public privacy policy:
 <https://shahzaib-574.github.io/pdf-suite/privacy.html>
 
 ## Stack

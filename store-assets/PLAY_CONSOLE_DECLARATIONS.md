@@ -199,7 +199,9 @@ Current policy source: [`public/privacy.html`](../public/privacy.html).
 
 ### Must be completed before production submission
 
-- Publish the policy at an active public URL that returns the policy without login, geofencing, a PDF download, or an editable document. Verify the URL from a signed-out browser and from the Play reviewer countries you support.
+- Public URL is live without login: https://shahzaib-574.github.io/pdf-suite/privacy.html
+  (GitHub Pages workflow on `main`). Re-check it from a signed-out browser in the Play
+  reviewer countries you support before submitting.
 - Confirm the Play publisher/developer identity, add that identity to the policy, and
   provide a private privacy contact controlled by the publisher. The current public
   issue tracker warns users not to disclose sensitive information but is not a private

@@ -73,7 +73,7 @@ a legacy screenshot set without a manifest is reported as unprovenanced.
 - [ ] Capture, review, and upload at least four real phone screenshots.
 - [ ] Validate the final screenshots and their `screenshots/capture-provenance.json` together.
 - [ ] Paste the en-US listing copy without adding rankings, prices, testimonials, or unverified claims.
-- [ ] Enable the Pages workflow on `main`, then verify `https://shahzaib-574.github.io/pdf-suite/privacy.html` without signing in and add it as the privacy-policy URL.
+- [x] Enable the Pages workflow on `main`, then verify `https://shahzaib-574.github.io/pdf-suite/privacy.html` without signing in and add it as the privacy-policy URL.
 - [ ] Link a developer website whose host root serves the tracked `app-ads.txt` unchanged; a file under the `/pdf-suite/` project path is not sufficient for AdMob verification.
 - [ ] Select the Productivity category and only tags that accurately describe shipped behavior.
 - [ ] Declare that the app contains ads if AdMob is enabled in the release build.
