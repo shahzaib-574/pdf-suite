@@ -103,8 +103,8 @@ function activeNavTab(route: Route): BottomNavTab | undefined {
   if (route.name === 'home') return 'tools';
   if (route.name === 'recents') return 'recents';
   if (route.name === 'settings') return 'settings';
-  if (route.name === 'tool' && route.id === 'scan') return 'camera';
-  if (route.name === 'tool' && route.id === 'pdf-docx') return 'extract';
+  if (route.name === 'tool' && route.id === 'scan') return 'scan';
+  if (route.name === 'tool' && route.id === 'pdf-docx') return 'word';
   if (route.name === 'viewer' && route.recentId) return 'recents';
   return 'tools';
 }

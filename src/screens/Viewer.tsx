@@ -12,6 +12,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  FileText,
+  FolderOpen,
   List,
   Minus,
   PanelLeft,
@@ -20,7 +22,7 @@ import {
   Share2,
   X,
 } from 'lucide-react';
-import { PageHeader } from '../components';
+import { AnimatedButton, PageHeader } from '../components';
 import type { PickedFile } from '../lib/types';
 import { engine } from '../pdf';
 import type {
@@ -338,12 +340,54 @@ export function Viewer({ recentId }: ViewerProps) {
     if (event.touches.length < 2) pinchRef.current = null;
   }
 
+  const emptyCopy = recentId
+    ? {
+        title: 'Preview unavailable',
+        body:
+          error === 'File not found.'
+            ? 'That recent file is no longer on this device.'
+            : error === 'Nothing to open.'
+              ? 'Choose a PDF from Recents or Tools to read it here.'
+              : error ?? 'This file is too large to keep in Recents.',
+        action: 'Back to Recents',
+        href: '#/recents',
+      }
+    : error === 'Nothing to open.'
+      ? {
+          title: 'No PDF open',
+          body: 'Choose a PDF from Tools or Recents to read it here.',
+          action: 'Browse tools',
+          href: '#/',
+        }
+      : {
+          title: 'Could not open PDF',
+          body: error ?? 'Choose another file and try again.',
+          action: 'Browse tools',
+          href: '#/',
+        };
+
   return (
     <div className="ps-screen ps-screen--viewer">
-      <PageHeader title="Reader" subtitle={name} onBack={() => navigate(backHash)} />
+      <PageHeader
+        title="Reader"
+        subtitle={error ? undefined : name}
+        onBack={() => navigate(backHash)}
+      />
       {error ? (
-        <div className="ps-reader-state">
-          <p className="ps-banner ps-banner--error" role="alert">{error}</p>
+        <div className="ps-body">
+          <div className="ps-empty-state">
+            <span className="ps-empty-state__icon" aria-hidden="true">
+              <FileText size={28} />
+            </span>
+            <h2>{emptyCopy.title}</h2>
+            <p>{emptyCopy.body}</p>
+            <AnimatedButton
+              icon={FolderOpen}
+              onClick={() => navigate(emptyCopy.href)}
+            >
+              {emptyCopy.action}
+            </AnimatedButton>
+          </div>
         </div>
       ) : !session ? (
         <div className="ps-reader-state" role="status" aria-live="polite">

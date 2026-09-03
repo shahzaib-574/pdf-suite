@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Clock3, Search, ShieldCheck, Sparkles } from 'lucide-react';
 import { AppShell, StaggerGrid, ToolTile } from '../components';
-import { TOOLS } from '../lib/catalog';
+import { TOOLS, toolMatchesQuery } from '../lib/catalog';
 import type { RecentItem, ToolId } from '../lib/types';
 import { formatBytes, saveBytes } from '../store/files';
 import { listRecents } from '../store/recents';
@@ -39,16 +39,10 @@ export function Home() {
   }, []);
 
   const visibleTools = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
     const toolIds = FILTERS.find((item) => item.id === filter)?.tools;
     return TOOLS.filter((tool) => tool.available !== false)
       .filter((tool) => !toolIds || toolIds.includes(tool.id))
-      .filter(
-        (tool) =>
-          !normalized ||
-          tool.title.toLowerCase().includes(normalized) ||
-          tool.blurb.toLowerCase().includes(normalized),
-      );
+      .filter((tool) => toolMatchesQuery(tool, query));
   }, [filter, query]);
 
   async function saveRecentFile(item: RecentItem): Promise<void> {
@@ -64,10 +58,10 @@ export function Home() {
     }
   }
 
+  const searching = query.trim().length > 0;
+
   return (
-    <AppShell
-      onSettings={() => navigate('#/settings')}
-    >
+    <AppShell>
       <div className="ps-home">
         <section className="ps-home-hero">
           <div className="ps-page-intro">
@@ -75,20 +69,22 @@ export function Home() {
             <h1>What do you want to make?</h1>
             <p>Fast, focused tools. Your files never leave this device.</p>
           </div>
-          <button
-            type="button"
-            className="ps-feature-card"
-            onClick={() => navigate('#/tool/pdf-docx')}
-          >
-            <span className="ps-feature-card__icon" aria-hidden="true">
-              <Sparkles size={22} />
-            </span>
-            <span className="ps-feature-card__copy">
-              <strong>Smart PDF to Word</strong>
-              <span>Rebuild text, tables, spacing, and scanned pages</span>
-            </span>
-            <ArrowRight size={20} aria-hidden="true" />
-          </button>
+          {searching ? null : (
+            <button
+              type="button"
+              className="ps-feature-card"
+              onClick={() => navigate('#/tool/pdf-docx')}
+            >
+              <span className="ps-feature-card__icon" aria-hidden="true">
+                <Sparkles size={22} />
+              </span>
+              <span className="ps-feature-card__copy">
+                <strong>PDF → Word</strong>
+                <span>Rebuild text, tables, spacing, and scanned pages</span>
+              </span>
+              <ArrowRight size={20} aria-hidden="true" />
+            </button>
+          )}
         </section>
 
         <section className="ps-tools-section" aria-labelledby="tools-title">
@@ -135,7 +131,6 @@ export function Home() {
                   title={tool.title}
                   blurb={tool.blurb}
                   icon={TOOL_ICONS[tool.id]}
-                  pro={tool.pro}
                   index={index}
                   onSelect={() => navigate(`#/tool/${tool.id}`)}
                 />
@@ -152,9 +147,11 @@ export function Home() {
               <p className="ps-eyebrow">Your workspace</p>
               <h2 id="recents-title">Recent files</h2>
             </div>
-            <button type="button" className="ps-text-action" onClick={() => navigate('#/recents')}>
-              See all <ArrowRight size={15} aria-hidden="true" />
-            </button>
+            {recents.length > 0 ? (
+              <button type="button" className="ps-text-action" onClick={() => navigate('#/recents')}>
+                See all <ArrowRight size={15} aria-hidden="true" />
+              </button>
+            ) : null}
           </div>
           {recents.length === 0 ? (
             <div className="ps-inline-empty">

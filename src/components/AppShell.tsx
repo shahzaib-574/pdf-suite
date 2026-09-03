@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Settings } from 'lucide-react';
-import { APP_SHORT_NAME, APP_TAGLINE } from '../lib/catalog';
+import { APP_SHORT_NAME } from '../lib/catalog';
 import { AnimatedButton } from './AnimatedButton';
 
 export type AppShellProps = {
@@ -19,7 +19,7 @@ export function AppShell({
           <img className="shell__mark" src="./favicon.svg" alt="" aria-hidden="true" />
           <div className="shell__titles">
             <p className="shell__name">{APP_SHORT_NAME}</p>
-            <p className="shell__tag">{APP_TAGLINE}</p>
+            <p className="shell__tag">On-device PDF tools</p>
           </div>
         </div>
         {onSettings ? (

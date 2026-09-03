@@ -96,11 +96,13 @@ export function Settings() {
                 <strong>Reduce motion</strong>
                 <span>Minimize transitions and animated feedback.</span>
               </span>
-              <input
-                type="checkbox"
-                checked={reducedMotion}
-                onChange={(event) => setReducedMotion(event.target.checked)}
-              />
+              <span className="ps-switch-control">
+                <input
+                  type="checkbox"
+                  checked={reducedMotion}
+                  onChange={(event) => setReducedMotion(event.target.checked)}
+                />
+              </span>
             </label>
           </div>
         </section>

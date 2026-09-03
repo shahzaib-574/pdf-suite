@@ -280,9 +280,12 @@ ol {
 }
 
 .btn:disabled {
-  opacity: 0.45;
+  opacity: 1;
   cursor: not-allowed;
-  pointer-events: none;
+  box-shadow: none;
+  background: var(--surface-strong);
+  color: var(--muted);
+  border-color: var(--line);
 }
 
 .shell {
@@ -390,7 +393,7 @@ ol {
   min-height: 56px;
   border-radius: 14px;
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: 12px; /* keep labels readable on a 5-tab bar */
   font-weight: 650;
   transition: color 180ms ease, background 180ms ease, transform 130ms ease,
     box-shadow 180ms ease;
@@ -574,6 +577,10 @@ ol {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.ps-body:not(:has(.well ~ .well)) > .well .well__hit {
+  min-height: min(240px, 36dvh);
 }
 
 .well__hit {

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import { AnimatedButton, FileWell, PageHeader, ProgressHud } from '../components';
 import { TOOLS, type ToolDef } from '../lib/catalog';
 import type {
@@ -79,7 +80,7 @@ function wellCopy(id: ToolId, minFiles: number): { label: string; hint: string }
     case 'docx-pdf':
       return { label: 'Choose a Word file', hint: 'DOCX only. Layout is simplified.' };
     case 'pdf-docx':
-      return { label: 'Choose a PDF', hint: 'Extracts text into Word' };
+      return { label: 'Choose a PDF', hint: 'Rebuilds text into Word' };
     default:
       return { label: 'Choose a PDF', hint: 'Stays on this device' };
   }
@@ -112,6 +113,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const [watermarkText, setWatermarkText] = useState('');
   const [watermarkOpacity, setWatermarkOpacity] = useState(0.28);
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [rotateAll, setRotateAll] = useState(false);
   const [reverse, setReverse] = useState(false);
   const [thumbs, setThumbs] = useState<string[]>([]);
@@ -253,7 +256,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
       case 'watermark':
         return watermarkText.trim().length > 0;
       case 'protect':
-        return password.length > 0;
+        return password.length > 0 && password === confirmPassword;
       case 'organize':
         return pageCount > 0 && removedPages.length < pageCount;
       default:
@@ -323,7 +326,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
 
   async function run(): Promise<void> {
     if (locked) {
-      setError('Pro is off (dev toggle)');
+      setError('This tool is not available right now.');
       return;
     }
     if (picked.length < tool.minFiles) {
@@ -411,6 +414,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
     tool.id !== 'view' &&
     picked.length >= tool.minFiles &&
     extraValid();
+  const hasFile = picked.length >= tool.minFiles;
   const flowSteps = TOOLS_WITH_OPTIONS.has(tool.id)
     ? ['Select', 'Adjust', 'Create']
     : ['Select', 'Create'];
@@ -420,6 +424,34 @@ export function ToolFlow({ id }: ToolFlowProps) {
       : busy || flowSteps.length === 2
         ? flowSteps.length - 1
         : 1;
+
+  function blockedReason(): string | null {
+    if (locked) return 'This tool is not available right now.';
+    if (tool.id === 'view') return null;
+    if (picked.length < tool.minFiles) {
+      if (tool.id === 'merge') return 'Add at least 2 PDFs to merge.';
+      if (tool.id === 'scan') return 'Take or choose a photo first.';
+      if (tool.id === 'images') {
+        return tool.minFiles === 1
+          ? 'Add a photo first.'
+          : `Add at least ${tool.minFiles} images.`;
+      }
+      if (tool.id === 'docx-pdf') return 'Choose a Word file first.';
+      return 'Choose a PDF first.';
+    }
+    if (tool.id === 'split') return extraValid() ? null : 'Set a valid page range.';
+    if (tool.id === 'watermark') return watermarkText.trim() ? null : 'Enter watermark text.';
+    if (tool.id === 'protect') {
+      if (!password) return 'Set a password first.';
+      if (password !== confirmPassword) return 'Passwords do not match.';
+    }
+    if (tool.id === 'organize' && pageCount > 0 && removedPages.length >= pageCount) {
+      return 'Restore at least one page before continuing.';
+    }
+    return null;
+  }
+
+  const ctaHint = canRun ? null : blockedReason();
 
   return (
     <div className="ps-screen">
@@ -438,15 +470,10 @@ export function ToolFlow({ id }: ToolFlowProps) {
               }`}
               aria-current={index === activeStep ? 'step' : undefined}
             >
-              {step}
+              {index + 1}. {step}
             </span>
           ))}
         </div>
-        {locked ? (
-          <p className="ps-banner ps-banner--lock" role="status">
-            Pro is off (dev toggle)
-          </p>
-        ) : null}
         {error ? (
           <p className="ps-banner ps-banner--error" role="alert">
             {error}
@@ -474,7 +501,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
                 void onPick(list);
               }}
               onRemove={onRemove}
-              label="Choose from gallery"
+              label={picked.length > 0 ? 'Pages in this scan' : 'Choose from gallery'}
               hint="Photos stay on this device"
             />
           </>
@@ -507,7 +534,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
           </p>
         ) : null}
 
-        {tool.id === 'split' ? (
+        {tool.id === 'split' && hasFile ? (
           <>
             <div className="ps-row">
               <label className="ps-field ps-grow">
@@ -537,7 +564,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
           </>
         ) : null}
 
-        {tool.id === 'compress' ? (
+        {tool.id === 'compress' && hasFile ? (
           <>
             <div className="ps-row" role="group" aria-label="Compression level">
               {LEVELS.map((level) => (
@@ -559,7 +586,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
           </>
         ) : null}
 
-        {tool.id === 'watermark' ? (
+        {tool.id === 'watermark' && hasFile ? (
           <>
             <label className="ps-field">
               Text
@@ -584,19 +611,40 @@ export function ToolFlow({ id }: ToolFlowProps) {
           </>
         ) : null}
 
-        {tool.id === 'protect' ? (
-          <label className="ps-field">
-            Password
-            <input
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </label>
+        {tool.id === 'protect' && hasFile ? (
+          <>
+            <label className="ps-field">
+              Password
+              <span className="ps-password">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="ps-password__toggle"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  onClick={() => setShowPassword((value) => !value)}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </span>
+            </label>
+            <label className="ps-field">
+              Confirm password
+              <input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+              />
+            </label>
+          </>
         ) : null}
 
-        {tool.id === 'organize' ? (
+        {tool.id === 'organize' && hasFile ? (
           <>
             {pageCount > 0 ? (
               <p className="ps-muted tabular">{pageCount} pages</p>
@@ -696,6 +744,11 @@ export function ToolFlow({ id }: ToolFlowProps) {
 
         {tool.id !== 'view' ? (
           <div className="ps-actions ps-actions--sticky">
+            {ctaHint ? (
+              <p className="ps-cta-hint" role="status">
+                {ctaHint}
+              </p>
+            ) : null}
             <AnimatedButton block disabled={!canRun} onClick={() => void run()}>
               {ACTION_LABELS[tool.id as Exclude<ToolId, 'view'>]}
             </AnimatedButton>

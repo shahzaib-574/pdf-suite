@@ -50,9 +50,7 @@ export function Recents() {
   }
 
   return (
-    <AppShell
-      onSettings={() => navigate('#/settings')}
-    >
+    <AppShell>
       <section className="ps-library">
         <div className="ps-page-intro">
           <p className="ps-eyebrow">Your workspace</p>

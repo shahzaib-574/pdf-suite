@@ -5,7 +5,7 @@ export type ToolDef = {
   title: string;
   blurb: string;
   group: 'everyday' | 'pages' | 'lock';
-  /** Shown as Pro in the UI. Phase 1 ships unlocked; settings can toggle. */
+  /** Reserved for Play Billing. v1 ships every tool unlocked. */
   pro: boolean;
   accept: 'pdf' | 'pdfs' | 'images' | 'docx' | 'none';
   minFiles: number;
@@ -137,7 +137,7 @@ export const TOOLS: ToolDef[] = [
   {
     id: 'pdf-docx',
     title: 'PDF → Word',
-    blurb: 'Extract text into a DOCX',
+    blurb: 'Rebuild text into a Word file',
     group: 'everyday',
     pro: false,
     accept: 'pdf',
@@ -152,4 +152,21 @@ export const APP_TAGLINE = 'PDF Suite · On-device. Your files stay here.';
 
 export function toolById(id: string): ToolDef | undefined {
   return TOOLS.find((t) => t.id === id);
+}
+
+function wordsIn(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+
+/** Whole-word / prefix match so "word" does not hit "password". */
+export function toolMatchesQuery(tool: ToolDef, query: string): boolean {
+  const tokens = wordsIn(query);
+  if (tokens.length === 0) return true;
+  const haystack = wordsIn(`${tool.title} ${tool.blurb}`);
+  return tokens.every((token) =>
+    haystack.some((word) => word === token || word.startsWith(token)),
+  );
 }

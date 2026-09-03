@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, Download, Eye, Share2, Plus } from 'lucide-react';
+import { Check, Download, Eye, FolderOpen, Share2, Plus } from 'lucide-react';
 import { AnimatedButton, PageHeader } from '../components';
 import { engine } from '../pdf';
 import type { PickedFile } from '../lib/types';
@@ -66,10 +66,14 @@ export function Result() {
       <div className="ps-screen">
         <PageHeader title="Result" onBack={() => navigate('#/')} />
         <div className="ps-body">
-          <p className="ps-muted">Nothing to show.</p>
-          <div className="ps-actions">
-            <AnimatedButton block onClick={() => navigate('#/')}>
-              New
+          <div className="ps-empty-state">
+            <span className="ps-empty-state__icon" aria-hidden="true">
+              <FolderOpen size={28} />
+            </span>
+            <h2>No file ready</h2>
+            <p>Finish a tool to save, share, or open the result here.</p>
+            <AnimatedButton icon={Plus} onClick={() => navigate('#/')}>
+              Browse tools
             </AnimatedButton>
           </div>
         </div>
