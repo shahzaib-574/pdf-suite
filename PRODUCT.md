@@ -47,7 +47,8 @@ Shipped today:
 
 Confirmed product direction:
 
-- Current goal: Play Store v1, then one-time Pro via Play Billing. Extra OCR languages follow Pro.
+- Current goal: ship Play Store v1 as a signed Android App Bundle (`com.reampdf.mobile`) on an internal test track, then a production listing. One-time Pro via Play Billing is the next layer, not part of this cut.
+- Shipping sequence for this goal: land the current app on `main` → fill GitHub `production` secrets → build the signed AAB → Play Console listing and declarations → internal-track device QA → production review.
 - Feature quality outranks keeping every byte on-device. If conversion quality needs a server, use one and say so.
 - iOS is not in the current goal.
 

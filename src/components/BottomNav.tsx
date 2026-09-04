@@ -1,4 +1,5 @@
-import { Camera, Clock3, FileOutput, House, Settings } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { Camera, Clock3, FilePenLine, LayoutGrid, Settings } from 'lucide-react';
 import { navigate } from '../screens/nav';
 
 export type BottomNavTab = 'tools' | 'scan' | 'word' | 'recents' | 'settings';
@@ -14,8 +15,16 @@ export function BottomNav({ activeTab }: BottomNavProps) {
         id="tools"
         label="Tools"
         activeTab={activeTab}
-        icon={House}
+        icon={LayoutGrid}
         onClick={() => navigate('#/')}
+      />
+      <NavButton
+        id="word"
+        label="Word"
+        ariaLabel="PDF to Word"
+        activeTab={activeTab}
+        icon={FilePenLine}
+        onClick={() => navigate('#/tool/pdf-docx')}
       />
       <button
         type="button"
@@ -29,18 +38,10 @@ export function BottomNav({ activeTab }: BottomNavProps) {
         onClick={() => navigate('#/tool/scan')}
       >
         <span className="shell__nav-camera-icon" aria-hidden="true">
-          <Camera size={21} strokeWidth={2.2} />
+          <Camera size={26} strokeWidth={2.15} />
         </span>
         <span>Scan</span>
       </button>
-      <NavButton
-        id="word"
-        label="Word"
-        ariaLabel="PDF to Word"
-        activeTab={activeTab}
-        icon={FileOutput}
-        onClick={() => navigate('#/tool/pdf-docx')}
-      />
       <NavButton
         id="recents"
         label="Recents"
@@ -64,7 +65,7 @@ type NavButtonProps = {
   label: string;
   ariaLabel?: string;
   activeTab?: BottomNavTab;
-  icon: typeof House;
+  icon: LucideIcon;
   onClick: () => void;
 };
 

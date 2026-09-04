@@ -184,6 +184,7 @@ const MERGED_PERMISSION_ALLOWLIST = Object.freeze([
   'android.permission.ACCESS_ADSERVICES_ATTRIBUTION',
   'android.permission.ACCESS_ADSERVICES_TOPICS',
   'android.permission.ACCESS_NETWORK_STATE',
+  'android.permission.CAMERA',
   'android.permission.FOREGROUND_SERVICE',
   'android.permission.INTERNET',
   'android.permission.WAKE_LOCK',
@@ -206,7 +207,6 @@ const SENSITIVE_PERMISSION_DENYLIST = Object.freeze([
   'android.permission.BODY_SENSORS',
   'android.permission.BODY_SENSORS_BACKGROUND',
   'android.permission.CALL_PHONE',
-  'android.permission.CAMERA',
   'android.permission.FOREGROUND_SERVICE_CAMERA',
   'android.permission.FOREGROUND_SERVICE_LOCATION',
   'android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION',
@@ -582,7 +582,7 @@ function runSelfTest() {
 
   const expandedViolations = [];
   checkPermissions(
-    [...MERGED_PERMISSION_ALLOWLIST, 'android.permission.CAMERA'],
+    [...MERGED_PERMISSION_ALLOWLIST, 'android.permission.RECORD_AUDIO'],
     expandedViolations,
   );
   assert.equal(expandedViolations.length, 2);

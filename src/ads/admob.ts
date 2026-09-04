@@ -124,7 +124,7 @@ function showDesiredBanner(): Promise<void> {
         adId: bannerId,
         adSize: BannerAdSize.ADAPTIVE_BANNER,
         position: BannerAdPosition.BOTTOM_CENTER,
-        margin: 84,
+        margin: 96,
         isTesting: testMode,
       });
     } catch {

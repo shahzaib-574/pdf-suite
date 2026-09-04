@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Clock3, Search, ShieldCheck, Sparkles } from 'lucide-react';
+import { ArrowRight, Clock3, FilePenLine, Search, ShieldCheck } from 'lucide-react';
 import { AppShell, StaggerGrid, ToolTile } from '../components';
 import { TOOLS, toolMatchesQuery } from '../lib/catalog';
 import type { RecentItem, ToolId } from '../lib/types';
@@ -76,7 +76,7 @@ export function Home() {
               onClick={() => navigate('#/tool/pdf-docx')}
             >
               <span className="ps-feature-card__icon" aria-hidden="true">
-                <Sparkles size={22} />
+                <FilePenLine size={22} />
               </span>
               <span className="ps-feature-card__copy">
                 <strong>PDF → Word</strong>

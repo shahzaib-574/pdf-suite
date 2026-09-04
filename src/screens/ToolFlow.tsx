@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Camera, Eye, EyeOff } from 'lucide-react';
 import { AnimatedButton, FileWell, PageHeader, ProgressHud } from '../components';
+import { ScanCamera } from './ScanCamera';
 import { TOOLS, type ToolDef } from '../lib/catalog';
 import type {
   CompressLevel,
@@ -102,6 +103,9 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const pro = usePro();
   const [initialScan] = useState(() => takeInitialScan(id));
   const [picked, setPicked] = useState<PickedFile[]>(initialScan.files);
+  const [cameraOpen, setCameraOpen] = useState(
+    () => id === 'scan' && initialScan.files.length === 0,
+  );
   const [busy, setBusy] = useState(false);
   const [jobProgress, setJobProgress] = useState<number | undefined>();
   const [jobLabel, setJobLabel] = useState('Working on-device…');
@@ -124,6 +128,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
 
   const locked = !pro && tool.pro;
   const maxFiles = pro ? Number.POSITIVE_INFINITY : tool.maxFilesFree;
+  const scanMaxPages = Number.isFinite(maxFiles) ? Math.max(1, maxFiles) : 20;
   const multiple = tool.accept === 'pdfs' || tool.accept === 'images';
   const copy = wellCopy(tool.id, tool.minFiles);
   const wellItems = useMemo(
@@ -453,6 +458,24 @@ export function ToolFlow({ id }: ToolFlowProps) {
 
   const ctaHint = canRun ? null : blockedReason();
 
+  if (tool.id === 'scan' && cameraOpen) {
+    return (
+      <ScanCamera
+        pages={picked}
+        maxPages={scanMaxPages}
+        onPages={(next) => {
+          setError(null);
+          setPicked(next);
+        }}
+        onClose={() => {
+          if (picked.length === 0) goBack('#/');
+          else setCameraOpen(false);
+        }}
+        onUse={() => setCameraOpen(false)}
+      />
+    );
+  }
+
   return (
     <div className="ps-screen">
       <PageHeader
@@ -482,17 +505,14 @@ export function ToolFlow({ id }: ToolFlowProps) {
 
         {tool.accept !== 'none' && tool.id === 'scan' ? (
           <>
-            <FileWell
-              accept="image/*"
-              multiple
-              files={[]}
-              onPick={(list) => {
-                void onPick(list);
-              }}
-              label="Take a photo"
-              hint="Uses the rear camera"
-              capture="environment"
-            />
+            <AnimatedButton
+              variant="ghost"
+              icon={Camera}
+              block
+              onClick={() => setCameraOpen(true)}
+            >
+              Add page with camera
+            </AnimatedButton>
             <FileWell
               accept="image/*"
               multiple

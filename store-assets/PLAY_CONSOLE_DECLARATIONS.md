@@ -9,7 +9,7 @@ Audited against the repository on **August 22, 2026** for Android application ID
 - The Android app targets API 36 with minimum API 24.
 - PDF, DOCX, image, OCR, generated-file, and recent-file contents are processed and retained locally. There is no Ream account or cloud document service.
 - Save uses Android's Storage Access Framework. Share is a specific user-initiated transfer through Android's share sheet.
-- Scan launches the system capture/file experience. The app does not declare camera, broad storage, or photo-library permission.
+- Scan opens an in-app camera preview and declares `CAMERA` for that screen. Gallery import still uses the system picker. The app does not declare broad storage or photo-library permission.
 - The production design includes Google AdMob adaptive banners on Tools and Recents only. It does not implement interstitial, rewarded, native, or app-open ads.
 - The release is pinned to Google Mobile Ads SDK `25.4.0` and User Messaging Platform `4.0.0` through `@capacitor-community/admob` `8.1.0`.
 - The app requests updated consent information before initializing ads, shows a consent form when required, does not request ads unless `canRequestAds` is true, and exposes Google's privacy-options form from Settings when required.
@@ -160,6 +160,7 @@ WorkManager dependency merge the remaining normal permissions below. CI enforces
 this as an exact packaged-APK allowlist rather than an expectation:
 
 - `android.permission.INTERNET`
+- `android.permission.CAMERA`
 - `android.permission.ACCESS_NETWORK_STATE`
 - `com.google.android.gms.permission.AD_ID`
 - `android.permission.ACCESS_ADSERVICES_AD_ID`
@@ -175,9 +176,9 @@ reappears. AndroidX Core declares Ream's package-scoped dynamic-receiver permiss
 with `signature` protection so only an app signed by the same certificate can use
 it; it is not a runtime prompt or access to user data.
 
-The app does **not** intentionally request `CAMERA`, `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, `READ_MEDIA_IMAGES`, precise/approximate location, microphone, contacts, phone, SMS, call log, or notification permission. Scan delegates capture to the system experience; import/export uses pickers and app-scoped cache. Android recommends these permission-minimizing patterns in [Minimize your permission requests](https://developer.android.com/privacy-and-security/minimize-permission-requests).
+The app requests `CAMERA` only for the in-app Scan preview. It does **not** request `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, `READ_MEDIA_IMAGES`, precise/approximate location, microphone, contacts, phone, SMS, call log, or notification permission. Gallery import and Save/Share still use pickers and app-scoped cache. Android recommends these permission-minimizing patterns in [Minimize your permission requests](https://developer.android.com/privacy-and-security/minimize-permission-requests).
 
-Expected Play result: **no high-risk or sensitive Permissions Declaration Form**. The advertising-ID question is separate and should be answered Yes as described above. Play evaluates the uploaded bundle, so inspect the final merged manifest in Bundle Explorer. If Play requests a sensitive-permission declaration, do not rationalize an unexpected permission—identify and remove its source or document the newly shipped core use case. See [Declare permissions for your app](https://support.google.com/googleplay/android-developer/answer/9214102).
+Expected Play result: a **Camera** permission declaration with the core use case “scanning paper pages into a PDF,” and no other high-risk permission form. The advertising-ID question is separate and should be answered Yes as described above. Play evaluates the uploaded bundle, so inspect the final merged manifest in Bundle Explorer. If Play requests a sensitive-permission declaration for anything other than camera, do not rationalize an unexpected permission—identify and remove its source or document the newly shipped core use case. See [Declare permissions for your app](https://support.google.com/googleplay/android-developer/answer/9214102).
 
 ## 7. Privacy-policy consistency
 
@@ -193,7 +194,7 @@ Current policy source: [`public/privacy.html`](../public/privacy.html).
 - Describes consent gating and the in-app route back to Google's privacy choices.
 - Describes TLS, local retention/deletion, Google-held advertising data, and Google
   privacy controls without treating Clear Recents as an ad-data deletion request.
-- Explains picker-based camera, file, and share behavior without broad storage access.
+- Explains in-app Scan camera permission, gallery picker, file, and share behavior without broad storage access.
 - Distinguishes on-device document processing and user-directed Save/Share from the
   advertising metadata transmitted to Google.
 
@@ -236,7 +237,7 @@ Internal testing supports up to 100 testers and is the recommended first Play-di
 - [ ] Install using the tester opt-in/Play link, not by sideloading; test clean install, upgrade, relaunch, background/restore, and uninstall/reinstall.
 - [ ] Cover minimum API 24 and target API 36, plus a current small phone and a tablet/large screen.
 - [ ] Verify Scan, PDF/DOCX/image import, every enabled tool, PDF reader/search, PDF-to-Word layout/OCR, Save, Share, Recents, and Clear Recents with synthetic non-confidential fixtures.
-- [ ] Confirm Android shows no camera, storage, photo-library, location, microphone, contacts, or phone runtime permission prompt.
+- [ ] Confirm Android shows a camera permission prompt only on Scan, and no storage, photo-library, location, microphone, contacts, or phone runtime permission prompt.
 - [ ] Verify document tools remain usable in airplane mode and when ads fail or consent does not permit a request.
 - [ ] Run the full UMP matrix in [`docs/admob-privacy-testing.md`](../docs/admob-privacy-testing.md): EEA, regulated-US (when distributed there), and other-region first/returning launches; verify Settings reopens privacy options only when required.
 - [ ] Confirm the banner appears only on Tools/Recents, never overlays navigation or actions, survives rotation/resizing, and leaves no blank spacer after a load failure.
