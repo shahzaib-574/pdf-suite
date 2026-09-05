@@ -1,8 +1,9 @@
 import { Camera, Images, Plus, RotateCcw, RotateCw, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import type { PickedFile } from "../lib/types";
 import { AnimatedButton } from "../components";
 import { toArrayBuffer } from "../store/files";
+import { fileArrayToFileList, pickGalleryImages } from "../store/incoming";
 import { applyScanEdit } from "../pdf/scanProcess";
 import { validCorners, type Point, type ScanEdit } from "../pdf/scanGeometry";
 const full = (): Point[] => [
@@ -12,6 +13,15 @@ const full = (): Point[] => [
   { x: 0, y: 1 },
 ];
 const WORKER_START = "WORKER_START";
+const PAGER_WINDOW = 6;
+function pagerShift(active: number, count: number): number {
+  if (count <= PAGER_WINDOW) return 0;
+  const focus = Math.min(Math.max(0, active), count - 1);
+  return Math.min(
+    Math.max(0, focus - Math.floor((PAGER_WINDOW - 1) / 2)),
+    count - PAGER_WINDOW,
+  );
+}
 async function applyPageEdit(
   original: PickedFile,
   edit: ScanEdit,
@@ -55,11 +65,13 @@ export function ScanEditor({
   onDone,
   onCamera,
   onGallery,
+  maxPages,
 }: {
   files: PickedFile[];
   onDone?: () => void;
   onCamera: () => void;
   onGallery: (files: FileList) => void;
+  maxPages: number;
   onChange: (original: PickedFile, file: PickedFile) => void;
   onBusyChange: (busy: boolean) => void;
 }) {
@@ -69,6 +81,7 @@ export function ScanEditor({
     [error, setError] = useState("");
   const worker = useRef<Worker | null>(null);
   const carousel = useRef<HTMLDivElement>(null);
+  const pagerView = useRef<HTMLDivElement>(null);
   const galleryInput = useRef<HTMLInputElement>(null);
   const slideWidth = useRef(1);
   const [ratios, setRatios] = useState<Record<string, number>>({});
@@ -128,7 +141,13 @@ export function ScanEditor({
   const turn = ((rotation % 360) + 360) % 360;
   const lastPage = files.length;
   const dragPx = drag ?? 0;
-  const thumbPos = Math.max(0, Math.min(lastPage, index - dragPx / slideWidth.current));
+  const visual = Math.max(0, Math.min(lastPage, index - dragPx / slideWidth.current));
+  const pagerCount = Math.min(files.length, PAGER_WINDOW);
+  const pagerOffset = pagerShift(visual >= files.length ? files.length - 1 : visual, files.length);
+  const thumbPos = visual >= files.length ? pagerCount : visual - pagerOffset;
+  useLayoutEffect(() => {
+    if (pagerView.current) pagerView.current.scrollLeft = 0;
+  }, [index, pagerOffset, files.length]);
   function onCarouselPointerDown(e: PointerEvent<HTMLDivElement>) {
     if ((e.target as HTMLElement).closest("button, input")) return;
     touchStart.current = e.clientX;
@@ -150,12 +169,25 @@ export function ScanEditor({
     setDrag(null);
     if (Math.abs(delta) > 45) selectPage(index + (delta < 0 ? 1 : -1));
   }
+  async function openGallery(): Promise<void> {
+    if (busy) return;
+    const remaining = Math.max(1, maxPages - files.length);
+    try {
+      const native = await pickGalleryImages(remaining);
+      if (native === null) {
+        galleryInput.current?.click();
+        return;
+      }
+      if (native.length) onGallery(fileArrayToFileList(native));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not add those photos.");
+    }
+  }
   return (
     <section className="scan-edit" aria-label="Crop and Edit">
       <header className="scan-edit__header">
         <AnimatedButton variant="ghost" icon={X} aria-label="Return to camera" disabled={busy} onClick={() => leave(onCamera)} />
         <h1>Crop and Edit</h1>
-        <span aria-live="polite">{index < files.length ? `${index + 1} / ${files.length}` : "Add pages"}</span>
       </header>
       <div className={`scan-edit__carousel${drag !== null ? " is-dragging" : ""}`} ref={carousel} role="region" aria-label="Scan pages" aria-roledescription="carousel" tabIndex={0}
         onKeyDown={e => { if ((e.target as HTMLElement).closest('button')) return; if(e.key === 'ArrowRight') selectPage(index + 1); if(e.key === 'ArrowLeft') selectPage(index - 1); }}
@@ -237,7 +269,7 @@ export function ScanEditor({
               <p id="scan-add-lead" className="scan-edit__add-lead">Add more using</p>
               <AnimatedButton icon={Camera} disabled={busy} onClick={() => leave(onCamera)}>Camera</AnimatedButton>
               <p className="scan-edit__add-or">OR</p>
-              <AnimatedButton variant="ghost" icon={Images} disabled={busy} onClick={() => galleryInput.current?.click()}>Gallery</AnimatedButton>
+              <AnimatedButton variant="ghost" icon={Images} disabled={busy} onClick={() => { void openGallery(); }}>Gallery</AnimatedButton>
               <input ref={galleryInput} className="sr-only" aria-label="Choose photos" type="file" accept="image/*" multiple disabled={busy} onChange={e => { if (e.target.files?.length) onGallery(e.target.files); e.target.value = ""; }} />
             </div>
           </div>
@@ -245,7 +277,26 @@ export function ScanEditor({
         <div className="scan-edit__pager" aria-label="Select page">
           <div className="scan-edit__pager-well">
             <span className="scan-edit__pager-thumb" aria-hidden="true" style={{transform: `translateX(calc(${thumbPos} * var(--pager-slot)))`}} />
-            {files.map((_, i) => <button type="button" key={i} aria-label={`Edit page ${i+1}`} aria-current={index === i ? "page" : undefined} disabled={busy} onClick={() => selectPage(i)} />)}
+            <div
+              ref={pagerView}
+              className="scan-edit__pager-view"
+              style={{width: `calc(${pagerCount} * var(--pager-slot))`}}
+              onScroll={(event) => { event.currentTarget.scrollLeft = 0; }}
+              onFocusCapture={() => { if (pagerView.current) pagerView.current.scrollLeft = 0; }}
+            >
+              <div className="scan-edit__pager-track" style={{width: `calc(${files.length} * var(--pager-slot))`, transform: `translateX(calc(${-pagerOffset} * var(--pager-slot)))`}}>
+                {files.map((_, i) => (
+                  <button
+                    type="button"
+                    key={i}
+                    aria-label={`Edit page ${i + 1}`}
+                    aria-current={index === i ? "page" : undefined}
+                    disabled={busy}
+                    onClick={() => selectPage(i)}
+                  />
+                ))}
+              </div>
+            </div>
             <button type="button" aria-label="Add more pages" aria-current={index === lastPage ? "page" : undefined} disabled={busy} onClick={() => selectPage(lastPage)}><Plus size={14} strokeWidth={2.4} /></button>
           </div>
         </div>

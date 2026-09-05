@@ -2136,35 +2136,46 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+}
+.ps-scan-preview__stage {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 42dvh;
 }
 .ps-scan-preview__sheet {
-  width: min(100%, calc(36dvh * var(--paper-w, 595) / var(--paper-h, 842)));
-  max-height: 36dvh;
-  aspect-ratio: var(--paper-w, 595) / var(--paper-h, 842);
+  position: relative;
+  box-sizing: border-box;
+  width: min(100%, calc(42dvh * var(--paper-w, 595.28) / var(--paper-h, 841.89)));
+  aspect-ratio: var(--paper-w, 595.28) / var(--paper-h, 841.89);
   overflow: hidden;
   background: #fff;
-  border-radius: 3px;
+  border-radius: 2px;
   box-shadow:
     0 14px 38px rgb(20 18 40 / 0.16),
     0 0 0 1px rgb(40 36 70 / 0.1);
   color-scheme: only light;
 }
-.ps-scan-preview__inset {
-  box-sizing: border-box;
-  width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
-  background: #fff;
-}
-.ps-scan-preview__inset img {
+.ps-scan-preview__photo {
+  position: absolute;
   display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+  max-width: none;
+  object-fit: fill;
   pointer-events: none;
   user-select: none;
+}
+.ps-scan-preview__photo.is-measuring {
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.ps-scan-preview__label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 .ps-scan-preview__pager {
   display: flex;
@@ -2222,9 +2233,13 @@
 .ps-select__button svg {
   flex-shrink: 0;
   color: var(--muted);
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .ps-select.is-open .ps-select__button {
   border-color: var(--primary);
+}
+.ps-select.is-open .ps-select__button svg {
+  transform: rotate(180deg);
 }
 .ps-select__button:disabled {
   opacity: 0.55;
@@ -2248,10 +2263,42 @@
   border: 1px solid var(--line);
   border-radius: 12px;
   box-shadow: var(--shadow-soft);
+  transform-origin: 50% 0;
+  animation: ps-select-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .ps-select__menu.is-up {
   top: auto;
   bottom: calc(100% + 4px);
+  transform-origin: 50% 100%;
+  animation-name: ps-select-in-up;
+}
+@keyframes ps-select-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes ps-select-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ps-select__menu,
+  .ps-select__menu.is-up,
+  .ps-select__button svg {
+    animation: none;
+    transition: none;
+  }
 }
 .ps-select__option {
   display: flex;
@@ -2293,7 +2340,8 @@
 .scan-edit__carousel { flex: 1; min-height: 0; overflow: hidden; touch-action: pan-y; position: relative; display: flex; flex-direction: column; }
 .scan-edit__track { display: flex; flex: 1; min-height: 0; align-items: stretch; transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1); container-type: size; }
 .scan-edit__carousel.is-dragging .scan-edit__track,
-.scan-edit__carousel.is-dragging .scan-edit__pager-thumb { transition: none; }
+.scan-edit__carousel.is-dragging .scan-edit__pager-thumb,
+.scan-edit__carousel.is-dragging .scan-edit__pager-track { transition: none; }
 .scan-edit__slide { flex: 0 0 100%; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 16px 32px 8px; box-sizing: border-box; }
 .scan-edit .ps-scan-editor__image { width: fit-content; max-width: 100%; height: auto; max-height: 100%; margin: 0; display: flex; }
 .scan-edit .ps-scan-editor__image img { width: auto; max-width: 100%; max-height: calc(100dvh - 228px); object-fit: contain; user-select: none; }
@@ -2303,10 +2351,8 @@
   display: flex;
   justify-content: center;
   padding: 0 16px 70px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow: hidden;
 }
-.scan-edit__pager::-webkit-scrollbar { display: none; }
 .scan-edit__pager-well {
   position: relative;
   display: flex;
@@ -2326,21 +2372,28 @@
   width: var(--pager-slot);
   height: calc(100% - 6px);
   border-radius: 999px;
-  background: linear-gradient(165deg, #ffffff 0%, #f2f4f8 48%, #d9dee8 100%);
+  background: linear-gradient(135deg, var(--primary), var(--primary-strong));
   box-shadow:
-    0 4px 12px color-mix(in srgb, #fff 20%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+    0 8px 20px color-mix(in srgb, var(--primary) 28%, transparent),
+    inset 0 1px rgba(255, 255, 255, 0.22);
   pointer-events: none;
   transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1);
 }
-[data-theme="light"] .scan-edit__pager-thumb {
-  box-shadow:
-    0 3px 8px rgba(24, 23, 37, 0.14),
-    inset 0 1px 0 #fff;
+.scan-edit__pager-view {
+  overflow: hidden;
+  overflow: clip;
+  height: 26px;
+  flex: none;
+}
+.scan-edit__pager-track {
+  display: flex;
+  height: 26px;
+  transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .scan-edit__pager button {
   position: relative;
   z-index: 1;
+  flex: none;
   width: var(--pager-slot);
   height: 26px;
   padding: 0;
@@ -2350,7 +2403,7 @@
   place-items: center;
   color: var(--muted);
 }
-.scan-edit__pager button:not(:last-child)::after {
+.scan-edit__pager-track button::after {
   content: "";
   width: 6px;
   height: 6px;
@@ -2359,11 +2412,11 @@
   opacity: 0.55;
   transition: opacity 180ms ease, transform 180ms ease;
 }
-.scan-edit__pager button[aria-current]:not(:last-child)::after {
+.scan-edit__pager-track button[aria-current]::after {
   opacity: 0;
   transform: scale(0.4);
 }
-.scan-edit__pager button[aria-current] { color: #181725; }
+.scan-edit__pager button[aria-current] { color: var(--brass-ink); }
 .scan-edit__pager button:focus-visible {
   outline: 3px solid var(--primary);
   outline-offset: 2px;
@@ -2410,7 +2463,8 @@
 @media (prefers-reduced-motion: reduce) {
   .scan-edit__track,
   .scan-edit__pager-thumb,
-  .scan-edit__pager button:not(:last-child)::after { transition: none; }
+  .scan-edit__pager-track,
+  .scan-edit__pager-track button::after { transition: none; }
 }
 
 .scan-edit { --scan-image-height: calc(100dvh - 228px); }

@@ -1,10 +1,13 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import type { PluginListenerHandle } from "@capacitor/core";
 import type { PickedFile } from "../lib/types";
-import { ensureJpegOrPng, MAX_INPUT_BYTES } from "./files";
+import { ensureJpegOrPng, MAX_INPUT_BYTES, toArrayBuffer } from "./files";
 type Incoming = { id: string; name: string; mime: string; size: number };
 const importer = registerPlugin<{
   takeFiles(): Promise<{ files: Incoming[]; error: string }>;
+  pickImages(options: {
+    max: number;
+  }): Promise<{ files: Incoming[]; cancelled?: boolean; error: string }>;
   readChunk(options: { id: string; offset: number }): Promise<{ data: string }>;
   release(options: { id: string }): Promise<void>;
   addListener(
@@ -12,6 +15,74 @@ const importer = registerPlugin<{
     callback: () => void,
   ): Promise<PluginListenerHandle>;
 }>("FileImporter");
+
+function isUnimplementedPluginError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /not implemented|unimplemented|is not available/i.test(message);
+}
+
+async function readIncomingBytes(file: Incoming): Promise<Uint8Array> {
+  const bytes = new Uint8Array(file.size);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const { data } = await importer.readChunk({
+      id: file.id,
+      offset,
+    });
+    const binary = atob(data);
+    if (!binary.length || offset + binary.length > bytes.length)
+      throw new Error("The file could not be read completely.");
+    for (let i = 0; i < binary.length; i++)
+      bytes[offset + i] = binary.charCodeAt(i);
+    offset += binary.length;
+  }
+  return bytes;
+}
+
+export function androidGalleryPickerAvailable(): boolean {
+  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+}
+
+export function fileArrayToFileList(files: File[]): FileList {
+  const transfer = new DataTransfer();
+  for (const file of files) transfer.items.add(file);
+  return transfer.files;
+}
+
+/** Native Android photo picker. `null` means fall back to `<input type="file">`. */
+export async function pickGalleryImages(max: number): Promise<File[] | null> {
+  if (!androidGalleryPickerAvailable()) return null;
+  const limit = Math.max(1, Math.min(200, Math.floor(max) || 1));
+  let batch: { files: Incoming[]; cancelled?: boolean; error: string };
+  try {
+    batch = await importer.pickImages({ max: limit });
+  } catch (error) {
+    if (isUnimplementedPluginError(error)) return null;
+    throw error instanceof Error
+      ? error
+      : new Error("Could not open the gallery.");
+  }
+  if (batch.error) throw new Error(batch.error);
+  if (batch.cancelled || batch.files.length === 0) return [];
+  try {
+    if (batch.files.reduce((sum, file) => sum + file.size, 0) > MAX_INPUT_BYTES)
+      throw new Error("Those photos exceed 128 MB. Choose a smaller group.");
+    const files: File[] = [];
+    for (const file of batch.files) {
+      const bytes = await readIncomingBytes(file);
+      files.push(
+        new File([toArrayBuffer(bytes)], file.name, {
+          type: file.mime || "image/jpeg",
+        }),
+      );
+    }
+    return files;
+  } finally {
+    await Promise.allSettled(
+      batch.files.map((file) => importer.release({ id: file.id })),
+    );
+  }
+}
 export function subscribeIncoming(
   onFiles: (files: PickedFile[]) => void,
   onError: (message: string) => void,
@@ -42,22 +113,7 @@ export function subscribeIncoming(
           const files: PickedFile[] = [];
           for (const file of batch.files) {
             if (!active) break;
-            const bytes = new Uint8Array(file.size);
-            let offset = 0;
-            while (offset < bytes.length) {
-              const { data } = await importer.readChunk({
-                id: file.id,
-                offset,
-              });
-              const binary = atob(data);
-              if (!binary.length || offset + binary.length > bytes.length)
-                throw new Error(
-                  "The shared file could not be read completely.",
-                );
-              for (let i = 0; i < binary.length; i++)
-                bytes[offset + i] = binary.charCodeAt(i);
-              offset += binary.length;
-            }
+            const bytes = await readIncomingBytes(file);
             const picked = { name: file.name, mime: file.mime, bytes };
             files.push(
               file.mime.startsWith("image/")

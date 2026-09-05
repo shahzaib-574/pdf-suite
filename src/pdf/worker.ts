@@ -1,4 +1,4 @@
-import { PAPER_SIZES } from "../lib/paperSizes";
+import { fitImageOnPdfPage, imagePdfPageSize } from "../lib/imagePdfPage";
 import {
   PDFDocument,
   PDFSignature,
@@ -224,23 +224,20 @@ async function imagesToPdf(files: TransferFile[], options?: ImagePdfOptions) {
       item.kind === "jpg"
         ? await out.embedJpg(item.bytes)
         : await out.embedPng(item.bytes);
-    const margin = Math.max(0, Math.min(72, options?.margin ?? IMAGE_MARGIN));
-    const paper = PAPER_SIZES[options?.size === "original" ? "a4" : (options?.size ?? "a4")];
-    let width: number = paper.width;
-    let height: number = paper.height;
-    if (options?.landscape) [width, height] = [height, width];
-    if (options?.size === "original") {
-      width = image.width * 0.75 + margin * 2;
-      height = image.height * 0.75 + margin * 2;
-    }
-    const dims = image.scaleToFit(width - margin * 2, height - margin * 2);
-    const page = out.addPage([width, height]);
-    page.drawImage(image, {
-      x: (width - dims.width) / 2,
-      y: (height - dims.height) / 2,
-      width: dims.width,
-      height: dims.height,
-    });
+    const pageBox = imagePdfPageSize(
+      {
+        size: options?.size ?? "a4",
+        landscape: Boolean(options?.landscape),
+        margin: options?.margin ?? IMAGE_MARGIN,
+      },
+      { width: image.width, height: image.height },
+    );
+    const dims = fitImageOnPdfPage(
+      { width: image.width, height: image.height },
+      pageBox,
+    );
+    const page = out.addPage([pageBox.width, pageBox.height]);
+    page.drawImage(image, dims);
   }
   return saved(out, "images.pdf");
 }

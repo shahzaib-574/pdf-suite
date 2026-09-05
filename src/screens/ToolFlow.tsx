@@ -743,6 +743,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
             }}
             onCamera={() => setCameraOpen(true)}
             onGallery={(list) => { void onPick(list); }}
+            maxPages={scanMaxPages}
             files={picked}
             onBusyChange={setScanBusy}
             onChange={(original, file) =>

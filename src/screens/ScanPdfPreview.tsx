@@ -1,9 +1,40 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { AnimatedButton } from "../components";
-import { PAPER_SIZES } from "../lib/paperSizes";
+import {
+  fitImageOnPdfPage,
+  imagePdfPageSize,
+  paperPreviewLabel,
+} from "../lib/imagePdfPage";
 import type { ImagePdfOptions, PickedFile } from "../lib/types";
 import { toArrayBuffer } from "../store/files";
+
+function previewMime(file: PickedFile): string {
+  const mime = file.mime.trim().toLowerCase();
+  if (mime === "image/jpg") return "image/jpeg";
+  if (
+    mime.startsWith("image/") &&
+    mime !== "image/heic" &&
+    mime !== "image/heif"
+  ) {
+    return mime;
+  }
+  const bytes = file.bytes;
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
+    return "image/jpeg";
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50)
+    return "image/png";
+  if (
+    bytes.length >= 12 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return "image/jpeg";
+}
 
 export function ScanPdfPreview({
   files,
@@ -13,65 +44,83 @@ export function ScanPdfPreview({
   options: ImagePdfOptions;
 }) {
   const [index, setIndex] = useState(0);
-  const [ratios, setRatios] = useState<Record<number, number>>({});
+  const [natural, setNatural] = useState<
+    Record<number, { width: number; height: number }>
+  >({});
   const urls = useMemo(
     () =>
       files.map((file) =>
         URL.createObjectURL(
-          new Blob([toArrayBuffer(file.bytes)], { type: file.mime }),
+          new Blob([toArrayBuffer(file.bytes)], { type: previewMime(file) }),
         ),
       ),
     [files],
   );
   useEffect(() => () => urls.forEach((url) => URL.revokeObjectURL(url)), [urls]);
-  useEffect(() => {
-    if (index > files.length - 1) setIndex(Math.max(0, files.length - 1));
-  }, [files.length, index]);
 
-  const paper =
-    options.size === "original" ? null : PAPER_SIZES[options.size];
-  const ratio = ratios[index] || 0.7071;
-  let paperW = paper?.width ?? 100;
-  let paperH = paper?.height ?? 100 / ratio;
-  if (!paper) {
-    paperW = ratio >= 1 ? 100 : 100 * ratio;
-    paperH = ratio >= 1 ? 100 / ratio : 100;
-  } else if (options.landscape) {
-    [paperW, paperH] = [paperH, paperW];
-  }
-  const pad = paperW > 0 ? (Math.max(0, options.margin) / paperW) * 100 : 0;
-  const last = files.length - 1;
+  const last = Math.max(0, files.length - 1);
+  const pageIndex = Math.min(index, last);
+  const measured = natural[pageIndex];
+  const page = imagePdfPageSize(
+    options,
+    measured ?? { width: 1000, height: 1414 },
+  );
+  const draw = measured ? fitImageOnPdfPage(measured, page) : null;
+  const label = paperPreviewLabel(options);
   if (files.length === 0) return null;
 
   return (
     <section className="ps-scan-preview" aria-label="PDF preview">
-      <div
-        className="ps-scan-preview__sheet"
-        style={{
-          ["--paper-w" as string]: String(paperW),
-          ["--paper-h" as string]: String(paperH),
-        }}
-      >
+      <div className="ps-scan-preview__stage">
         <div
-          className="ps-scan-preview__inset"
-          style={{ padding: `${pad}%` }}
+          className="ps-scan-preview__sheet"
+          aria-label={label}
+          style={{
+            ["--paper-w" as string]: String(page.width),
+            ["--paper-h" as string]: String(page.height),
+          }}
         >
-          {urls[index] ? (
+          {urls[pageIndex] ? (
             <img
-              src={urls[index]}
-              alt={`Page ${index + 1} of ${files.length}`}
+              className={`ps-scan-preview__photo${draw ? "" : " is-measuring"}`}
+              src={urls[pageIndex]}
+              alt={`Page ${pageIndex + 1} of ${files.length}`}
+              style={
+                draw
+                  ? {
+                      left: `${(draw.x / page.width) * 100}%`,
+                      top: `${((page.height - draw.y - draw.height) / page.height) * 100}%`,
+                      width: `${(draw.width / page.width) * 100}%`,
+                      height: `${(draw.height / page.height) * 100}%`,
+                    }
+                  : undefined
+              }
               onLoad={(event) => {
-                const image = event.currentTarget;
-                if (!image.naturalWidth || !image.naturalHeight) return;
-                const next = image.naturalWidth / image.naturalHeight;
-                setRatios((current) =>
-                  current[index] === next ? current : { ...current, [index]: next },
-                );
+                const node = event.currentTarget;
+                if (!node.naturalWidth || !node.naturalHeight) return;
+                setNatural((current) => {
+                  const prev = current[pageIndex];
+                  if (
+                    prev &&
+                    prev.width === node.naturalWidth &&
+                    prev.height === node.naturalHeight
+                  ) {
+                    return current;
+                  }
+                  return {
+                    ...current,
+                    [pageIndex]: {
+                      width: node.naturalWidth,
+                      height: node.naturalHeight,
+                    },
+                  };
+                });
               }}
             />
           ) : null}
         </div>
       </div>
+      <p className="ps-scan-preview__label">{label}</p>
       {files.length > 1 ? (
         <div className="ps-scan-preview__pager">
           <AnimatedButton
@@ -79,18 +128,18 @@ export function ScanPdfPreview({
             className="btn--icon"
             icon={ChevronLeft}
             aria-label="Previous page"
-            disabled={index === 0}
+            disabled={pageIndex === 0}
             onClick={() => setIndex((value) => Math.max(0, value - 1))}
           />
           <span className="tabular">
-            {index + 1} / {files.length}
+            {pageIndex + 1} / {files.length}
           </span>
           <AnimatedButton
             variant="ghost"
             className="btn--icon"
             icon={ChevronRight}
             aria-label="Next page"
-            disabled={index >= last}
+            disabled={pageIndex >= last}
             onClick={() => setIndex((value) => Math.min(last, value + 1))}
           />
         </div>

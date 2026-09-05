@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import { Check, Images, X } from "lucide-react";
 import type { PickedFile } from "../lib/types";
 import { fileListToPicked, toArrayBuffer } from "../store/files";
+import { pickGalleryImages } from "../store/incoming";
 
 export type ScanCameraProps = {
   pages: PickedFile[];
@@ -257,6 +258,23 @@ export function ScanCamera({
     event.target.value = "";
   }
 
+  async function openGallery(): Promise<void> {
+    if (busy || atLimit) return;
+    const remaining = Math.max(1, maxPages - pagesRef.current.length);
+    try {
+      const native = await pickGalleryImages(remaining);
+      if (native === null) {
+        galleryRef.current?.click();
+        return;
+      }
+      if (native.length) await addImageFiles(native);
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Could not add those photos.",
+      );
+    }
+  }
+
   function retryCamera(): void {
     setMessage(null);
     setStatus("starting");
@@ -365,7 +383,9 @@ export function ScanCamera({
           className="scan-cam__gallery"
           aria-label="Choose from gallery"
           disabled={busy || atLimit}
-          onClick={() => galleryRef.current?.click()}
+          onClick={() => {
+            void openGallery();
+          }}
         >
           <Images size={22} strokeWidth={2.1} aria-hidden="true" />
           <span>Gallery</span>
