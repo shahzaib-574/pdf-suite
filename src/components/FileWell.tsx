@@ -1,8 +1,8 @@
-import { useId, type ChangeEvent } from 'react';
-import { Camera, Upload, X } from 'lucide-react';
-import '../motion/gsapSetup';
-import { usePress } from '../motion/press';
-import { AnimatedButton } from './AnimatedButton';
+import { useId, type ChangeEvent } from "react";
+import { Camera, Upload, X, ArrowUp, ArrowDown } from "lucide-react";
+import "../motion/gsapSetup";
+import { usePress } from "../motion/press";
+import { AnimatedButton } from "./AnimatedButton";
 
 export type FileWellItem = {
   name: string;
@@ -12,16 +12,18 @@ export type FileWellItem = {
 export type FileWellProps = {
   accept: string;
   multiple?: boolean;
+  disabled?: boolean;
   files: FileWellItem[];
   onPick: (fileList: FileList) => void;
   onRemove?: (index: number) => void;
+  onMove?: (index: number, direction: -1 | 1) => void;
   label: string;
   hint: string;
-  capture?: boolean | 'user' | 'environment';
+  capture?: boolean | "user" | "environment";
 };
 
 function formatBytes(size: number): string {
-  if (!Number.isFinite(size) || size <= 0) return '0 B';
+  if (!Number.isFinite(size) || size <= 0) return "0 B";
   if (size < 1024) return `${Math.round(size)} B`;
   const kb = size / 1024;
   if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
@@ -30,19 +32,21 @@ function formatBytes(size: number): string {
 }
 
 function captureAttr(
-  capture: FileWellProps['capture'],
-): 'user' | 'environment' | undefined {
-  if (capture === true) return 'environment';
-  if (capture === 'user' || capture === 'environment') return capture;
+  capture: FileWellProps["capture"],
+): "user" | "environment" | undefined {
+  if (capture === true) return "environment";
+  if (capture === "user" || capture === "environment") return capture;
   return undefined;
 }
 
 export function FileWell({
   accept,
   multiple = false,
+  disabled = false,
   files,
   onPick,
   onRemove,
+  onMove,
   label,
   hint,
   capture,
@@ -55,7 +59,7 @@ export function FileWell({
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     const list = event.target.files;
     if (list && list.length > 0) onPick(list);
-    event.target.value = '';
+    event.target.value = "";
   };
 
   return (
@@ -65,6 +69,7 @@ export function FileWell({
           id={id}
           className="sr-only"
           type="file"
+          disabled={disabled}
           accept={accept}
           multiple={multiple}
           capture={captureValue}
@@ -84,11 +89,32 @@ export function FileWell({
                 <p className="well__file">{file.name}</p>
                 <p className="well__size tabular">{formatBytes(file.size)}</p>
               </div>
+              {onMove && files.length > 1 ? (
+                <>
+                  <AnimatedButton
+                    variant="ghost"
+                    className="btn--icon"
+                    icon={ArrowUp}
+                    disabled={disabled || index === 0}
+                    aria-label={`Move ${file.name} earlier`}
+                    onClick={() => onMove(index, -1)}
+                  />
+                  <AnimatedButton
+                    variant="ghost"
+                    className="btn--icon"
+                    icon={ArrowDown}
+                    disabled={disabled || index === files.length - 1}
+                    aria-label={`Move ${file.name} later`}
+                    onClick={() => onMove(index, 1)}
+                  />
+                </>
+              ) : null}
               {onRemove ? (
                 <AnimatedButton
                   variant="ghost"
                   className="btn--icon well__remove"
                   icon={X}
+                  disabled={disabled}
                   aria-label={`Remove ${file.name}`}
                   onClick={() => onRemove(index)}
                 />

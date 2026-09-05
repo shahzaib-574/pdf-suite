@@ -1,0 +1,50 @@
+name: Build ad-free internal test APK
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  internal-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+      - run: npm ci
+      - name: Verify and synchronize ad-free app
+        run: |
+          npm run lint
+          npm run pdf-selfcheck
+          npm run docx-selfcheck
+          npm run quality-selfcheck
+          npm run android:sync
+          npm run verify:ad-free
+      - name: Build and check Android
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug
+      - name: Upload sideload-only test APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ream-ad-free-test-apk-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Android check reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ream-android-checks-${{ github.run_number }}
+          path: android/app/build/reports/
+          if-no-files-found: ignore
+          retention-days: 14

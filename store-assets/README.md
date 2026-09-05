@@ -15,7 +15,6 @@ Use [`PLAY_CONSOLE_DECLARATIONS.md`](PLAY_CONSOLE_DECLARATIONS.md) as the audite
 | App icon | `graphics/app-icon-512.png` | 512 x 512, 32-bit RGBA PNG, fully opaque, sRGB, 1 MB or smaller |
 | Feature graphic | `graphics/feature-graphic-1024x500.png` | 1024 x 500, 24-bit RGB PNG, no alpha, sRGB |
 | Graphic alt text | `listing/en-US/alt-text.md` | Written for meaning rather than visual decoration |
-| AdMob authorization | `app-ads.txt` | Exact Ream publisher record; deploy unchanged at the developer website host root |
 | Screenshot PDF fixture | `fixtures/ream-screenshot-fixture.pdf` | Deterministic five-page synthetic document with text, table, columns, and mixed orientation |
 
 The graphics are derived from the canonical `assets/logo.svg`. Their editable vector sources are in `graphics/source/`.
@@ -74,9 +73,8 @@ a legacy screenshot set without a manifest is reported as unprovenanced.
 - [ ] Validate the final screenshots and their `screenshots/capture-provenance.json` together.
 - [ ] Paste the en-US listing copy without adding rankings, prices, testimonials, or unverified claims.
 - [x] Enable the Pages workflow on `main`, then verify `https://shahzaib-574.github.io/pdf-suite/privacy.html` without signing in and add it as the privacy-policy URL.
-- [ ] Link a developer website whose host root serves the tracked `app-ads.txt` unchanged; a file under the `/pdf-suite/` project path is not sufficient for AdMob verification.
 - [ ] Select the Productivity category and only tags that accurately describe shipped behavior.
-- [ ] Declare that the app contains ads if AdMob is enabled in the release build.
+- [ ] Review the ad-free declaration draft against every currently distributed version.
 - [ ] Complete Data safety from the release build's actual SDK behavior.
 - [ ] Complete content rating, target audience, app access, and ads declarations.
 - [ ] Verify the developer contact and support website shown to users.

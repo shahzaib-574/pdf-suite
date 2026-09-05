@@ -1,12 +1,13 @@
 /**
  * On-device DOCX → PDF. No DOM / network. Runs in the browser and in Node.
  */
-import { XMLParser } from 'fast-xml-parser';
-import JSZip from 'jszip';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import type { PDFFont, PDFImage, PDFPage } from 'pdf-lib';
-import type { JobOk, JobResult, PickedFile } from '../lib/types';
-import { clamp, humanError } from './util';
+import { XMLParser } from "fast-xml-parser";
+import JSZip from "jszip";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import type { PDFFont, PDFImage, PDFPage } from "pdf-lib";
+import type { JobOk, JobResult, PickedFile } from "../lib/types";
+import { clamp, humanError } from "./util";
+import { documentFonts } from "./fonts";
 
 const PAGE_W = 595.28;
 const PAGE_H = 841.89;
@@ -25,8 +26,8 @@ type PageLayout = {
 function contentWidth(layout: PageLayout): number {
   return Math.max(40, layout.width - layout.left - layout.right);
 }
-const NOT_DOCX = 'This does not look like a Word .docx file.';
-const EMPTY_LINE = 'This document had no readable text.';
+const NOT_DOCX = "This does not look like a Word .docx file.";
+const EMPTY_LINE = "This document had no readable text.";
 const INK = rgb(0, 0, 0);
 const CELL_PAD = 5;
 
@@ -37,21 +38,21 @@ const WIN1252_EXTRA = new Set<number>([
 ]);
 
 const TEXT_MAP: Record<string, string> = {
-  '\u00a0': ' ',
-  '\u2002': ' ',
-  '\u2003': ' ',
-  '\u2009': ' ',
-  '\u202f': ' ',
-  '\u200b': '',
-  '\u200c': '',
-  '\u200d': '',
-  '\u2060': '',
-  '\ufeff': '',
-  '\u00ad': '',
-  '\t': '    ',
+  "\u00a0": " ",
+  "\u2002": " ",
+  "\u2003": " ",
+  "\u2009": " ",
+  "\u202f": " ",
+  "\u200b": "",
+  "\u200c": "",
+  "\u200d": "",
+  "\u2060": "",
+  "\ufeff": "",
+  "\u00ad": "",
+  "\t": "    ",
 };
 
-type Align = 'left' | 'center' | 'right';
+type Align = "left" | "center" | "right";
 type Heading = 1 | 2 | 3;
 type XmlNode = Record<string, unknown>;
 
@@ -97,10 +98,10 @@ type NumInfo = {
 type RunPr = { bold?: boolean; italic?: boolean; sizePt?: number };
 
 type Piece =
-  | { kind: 'text'; text: string; bold: boolean; italic: boolean; size: number }
-  | { kind: 'nl' }
-  | { kind: 'break' }
-  | { kind: 'image'; relId: string; cx?: number; cy?: number };
+  | { kind: "text"; text: string; bold: boolean; italic: boolean; size: number }
+  | { kind: "nl" }
+  | { kind: "break" }
+  | { kind: "image"; relId: string; cx?: number; cy?: number };
 
 type Run = { text: string; bold: boolean; italic: boolean; size: number };
 
@@ -122,7 +123,7 @@ type TableCell = {
 
 type Block =
   | {
-      kind: 'para';
+      kind: "para";
       runs: Run[];
       align: Align;
       indent: number;
@@ -133,17 +134,28 @@ type Block =
       spaceAfter: number;
       lineMult: number;
     }
-  | { kind: 'image'; relId: string; cx?: number; cy?: number; align: Align }
-  | { kind: 'break' }
-  | { kind: 'table'; rows: TableCell[][]; colWeights: number[]; edges: SideBorders };
+  | { kind: "image"; relId: string; cx?: number; cy?: number; align: Align }
+  | { kind: "break" }
+  | {
+      kind: "table";
+      rows: TableCell[][];
+      colWeights: number[];
+      edges: SideBorders;
+    };
 
 type Fonts = { r: PDFFont; b: PDFFont; i: PDFFont; bi: PDFFont };
 
-type LinePart = { text: string; bold: boolean; italic: boolean; size: number; width: number };
+type LinePart = {
+  text: string;
+  bold: boolean;
+  italic: boolean;
+  size: number;
+  width: number;
+};
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
-  attributeNamePrefix: '@_',
+  attributeNamePrefix: "@_",
   preserveOrder: true,
   removeNSPrefix: true,
   trimValues: false,
@@ -164,22 +176,59 @@ export async function docxToPdf(file: PickedFile): Promise<JobResult> {
 
 function fail(err: unknown): JobResult {
   const message = humanError(err);
-  if (message === 'PDF processing failed') {
-    return { ok: false, message: 'Could not convert this Word document.' };
+  if (message === "PDF processing failed") {
+    return { ok: false, message: "Could not convert this Word document." };
   }
   return { ok: false, message };
+}
+
+export function validateDocxArchive(bytes: Uint8Array): void {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let total = 0,
+    entries = 0;
+  for (let i = Math.max(0, bytes.length - 65557); i + 22 <= bytes.length; i++) {
+    if (view.getUint32(i, true) !== 0x06054b50) continue;
+    const count = view.getUint16(i + 10, true);
+    let at = view.getUint32(i + 16, true);
+    if (count > 2000 || count === 65535)
+      throw new Error(
+        "This DOCX contains too many parts. Simplify it in Word before converting.",
+      );
+    for (let n = 0; n < count; n++) {
+      if (at + 46 > bytes.length || view.getUint32(at, true) !== 0x02014b50)
+        throw new Error("The DOCX archive is damaged.");
+      const size = view.getUint32(at + 24, true);
+      total += size;
+      entries++;
+      if (size > 32 * 1024 * 1024 || total > 128 * 1024 * 1024)
+        throw new Error(
+          "The expanded DOCX is too large to convert safely on this device.",
+        );
+      at +=
+        46 +
+        view.getUint16(at + 28, true) +
+        view.getUint16(at + 30, true) +
+        view.getUint16(at + 32, true);
+    }
+    if (entries) return;
+  }
+  throw new Error(NOT_DOCX);
 }
 
 async function convert(file: PickedFile): Promise<JobResult> {
   const bytes = file.bytes.slice();
   let zip: JSZip;
   try {
+    validateDocxArchive(bytes);
     zip = await JSZip.loadAsync(bytes);
-  } catch {
-    return { ok: false, message: NOT_DOCX };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : NOT_DOCX,
+    };
   }
 
-  const docXml = await readZipString(zip, 'word/document.xml');
+  const docXml = await readZipString(zip, "word/document.xml");
   if (docXml === undefined) {
     return { ok: false, message: NOT_DOCX };
   }
@@ -188,10 +237,10 @@ async function convert(file: PickedFile): Promise<JobResult> {
   try {
     parsed = parseXml(docXml);
   } catch {
-    return { ok: false, message: 'Could not read this Word document.' };
+    return { ok: false, message: "Could not read this Word document." };
   }
 
-  const rels = await loadRels(zip, 'word/_rels/document.xml.rels');
+  const rels = await loadRels(zip, "word/_rels/document.xml.rels");
   const styles = await loadStyles(zip);
   const numbering = await loadNumbering(zip);
   const blocks = walkBody(parsed, styles, numbering);
@@ -201,16 +250,20 @@ async function convert(file: PickedFile): Promise<JobResult> {
 }
 
 function parsePageLayout(parsed: unknown): PageLayout {
-  const body = findFirst(asNodes(parsed), 'body');
-  const sect = body ? findFirst(childrenOf(body), 'sectpr') : undefined;
-  const pgSz = sect ? childNamed(sect, 'pgsz') : undefined;
-  const pgMar = sect ? childNamed(sect, 'pgmar') : undefined;
-  const width = twipsToPt(pgSz ? attr(pgSz, 'w') : undefined) ?? PAGE_W;
-  const height = twipsToPt(pgSz ? attr(pgSz, 'h') : undefined) ?? PAGE_H;
-  const top = twipsToPt(pgMar ? attr(pgMar, 'top') : undefined) ?? DEFAULT_MARGIN;
-  const right = twipsToPt(pgMar ? attr(pgMar, 'right') : undefined) ?? DEFAULT_MARGIN;
-  const bottom = twipsToPt(pgMar ? attr(pgMar, 'bottom') : undefined) ?? DEFAULT_MARGIN;
-  const left = twipsToPt(pgMar ? attr(pgMar, 'left') : undefined) ?? DEFAULT_MARGIN;
+  const body = findFirst(asNodes(parsed), "body");
+  const sect = body ? findFirst(childrenOf(body), "sectpr") : undefined;
+  const pgSz = sect ? childNamed(sect, "pgsz") : undefined;
+  const pgMar = sect ? childNamed(sect, "pgmar") : undefined;
+  const width = twipsToPt(pgSz ? attr(pgSz, "w") : undefined) ?? PAGE_W;
+  const height = twipsToPt(pgSz ? attr(pgSz, "h") : undefined) ?? PAGE_H;
+  const top =
+    twipsToPt(pgMar ? attr(pgMar, "top") : undefined) ?? DEFAULT_MARGIN;
+  const right =
+    twipsToPt(pgMar ? attr(pgMar, "right") : undefined) ?? DEFAULT_MARGIN;
+  const bottom =
+    twipsToPt(pgMar ? attr(pgMar, "bottom") : undefined) ?? DEFAULT_MARGIN;
+  const left =
+    twipsToPt(pgMar ? attr(pgMar, "left") : undefined) ?? DEFAULT_MARGIN;
   return {
     width: Math.max(200, width),
     height: Math.max(200, height),
@@ -224,7 +277,7 @@ function parsePageLayout(parsed: unknown): PageLayout {
 export async function docxBlockKinds(file: PickedFile): Promise<string[]> {
   try {
     const zip = await JSZip.loadAsync(file.bytes.slice());
-    const docXml = await readZipString(zip, 'word/document.xml');
+    const docXml = await readZipString(zip, "word/document.xml");
     if (docXml === undefined) return [];
     const parsed = parseXml(docXml);
     const styles = await loadStyles(zip);
@@ -241,7 +294,7 @@ function parseXml(xml: string): unknown {
 }
 
 function isRecord(value: unknown): value is XmlNode {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function asNodes(value: unknown): XmlNode[] {
@@ -251,20 +304,20 @@ function asNodes(value: unknown): XmlNode[] {
 }
 
 function localName(tag: string): string {
-  const i = tag.indexOf(':');
+  const i = tag.indexOf(":");
   return (i >= 0 ? tag.slice(i + 1) : tag).toLowerCase();
 }
 
 function elementKey(node: XmlNode): string | undefined {
   for (const key of Object.keys(node)) {
-    if (key !== ':@' && key !== '#text') return key;
+    if (key !== ":@" && key !== "#text") return key;
   }
   return undefined;
 }
 
 function tagOf(node: XmlNode): string {
   const key = elementKey(node);
-  return key ? localName(key) : '';
+  return key ? localName(key) : "";
 }
 
 function childrenOf(node: XmlNode): XmlNode[] {
@@ -274,12 +327,12 @@ function childrenOf(node: XmlNode): XmlNode[] {
 }
 
 function attrsOf(node: XmlNode): Record<string, string> {
-  const raw = node[':@'];
+  const raw = node[":@"];
   if (!isRecord(raw)) return {};
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw)) {
     if (value === undefined || value === null) continue;
-    const name = key.startsWith('@_') ? key.slice(2) : key;
+    const name = key.startsWith("@_") ? key.slice(2) : key;
     out[localName(name)] = String(value);
   }
   return out;
@@ -290,14 +343,15 @@ function attr(node: XmlNode, name: string): string | undefined {
 }
 
 function textOf(node: XmlNode): string {
-  const direct = node['#text'];
-  if (typeof direct === 'string') return direct;
-  if (typeof direct === 'number' || typeof direct === 'boolean') return String(direct);
-  let out = '';
+  const direct = node["#text"];
+  if (typeof direct === "string") return direct;
+  if (typeof direct === "number" || typeof direct === "boolean")
+    return String(direct);
+  let out = "";
   for (const child of childrenOf(node)) {
-    if ('#text' in child && !elementKey(child)) {
+    if ("#text" in child && !elementKey(child)) {
       out += textOf(child);
-    } else if (tagOf(child) === '') {
+    } else if (tagOf(child) === "") {
       out += textOf(child);
     }
   }
@@ -315,12 +369,12 @@ function findFirst(nodes: XmlNode[], name: string): XmlNode | undefined {
 
 function unwrapAlternate(node: XmlNode): XmlNode[] {
   const kids = childrenOf(node);
-  const choices = kids.filter((k) => tagOf(k) === 'choice');
+  const choices = kids.filter((k) => tagOf(k) === "choice");
   for (const choice of choices) {
     const inner = childrenOf(choice);
     if (inner.length > 0) return inner;
   }
-  const fallback = kids.find((k) => tagOf(k) === 'fallback');
+  const fallback = kids.find((k) => tagOf(k) === "fallback");
   return fallback ? childrenOf(fallback) : [];
 }
 
@@ -328,24 +382,24 @@ function expand(nodes: XmlNode[]): XmlNode[] {
   const out: XmlNode[] = [];
   for (const node of nodes) {
     const name = tagOf(node);
-    if (name === 'alternatecontent') {
+    if (name === "alternatecontent") {
       out.push(...expand(unwrapAlternate(node)));
       continue;
     }
-    if (name === 'sdt') {
-      const content = childrenOf(node).find((c) => tagOf(c) === 'sdtcontent');
+    if (name === "sdt") {
+      const content = childrenOf(node).find((c) => tagOf(c) === "sdtcontent");
       if (content) out.push(...expand(childrenOf(content)));
       continue;
     }
     if (
-      name === 'sdtcontent' ||
-      name === 'hyperlink' ||
-      name === 'ins' ||
-      name === 'moveto' ||
-      name === 'smarttag' ||
-      name === 'customxml' ||
-      name === 'fldsimple' ||
-      name === 'ruby'
+      name === "sdtcontent" ||
+      name === "hyperlink" ||
+      name === "ins" ||
+      name === "moveto" ||
+      name === "smarttag" ||
+      name === "customxml" ||
+      name === "fldsimple" ||
+      name === "ruby"
     ) {
       out.push(...expand(childrenOf(node)));
       continue;
@@ -357,10 +411,10 @@ function expand(nodes: XmlNode[]): XmlNode[] {
 
 function onOff(node: XmlNode | undefined): boolean {
   if (!node) return false;
-  const val = attr(node, 'val');
-  if (val === undefined || val === '') return true;
+  const val = attr(node, "val");
+  if (val === undefined || val === "") return true;
   const v = val.toLowerCase();
-  return v !== '0' && v !== 'false' && v !== 'off';
+  return v !== "0" && v !== "false" && v !== "off";
 }
 
 function childNamed(node: XmlNode, name: string): XmlNode | undefined {
@@ -370,10 +424,14 @@ function childNamed(node: XmlNode, name: string): XmlNode | undefined {
 function readRunPr(rPr: XmlNode | undefined): RunPr {
   if (!rPr) return {};
   const kids = expand(childrenOf(rPr));
-  const b = kids.find((c) => tagOf(c) === 'b') ?? kids.find((c) => tagOf(c) === 'bcs');
-  const i = kids.find((c) => tagOf(c) === 'i') ?? kids.find((c) => tagOf(c) === 'ics');
-  const sz = kids.find((c) => tagOf(c) === 'sz') ?? kids.find((c) => tagOf(c) === 'szcs');
-  const half = sz ? Number(attr(sz, 'val')) : Number.NaN;
+  const b =
+    kids.find((c) => tagOf(c) === "b") ?? kids.find((c) => tagOf(c) === "bcs");
+  const i =
+    kids.find((c) => tagOf(c) === "i") ?? kids.find((c) => tagOf(c) === "ics");
+  const sz =
+    kids.find((c) => tagOf(c) === "sz") ??
+    kids.find((c) => tagOf(c) === "szcs");
+  const half = sz ? Number(attr(sz, "val")) : Number.NaN;
   return {
     bold: b ? onOff(b) : undefined,
     italic: i ? onOff(i) : undefined,
@@ -382,10 +440,10 @@ function readRunPr(rPr: XmlNode | undefined): RunPr {
 }
 
 function headingFromName(val: string): Heading | undefined {
-  const v = val.trim().toLowerCase().replace(/[_-]+/g, ' ');
-  if (v === 'title' || v === 'heading 1' || v === 'heading1') return 1;
-  if (v === 'subtitle' || v === 'heading 2' || v === 'heading2') return 2;
-  if (v === 'heading 3' || v === 'heading3') return 3;
+  const v = val.trim().toLowerCase().replace(/[_-]+/g, " ");
+  if (v === "title" || v === "heading 1" || v === "heading1") return 1;
+  if (v === "subtitle" || v === "heading 2" || v === "heading2") return 2;
+  if (v === "heading 3" || v === "heading3") return 3;
   const m = /heading\s*(\d)/.exec(v);
   if (!m) return undefined;
   const n = Number(m[1]);
@@ -409,7 +467,7 @@ function headingSize(level: Heading): number {
 }
 
 function normPath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/^\/+/, '');
+  return path.replace(/\\/g, "/").replace(/^\/+/, "");
 }
 
 function findZipEntry(zip: JSZip, path: string) {
@@ -422,20 +480,26 @@ function findZipEntry(zip: JSZip, path: string) {
   return undefined;
 }
 
-async function readZipString(zip: JSZip, path: string): Promise<string | undefined> {
+async function readZipString(
+  zip: JSZip,
+  path: string,
+): Promise<string | undefined> {
   const entry = findZipEntry(zip, path);
   if (!entry) return undefined;
-  return entry.async('string');
+  return entry.async("string");
 }
 
-async function readZipBytes(zip: JSZip, path: string): Promise<Uint8Array | undefined> {
+async function readZipBytes(
+  zip: JSZip,
+  path: string,
+): Promise<Uint8Array | undefined> {
   const entry = findZipEntry(zip, path);
   if (!entry) return undefined;
-  return entry.async('uint8array');
+  return entry.async("uint8array");
 }
 
 function resolveZipTarget(target: string): string | undefined {
-  const trimmed = target.trim().replace(/\\/g, '/');
+  const trimmed = target.trim().replace(/\\/g, "/");
   if (!trimmed || /^(https?:|mailto:|file:)/i.test(trimmed)) return undefined;
   let decoded = trimmed;
   try {
@@ -443,18 +507,18 @@ function resolveZipTarget(target: string): string | undefined {
   } catch {
     decoded = trimmed;
   }
-  const raw = decoded.startsWith('/') ? decoded.slice(1) : `word/${decoded}`;
+  const raw = decoded.startsWith("/") ? decoded.slice(1) : `word/${decoded}`;
   const parts: string[] = [];
-  for (const seg of raw.split('/')) {
-    if (!seg || seg === '.') continue;
-    if (seg === '..') {
+  for (const seg of raw.split("/")) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") {
       if (parts.length === 0) return undefined;
       parts.pop();
       continue;
     }
     parts.push(seg);
   }
-  return parts.join('/') || undefined;
+  return parts.join("/") || undefined;
 }
 
 async function loadRels(zip: JSZip, path: string): Promise<Map<string, Rel>> {
@@ -469,32 +533,35 @@ async function loadRels(zip: JSZip, path: string): Promise<Map<string, Rel>> {
   }
   const root = asNodes(parsed);
   const relRoot =
-    findFirst(root, 'relationships') ?? (root.length === 1 ? root[0] : undefined);
+    findFirst(root, "relationships") ??
+    (root.length === 1 ? root[0] : undefined);
   if (!relRoot) return map;
   for (const node of expand(childrenOf(relRoot))) {
-    if (tagOf(node) !== 'relationship') continue;
-    const id = attr(node, 'id');
-    const target = attr(node, 'target');
+    if (tagOf(node) !== "relationship") continue;
+    const id = attr(node, "id");
+    const target = attr(node, "target");
     if (!id || !target) continue;
     map.set(id, {
       target,
-      external: (attr(node, 'targetmode') ?? '').toLowerCase() === 'external',
+      external: (attr(node, "targetmode") ?? "").toLowerCase() === "external",
     });
   }
   return map;
 }
 
-function readNumPr(
-  pPr: XmlNode | undefined,
-): { numId?: string; ilvl: number; explicitOff: boolean } {
+function readNumPr(pPr: XmlNode | undefined): {
+  numId?: string;
+  ilvl: number;
+  explicitOff: boolean;
+} {
   if (!pPr) return { ilvl: 0, explicitOff: false };
-  const numPr = childNamed(pPr, 'numpr');
+  const numPr = childNamed(pPr, "numpr");
   if (!numPr) return { ilvl: 0, explicitOff: false };
-  const idNode = childNamed(numPr, 'numid');
-  const lvlNode = childNamed(numPr, 'ilvl');
-  const ilvlRaw = lvlNode ? Number(attr(lvlNode, 'val')) : 0;
-  const rawId = idNode ? attr(idNode, 'val') : undefined;
-  if (rawId === '0') return { ilvl: 0, explicitOff: true };
+  const idNode = childNamed(numPr, "numid");
+  const lvlNode = childNamed(numPr, "ilvl");
+  const ilvlRaw = lvlNode ? Number(attr(lvlNode, "val")) : 0;
+  const rawId = idNode ? attr(idNode, "val") : undefined;
+  if (rawId === "0") return { ilvl: 0, explicitOff: true };
   return {
     numId: rawId,
     ilvl: Number.isFinite(ilvlRaw) && ilvlRaw > 0 ? Math.trunc(ilvlRaw) : 0,
@@ -509,7 +576,7 @@ async function loadStyles(zip: JSZip): Promise<StylePack> {
   const tableBorders = new Map<string, SideBorders>();
   let defaultSize = 11;
   const empty = (): StylePack => ({ byId, defaultSize, tableBorders });
-  const xml = await readZipString(zip, 'word/styles.xml');
+  const xml = await readZipString(zip, "word/styles.xml");
   if (xml === undefined) return empty();
   let parsed: unknown;
   try {
@@ -517,30 +584,30 @@ async function loadStyles(zip: JSZip): Promise<StylePack> {
   } catch {
     return empty();
   }
-  const styles = findFirst(asNodes(parsed), 'styles');
+  const styles = findFirst(asNodes(parsed), "styles");
   if (!styles) return empty();
 
-  const defaults = findFirst(childrenOf(styles), 'docdefaults');
+  const defaults = findFirst(childrenOf(styles), "docdefaults");
   if (defaults) {
-    const rPr = findFirst(childrenOf(defaults), 'rpr');
+    const rPr = findFirst(childrenOf(defaults), "rpr");
     const sz = rPr ? readRunPr(rPr).sizePt : undefined;
     if (sz !== undefined) defaultSize = clamp(sz, 8, 28);
   }
 
   for (const node of expand(childrenOf(styles))) {
-    if (tagOf(node) !== 'style') continue;
-    const id = attr(node, 'styleid');
+    if (tagOf(node) !== "style") continue;
+    const id = attr(node, "styleid");
     if (!id) continue;
-    const nameNode = childNamed(node, 'name');
-    const pPr = childNamed(node, 'ppr');
-    const rPr = childNamed(node, 'rpr');
-    const outline = pPr ? childNamed(pPr, 'outlinelvl') : undefined;
+    const nameNode = childNamed(node, "name");
+    const pPr = childNamed(node, "ppr");
+    const rPr = childNamed(node, "rpr");
+    const outline = pPr ? childNamed(pPr, "outlinelvl") : undefined;
     const num = readNumPr(pPr);
     const run = readRunPr(rPr);
     const heading =
-      headingFromName(nameNode ? (attr(nameNode, 'val') ?? '') : '') ??
+      headingFromName(nameNode ? (attr(nameNode, "val") ?? "") : "") ??
       headingFromName(id) ??
-      headingFromOutline(outline ? attr(outline, 'val') : undefined);
+      headingFromOutline(outline ? attr(outline, "val") : undefined);
     const space = parseSpacing(pPr, undefined, 11);
     const ind = parseInd(pPr, undefined);
     byId.set(id, {
@@ -556,10 +623,13 @@ async function loadStyles(zip: JSZip): Promise<StylePack> {
       indentLeft: ind.left,
       indentFirst: ind.first,
     });
-    if ((attr(node, 'type') ?? '').toLowerCase() === 'table') {
-      tableRaw.set(id, parseBordersFrom(childNamed(node, 'tblpr'), 'tblborders'));
-      const based = childNamed(node, 'basedon');
-      const parent = based ? attr(based, 'val') : undefined;
+    if ((attr(node, "type") ?? "").toLowerCase() === "table") {
+      tableRaw.set(
+        id,
+        parseBordersFrom(childNamed(node, "tblpr"), "tblborders"),
+      );
+      const based = childNamed(node, "basedon");
+      const parent = based ? attr(based, "val") : undefined;
       if (parent) tableBasedOn.set(id, parent);
     }
   }
@@ -579,8 +649,8 @@ async function loadStyles(zip: JSZip): Promise<StylePack> {
 function parseHexColor(
   raw: string | undefined,
 ): { r: number; g: number; b: number } | undefined {
-  if (!raw || raw.toLowerCase() === 'auto') return { r: 0, g: 0, b: 0 };
-  const hex = raw.replace('#', '');
+  if (!raw || raw.toLowerCase() === "auto") return { r: 0, g: 0, b: 0 };
+  const hex = raw.replace("#", "");
   if (!/^[0-9a-fA-F]{6}$/.test(hex)) return undefined;
   return {
     r: parseInt(hex.slice(0, 2), 16) / 255,
@@ -591,18 +661,18 @@ function parseHexColor(
 
 function parseEdge(node: XmlNode | undefined): Edge | null | undefined {
   if (!node) return undefined;
-  const val = (attr(node, 'val') ?? '').toLowerCase();
-  if (val === 'nil' || val === 'none' || val === 'hidden') return null;
-  if (!val && attr(node, 'sz') === undefined) return undefined;
-  const sz = Number(attr(node, 'sz'));
+  const val = (attr(node, "val") ?? "").toLowerCase();
+  if (val === "nil" || val === "none" || val === "hidden") return null;
+  if (!val && attr(node, "sz") === undefined) return undefined;
+  const sz = Number(attr(node, "sz"));
   const width = Number.isFinite(sz) && sz > 0 ? Math.min(2.4, sz / 8) : 0.5;
   if (width <= 0) return null;
-  const color = parseHexColor(attr(node, 'color')) ?? { r: 0, g: 0, b: 0 };
+  const color = parseHexColor(attr(node, "color")) ?? { r: 0, g: 0, b: 0 };
   return { width, color };
 }
 
 function twipsToPt(raw: string | undefined): number | undefined {
-  if (raw === undefined || raw === '') return undefined;
+  if (raw === undefined || raw === "") return undefined;
   const n = Number(raw);
   if (!Number.isFinite(n)) return undefined;
   return n / 20;
@@ -613,12 +683,14 @@ function parseSpacing(
   style: StyleInfo | undefined,
   size: number,
 ): { before: number; after: number; lineMult: number } {
-  const node = pPr ? childNamed(pPr, 'spacing') : undefined;
-  const line = Number(node ? attr(node, 'line') : undefined);
-  const rule = (node ? (attr(node, 'linerule') ?? attr(node, 'lineRule')) : undefined)?.toLowerCase();
+  const node = pPr ? childNamed(pPr, "spacing") : undefined;
+  const line = Number(node ? attr(node, "line") : undefined);
+  const rule = (
+    node ? (attr(node, "linerule") ?? attr(node, "lineRule")) : undefined
+  )?.toLowerCase();
   let lineMult = style?.lineMult ?? 1.08;
   if (Number.isFinite(line) && line > 0) {
-    if (rule === 'exact' || rule === 'atleast') {
+    if (rule === "exact" || rule === "atleast") {
       const exact = line / 20;
       lineMult = Math.max(0.7, exact / Math.max(size, 1));
     } else {
@@ -626,14 +698,22 @@ function parseSpacing(
     }
   }
   const linePt = size * lineMult;
-  const beforeTwip = twipsToPt(node ? attr(node, 'before') : undefined);
-  const afterTwip = twipsToPt(node ? attr(node, 'after') : undefined);
-  const beforeLines = Number(node ? (attr(node, 'beforelines') ?? attr(node, 'beforeLines')) : undefined);
-  const afterLines = Number(node ? (attr(node, 'afterlines') ?? attr(node, 'afterLines')) : undefined);
+  const beforeTwip = twipsToPt(node ? attr(node, "before") : undefined);
+  const afterTwip = twipsToPt(node ? attr(node, "after") : undefined);
+  const beforeLines = Number(
+    node ? (attr(node, "beforelines") ?? attr(node, "beforeLines")) : undefined,
+  );
+  const afterLines = Number(
+    node ? (attr(node, "afterlines") ?? attr(node, "afterLines")) : undefined,
+  );
   const beforeFromLines =
-    Number.isFinite(beforeLines) && beforeLines > 0 ? (beforeLines / 100) * linePt : undefined;
+    Number.isFinite(beforeLines) && beforeLines > 0
+      ? (beforeLines / 100) * linePt
+      : undefined;
   const afterFromLines =
-    Number.isFinite(afterLines) && afterLines > 0 ? (afterLines / 100) * linePt : undefined;
+    Number.isFinite(afterLines) && afterLines > 0
+      ? (afterLines / 100) * linePt
+      : undefined;
   const before = beforeTwip ?? beforeFromLines ?? style?.spaceBefore ?? 0;
   const after = afterTwip ?? afterFromLines ?? style?.spaceAfter ?? 0;
   return { before: Math.max(0, before), after: Math.max(0, after), lineMult };
@@ -643,10 +723,12 @@ function parseInd(
   pPr: XmlNode | undefined,
   style?: StyleInfo,
 ): { left: number; first: number } {
-  const node = pPr ? childNamed(pPr, 'ind') : undefined;
-  const left = twipsToPt(node ? (attr(node, 'left') ?? attr(node, 'start')) : undefined);
-  const first = twipsToPt(node ? attr(node, 'firstline') : undefined);
-  const hanging = twipsToPt(node ? attr(node, 'hanging') : undefined);
+  const node = pPr ? childNamed(pPr, "ind") : undefined;
+  const left = twipsToPt(
+    node ? (attr(node, "left") ?? attr(node, "start")) : undefined,
+  );
+  const first = twipsToPt(node ? attr(node, "firstline") : undefined);
+  const hanging = twipsToPt(node ? attr(node, "hanging") : undefined);
   const leftPt = left ?? style?.indentLeft ?? 0;
   let firstPt = first ?? style?.indentFirst ?? 0;
   if (hanging !== undefined) firstPt = -hanging;
@@ -655,18 +737,18 @@ function parseInd(
 
 function parseBordersFrom(
   pr: XmlNode | undefined,
-  tag: 'tblborders' | 'tcborders',
+  tag: "tblborders" | "tcborders",
 ): SideBorders {
   if (!pr) return {};
   const box = childNamed(pr, tag);
   if (!box) return {};
   return {
-    top: parseEdge(childNamed(box, 'top')),
-    left: parseEdge(childNamed(box, 'left')),
-    bottom: parseEdge(childNamed(box, 'bottom')),
-    right: parseEdge(childNamed(box, 'right')),
-    insideH: parseEdge(childNamed(box, 'insideh')),
-    insideV: parseEdge(childNamed(box, 'insidev')),
+    top: parseEdge(childNamed(box, "top")),
+    left: parseEdge(childNamed(box, "left")),
+    bottom: parseEdge(childNamed(box, "bottom")),
+    right: parseEdge(childNamed(box, "right")),
+    insideH: parseEdge(childNamed(box, "insideh")),
+    insideV: parseEdge(childNamed(box, "insidev")),
   };
 }
 
@@ -687,7 +769,7 @@ async function loadNumbering(zip: JSZip): Promise<NumInfo> {
     fmtOf: new Map(),
     counters: new Map(),
   };
-  const xml = await readZipString(zip, 'word/numbering.xml');
+  const xml = await readZipString(zip, "word/numbering.xml");
   if (xml === undefined) return info;
   let parsed: unknown;
   try {
@@ -695,24 +777,28 @@ async function loadNumbering(zip: JSZip): Promise<NumInfo> {
   } catch {
     return info;
   }
-  const root = findFirst(asNodes(parsed), 'numbering');
+  const root = findFirst(asNodes(parsed), "numbering");
   if (!root) return info;
   for (const node of expand(childrenOf(root))) {
     const name = tagOf(node);
-    if (name === 'abstractnum') {
-      const absId = attr(node, 'abstractnumid');
+    if (name === "abstractnum") {
+      const absId = attr(node, "abstractnumid");
       if (absId === undefined) continue;
       for (const lvl of expand(childrenOf(node))) {
-        if (tagOf(lvl) !== 'lvl') continue;
-        const ilvl = attr(lvl, 'ilvl') ?? '0';
-        const fmt = childNamed(lvl, 'numfmt');
-        info.fmtOf.set(`${absId}:${ilvl}`, fmt ? (attr(fmt, 'val') ?? 'bullet') : 'bullet');
+        if (tagOf(lvl) !== "lvl") continue;
+        const ilvl = attr(lvl, "ilvl") ?? "0";
+        const fmt = childNamed(lvl, "numfmt");
+        info.fmtOf.set(
+          `${absId}:${ilvl}`,
+          fmt ? (attr(fmt, "val") ?? "bullet") : "bullet",
+        );
       }
-    } else if (name === 'num') {
-      const numId = attr(node, 'numid');
-      const abs = childNamed(node, 'abstractnumid');
-      const absId = abs ? attr(abs, 'val') : undefined;
-      if (numId !== undefined && absId !== undefined) info.absOf.set(numId, absId);
+    } else if (name === "num") {
+      const numId = attr(node, "numid");
+      const abs = childNamed(node, "abstractnumid");
+      const absId = abs ? attr(abs, "val") : undefined;
+      if (numId !== undefined && absId !== undefined)
+        info.absOf.set(numId, absId);
     }
   }
   return info;
@@ -721,8 +807,9 @@ async function loadNumbering(zip: JSZip): Promise<NumInfo> {
 function listPrefix(numbering: NumInfo, numId: string, ilvl: number): string {
   const abs = numbering.absOf.get(numId);
   const fmt = abs ? numbering.fmtOf.get(`${abs}:${String(ilvl)}`) : undefined;
-  const decimal = fmt !== undefined && /decimal|ordinal|cardinal|arabic/i.test(fmt);
-  if (!decimal) return '• ';
+  const decimal =
+    fmt !== undefined && /decimal|ordinal|cardinal|arabic/i.test(fmt);
+  if (!decimal) return "• ";
   let counters = numbering.counters.get(numId);
   if (!counters) {
     counters = [];
@@ -739,7 +826,7 @@ function walkBody(
   styles: StylePack,
   numbering: NumInfo,
 ): Block[] {
-  const body = findFirst(asNodes(parsed), 'body');
+  const body = findFirst(asNodes(parsed), "body");
   if (!body) return [];
   const blocks: Block[] = [];
   collectFlow(childrenOf(body), styles, numbering, blocks);
@@ -754,23 +841,23 @@ function collectFlow(
 ): void {
   for (const node of expand(nodes)) {
     const name = tagOf(node);
-    if (name === 'p') {
+    if (name === "p") {
       out.push(...paraToBlocks(node, styles, numbering, false));
       continue;
     }
-    if (name === 'tbl') {
+    if (name === "tbl") {
       const table = parseTable(node, styles, numbering);
       if (table) out.push(table);
       continue;
     }
     if (
-      name === 'sectpr' ||
-      name === 'bookmarkstart' ||
-      name === 'bookmarkend' ||
-      name === 'prooferr' ||
-      name === 'commentrange' ||
-      name === 'commentrangestart' ||
-      name === 'commentrangeend'
+      name === "sectpr" ||
+      name === "bookmarkstart" ||
+      name === "bookmarkend" ||
+      name === "prooferr" ||
+      name === "commentrange" ||
+      name === "commentrangestart" ||
+      name === "commentrangeend"
     ) {
       continue;
     }
@@ -785,27 +872,29 @@ function paraToBlocks(
   numbering: NumInfo,
   inTable: boolean,
 ): Block[] {
-  const pPr = childNamed(para, 'ppr');
-  const pStyle = pPr ? childNamed(pPr, 'pstyle') : undefined;
-  const styleId = pStyle ? attr(pStyle, 'val') : undefined;
+  const pPr = childNamed(para, "ppr");
+  const pStyle = pPr ? childNamed(pPr, "pstyle") : undefined;
+  const styleId = pStyle ? attr(pStyle, "val") : undefined;
   const style = styleId ? styles.byId.get(styleId) : undefined;
-  const outline = pPr ? childNamed(pPr, 'outlinelvl') : undefined;
+  const outline = pPr ? childNamed(pPr, "outlinelvl") : undefined;
   const heading =
     (styleId ? headingFromName(styleId) : undefined) ??
     style?.heading ??
-    headingFromOutline(outline ? attr(outline, 'val') : undefined);
+    headingFromOutline(outline ? attr(outline, "val") : undefined);
 
-  const jc = pPr ? childNamed(pPr, 'jc') : undefined;
-  const jcVal = (jc ? attr(jc, 'val') : undefined)?.toLowerCase();
-  let align: Align = 'left';
-  if (jcVal === 'center') align = 'center';
-  else if (jcVal === 'right' || jcVal === 'end') align = 'right';
+  const jc = pPr ? childNamed(pPr, "jc") : undefined;
+  const jcVal = (jc ? attr(jc, "val") : undefined)?.toLowerCase();
+  let align: Align = "left";
+  if (jcVal === "center") align = "center";
+  else if (jcVal === "right" || jcVal === "end") align = "right";
 
-  const pMark = pPr ? readRunPr(childNamed(pPr, 'rpr')) : {};
+  const pMark = pPr ? readRunPr(childNamed(pPr, "rpr")) : {};
   const paraNum = readNumPr(pPr);
-  const numId = paraNum.explicitOff ? undefined : (paraNum.numId ?? style?.numId);
+  const numId = paraNum.explicitOff
+    ? undefined
+    : (paraNum.numId ?? style?.numId);
   const ilvl = paraNum.numId !== undefined ? paraNum.ilvl : (style?.ilvl ?? 0);
-  const isList = numId !== undefined && numId !== '0' && heading === undefined;
+  const isList = numId !== undefined && numId !== "0" && heading === undefined;
 
   const baseSize = heading
     ? headingSize(heading)
@@ -813,16 +902,27 @@ function paraToBlocks(
   const baseBold = heading !== undefined || Boolean(style?.bold ?? pMark.bold);
   const baseItalic = Boolean(style?.italic ?? pMark.italic);
   const metrics = parseSpacing(pPr, style, baseSize);
-  const spacingNode = pPr ? childNamed(pPr, 'spacing') : undefined;
-  if (heading && !spacingNode && (style?.spaceBefore === undefined || style.spaceBefore === 0)) {
+  const spacingNode = pPr ? childNamed(pPr, "spacing") : undefined;
+  if (
+    heading &&
+    !spacingNode &&
+    (style?.spaceBefore === undefined || style.spaceBefore === 0)
+  ) {
     metrics.before = heading === 1 ? 12 : heading === 2 ? 10 : 8;
   }
-  if (heading && !spacingNode && (style?.spaceAfter === undefined || style.spaceAfter === 0)) {
+  if (
+    heading &&
+    !spacingNode &&
+    (style?.spaceAfter === undefined || style.spaceAfter === 0)
+  ) {
     metrics.after = heading === 1 ? 6 : 4;
   }
   const ind = parseInd(pPr, style);
 
-  const extent = { cx: undefined as number | undefined, cy: undefined as number | undefined };
+  const extent = {
+    cx: undefined as number | undefined,
+    cy: undefined as number | undefined,
+  };
   const pieces: Piece[] = [];
   walkContent(expand(childrenOf(para)), {
     bold: baseBold,
@@ -835,16 +935,22 @@ function paraToBlocks(
   });
 
   const blocks: Block[] = [];
-  let buf: Extract<Piece, { kind: 'text' | 'nl' }>[] = [];
+  let buf: Extract<Piece, { kind: "text" | "nl" }>[] = [];
   let listPrefixed = false;
 
   const flush = (forceEmpty: boolean): void => {
     const runs: Run[] = [];
     for (const item of buf) {
-      if (item.kind === 'nl') {
+      if (item.kind === "nl") {
         const last = runs[runs.length - 1];
-        if (last) last.text += '\n';
-        else runs.push({ text: '\n', bold: baseBold, italic: baseItalic, size: baseSize });
+        if (last) last.text += "\n";
+        else
+          runs.push({
+            text: "\n",
+            bold: baseBold,
+            italic: baseItalic,
+            size: baseSize,
+          });
         continue;
       }
       if (!item.text) continue;
@@ -854,18 +960,23 @@ function paraToBlocks(
         last.bold === item.bold &&
         last.italic === item.italic &&
         last.size === item.size &&
-        !last.text.endsWith('\n')
+        !last.text.endsWith("\n")
       ) {
         last.text += item.text;
       } else {
-        runs.push({ text: item.text, bold: item.bold, italic: item.italic, size: item.size });
+        runs.push({
+          text: item.text,
+          bold: item.bold,
+          italic: item.italic,
+          size: item.size,
+        });
       }
     }
-    const hasText = runs.some((r) => r.text.replace(/\s/g, '').length > 0);
+    const hasText = runs.some((r) => r.text.replace(/\s/g, "").length > 0);
     if (!hasText) {
       if (forceEmpty) {
         blocks.push({
-          kind: 'para',
+          kind: "para",
           runs: [],
           align,
           indent: 0,
@@ -884,12 +995,18 @@ function paraToBlocks(
       const prefix = listPrefix(numbering, numId, ilvl);
       const first = runs[0];
       if (first) first.text = prefix + first.text;
-      else runs.unshift({ text: prefix, bold: baseBold, italic: baseItalic, size: baseSize });
+      else
+        runs.unshift({
+          text: prefix,
+          bold: baseBold,
+          italic: baseItalic,
+          size: baseSize,
+        });
       listPrefixed = true;
     }
     const listPad = isList && ind.left === 0 ? 18 + Math.min(ilvl, 8) * 14 : 0;
     blocks.push({
-      kind: 'para',
+      kind: "para",
       runs,
       align,
       indent: ind.left + listPad,
@@ -905,10 +1022,10 @@ function paraToBlocks(
 
   const hadPieces = pieces.length > 0;
   for (const piece of pieces) {
-    if (piece.kind === 'break') {
+    if (piece.kind === "break") {
       flush(false);
-      if (!inTable) blocks.push({ kind: 'break' });
-    } else if (piece.kind === 'image') {
+      if (!inTable) blocks.push({ kind: "break" });
+    } else if (piece.kind === "image") {
       flush(false);
       blocks.push({ ...piece, align });
     } else {
@@ -924,13 +1041,17 @@ function parseTable(
   tbl: XmlNode,
   styles: StylePack,
   numbering: NumInfo,
-): Extract<Block, { kind: 'table' }> | undefined {
+): Extract<Block, { kind: "table" }> | undefined {
   const colWeights = parseGridWeights(tbl);
   const rows: TableCell[][] = [];
   collectRows(tbl, styles, numbering, rows);
   if (rows.length === 0) return undefined;
   const colCount = rows.reduce(
-    (max, row) => Math.max(max, row.reduce((n, cell) => n + cell.span, 0)),
+    (max, row) =>
+      Math.max(
+        max,
+        row.reduce((n, cell) => n + cell.span, 0),
+      ),
     0,
   );
   if (colCount < 1) return undefined;
@@ -938,13 +1059,13 @@ function parseTable(
     colWeights.length >= colCount
       ? colWeights.slice(0, colCount)
       : padWeights(colWeights, colCount);
-  const tblPr = expand(childrenOf(tbl)).find((c) => tagOf(c) === 'tblpr');
-  const styleNode = tblPr ? childNamed(tblPr, 'tblstyle') : undefined;
-  const styleId = styleNode ? attr(styleNode, 'val') : undefined;
+  const tblPr = expand(childrenOf(tbl)).find((c) => tagOf(c) === "tblpr");
+  const styleNode = tblPr ? childNamed(tblPr, "tblstyle") : undefined;
+  const styleId = styleNode ? attr(styleNode, "val") : undefined;
   const styleEdges = styleId ? (styles.tableBorders.get(styleId) ?? {}) : {};
-  const localEdges = parseBordersFrom(tblPr, 'tblborders');
+  const localEdges = parseBordersFrom(tblPr, "tblborders");
   return {
-    kind: 'table',
+    kind: "table",
     rows,
     colWeights: weights,
     edges: mergeBorders(styleEdges, localEdges),
@@ -958,12 +1079,12 @@ function padWeights(weights: number[], colCount: number): number[] {
 }
 
 function parseGridWeights(tbl: XmlNode): number[] {
-  const grid = expand(childrenOf(tbl)).find((c) => tagOf(c) === 'tblgrid');
+  const grid = expand(childrenOf(tbl)).find((c) => tagOf(c) === "tblgrid");
   if (!grid) return [];
   const weights: number[] = [];
   for (const col of expand(childrenOf(grid))) {
-    if (tagOf(col) !== 'gridcol') continue;
-    const raw = Number(attr(col, 'w'));
+    if (tagOf(col) !== "gridcol") continue;
+    const raw = Number(attr(col, "w"));
     weights.push(Number.isFinite(raw) && raw > 0 ? raw : 1);
   }
   return weights;
@@ -977,12 +1098,12 @@ function collectRows(
 ): void {
   for (const node of expand(childrenOf(tbl))) {
     const name = tagOf(node);
-    if (name === 'tr') {
+    if (name === "tr") {
       const row = parseRow(node, styles, numbering);
       if (row.length > 0) rows.push(row);
       continue;
     }
-    if (name === 'tblpr' || name === 'tblgrid') continue;
+    if (name === "tblpr" || name === "tblgrid") continue;
     const kids = childrenOf(node);
     if (kids.length > 0) collectRows(node, styles, numbering, rows);
   }
@@ -995,12 +1116,12 @@ function parseRow(
 ): TableCell[] {
   const row: TableCell[] = [];
   for (const node of expand(childrenOf(tr))) {
-    if (tagOf(node) === 'tc') {
+    if (tagOf(node) === "tc") {
       row.push(parseCell(node, styles, numbering));
       continue;
     }
-    if (tagOf(node) === 'trpr') continue;
-    const nested = expand(childrenOf(node)).filter((c) => tagOf(c) === 'tc');
+    if (tagOf(node) === "trpr") continue;
+    const nested = expand(childrenOf(node)).filter((c) => tagOf(c) === "tc");
     for (const tc of nested) row.push(parseCell(tc, styles, numbering));
   }
   return row;
@@ -1011,19 +1132,22 @@ function parseCell(
   styles: StylePack,
   numbering: NumInfo,
 ): TableCell {
-  const pr = childNamed(tc, 'tcpr');
-  const spanNode = pr ? childNamed(pr, 'gridspan') : undefined;
-  const spanRaw = spanNode ? Number(attr(spanNode, 'val')) : 1;
-  const span = Number.isFinite(spanRaw) && spanRaw > 1 ? Math.min(12, Math.trunc(spanRaw)) : 1;
-  const merge = pr ? childNamed(pr, 'vmerge') : undefined;
-  const mergeVal = (merge ? attr(merge, 'val') : undefined)?.toLowerCase();
-  const vContinue = Boolean(merge) && mergeVal !== 'restart';
+  const pr = childNamed(tc, "tcpr");
+  const spanNode = pr ? childNamed(pr, "gridspan") : undefined;
+  const spanRaw = spanNode ? Number(attr(spanNode, "val")) : 1;
+  const span =
+    Number.isFinite(spanRaw) && spanRaw > 1
+      ? Math.min(12, Math.trunc(spanRaw))
+      : 1;
+  const merge = pr ? childNamed(pr, "vmerge") : undefined;
+  const mergeVal = (merge ? attr(merge, "val") : undefined)?.toLowerCase();
+  const vContinue = Boolean(merge) && mergeVal !== "restart";
   const paras: CellPara[] = [];
   for (const child of expand(childrenOf(tc))) {
     const name = tagOf(child);
-    if (name === 'p') {
+    if (name === "p") {
       for (const block of paraToBlocks(child, styles, numbering, true)) {
-        if (block.kind === 'para' && !block.empty) {
+        if (block.kind === "para" && !block.empty) {
           paras.push({
             runs: block.runs,
             align: block.align,
@@ -1033,22 +1157,22 @@ function parseCell(
           });
         }
       }
-    } else if (name === 'tbl') {
+    } else if (name === "tbl") {
       const inner = parseTable(child, styles, numbering);
       if (inner) {
         for (const row of inner.rows) {
           const text = row
             .map((cell) =>
               cell.paras
-                .map((p) => p.runs.map((r) => r.text).join(''))
-                .join(' '),
+                .map((p) => p.runs.map((r) => r.text).join(""))
+                .join(" "),
             )
-            .join('  |  ')
+            .join("  |  ")
             .trim();
           if (text) {
             paras.push({
               runs: [{ text, bold: false, italic: false, size: 9 }],
-              align: 'left',
+              align: "left",
               size: 9,
               spaceAfter: 0,
               lineMult: 1.08,
@@ -1063,16 +1187,18 @@ function parseCell(
     span,
     vContinue,
     fill: parseShade(pr),
-    edges: parseBordersFrom(pr, 'tcborders'),
+    edges: parseBordersFrom(pr, "tcborders"),
   };
 }
 
-function parseShade(pr: XmlNode | undefined): { r: number; g: number; b: number } | undefined {
+function parseShade(
+  pr: XmlNode | undefined,
+): { r: number; g: number; b: number } | undefined {
   if (!pr) return undefined;
-  const shd = childNamed(pr, 'shd');
-  const fill = shd ? attr(shd, 'fill') : undefined;
-  if (!fill || fill.toLowerCase() === 'auto') return undefined;
-  const hex = fill.replace('#', '');
+  const shd = childNamed(pr, "shd");
+  const fill = shd ? attr(shd, "fill") : undefined;
+  if (!fill || fill.toLowerCase() === "auto") return undefined;
+  const hex = fill.replace("#", "");
   if (!/^[0-9a-fA-F]{6}$/.test(hex)) return undefined;
   return {
     r: parseInt(hex.slice(0, 2), 16) / 255,
@@ -1096,20 +1222,20 @@ function walkContent(
   for (const node of nodes) {
     const name = tagOf(node);
     if (
-      name === 'ppr' ||
-      name === 'rpr' ||
-      name === 'sectpr' ||
-      name === 'del' ||
-      name === 'movefrom' ||
-      name === 'instrtext' ||
-      name === 'footnotereference' ||
-      name === 'endnotereference' ||
-      name === 'commentreference'
+      name === "ppr" ||
+      name === "rpr" ||
+      name === "sectpr" ||
+      name === "del" ||
+      name === "movefrom" ||
+      name === "instrtext" ||
+      name === "footnotereference" ||
+      name === "endnotereference" ||
+      name === "commentreference"
     ) {
       continue;
     }
-    if (name === 'r') {
-      const runPr = readRunPr(childNamed(node, 'rpr'));
+    if (name === "r") {
+      const runPr = readRunPr(childNamed(node, "rpr"));
       const size = resolveSize(runPr.sizePt, ctx.size, ctx.heading);
       walkContent(expand(childrenOf(node)), {
         ...ctx,
@@ -1119,9 +1245,9 @@ function walkContent(
       });
       continue;
     }
-    if (name === 't') {
+    if (name === "t") {
       ctx.pieces.push({
-        kind: 'text',
+        kind: "text",
         text: textOf(node),
         bold: ctx.bold,
         italic: ctx.italic,
@@ -1129,51 +1255,61 @@ function walkContent(
       });
       continue;
     }
-    if (name === 'tab' || name === 'ptab') {
+    if (name === "tab" || name === "ptab") {
       ctx.pieces.push({
-        kind: 'text',
-        text: '    ',
+        kind: "text",
+        text: "    ",
         bold: ctx.bold,
         italic: ctx.italic,
         size: ctx.size,
       });
       continue;
     }
-    if (name === 'br') {
-      const typ = (attr(node, 'type') ?? '').toLowerCase();
-      if (typ === 'page' && !ctx.inTable) ctx.pieces.push({ kind: 'break' });
-      else ctx.pieces.push({ kind: 'nl' });
+    if (name === "br") {
+      const typ = (attr(node, "type") ?? "").toLowerCase();
+      if (typ === "page" && !ctx.inTable) ctx.pieces.push({ kind: "break" });
+      else ctx.pieces.push({ kind: "nl" });
       continue;
     }
-    if (name === 'cr') {
-      ctx.pieces.push({ kind: 'nl' });
+    if (name === "cr") {
+      ctx.pieces.push({ kind: "nl" });
       continue;
     }
-    if (name === 'lastrenderedpagebreak') {
+    if (name === "lastrenderedpagebreak") {
       continue;
     }
-    if (name === 'extent') {
-      const cx = Number(attr(node, 'cx'));
-      const cy = Number(attr(node, 'cy'));
+    if (name === "extent") {
+      const cx = Number(attr(node, "cx"));
+      const cy = Number(attr(node, "cy"));
       if (Number.isFinite(cx) && cx > 0) ctx.extent.cx = cx;
       if (Number.isFinite(cy) && cy > 0) ctx.extent.cy = cy;
       continue;
     }
-    if (name === 'blip') {
-      const id = attr(node, 'embed');
+    if (name === "blip") {
+      const id = attr(node, "embed");
       if (id) {
-        ctx.pieces.push({ kind: 'image', relId: id, cx: ctx.extent.cx, cy: ctx.extent.cy });
+        ctx.pieces.push({
+          kind: "image",
+          relId: id,
+          cx: ctx.extent.cx,
+          cy: ctx.extent.cy,
+        });
       }
       continue;
     }
-    if (name === 'imagedata') {
-      const id = attr(node, 'id');
+    if (name === "imagedata") {
+      const id = attr(node, "id");
       if (id) {
-        ctx.pieces.push({ kind: 'image', relId: id, cx: ctx.extent.cx, cy: ctx.extent.cy });
+        ctx.pieces.push({
+          kind: "image",
+          relId: id,
+          cx: ctx.extent.cx,
+          cy: ctx.extent.cy,
+        });
       }
       continue;
     }
-    if (name === 'drawing' || name === 'pict' || name === 'object') {
+    if (name === "drawing" || name === "pict" || name === "object") {
       walkContent(expand(childrenOf(node)), {
         ...ctx,
         extent: { cx: undefined, cy: undefined },
@@ -1184,7 +1320,11 @@ function walkContent(
   }
 }
 
-function resolveSize(runPt: number | undefined, paraPt: number, heading?: Heading): number {
+function resolveSize(
+  runPt: number | undefined,
+  paraPt: number,
+  heading?: Heading,
+): number {
   if (heading) {
     const floor = headingSize(heading);
     if (runPt === undefined) return floor;
@@ -1195,7 +1335,7 @@ function resolveSize(runPt: number | undefined, paraPt: number, heading?: Headin
 }
 
 const REPLACED_GLYPH_WARNING =
-  'This PDF uses standard fonts; some characters were replaced.';
+  "This PDF uses standard fonts; some characters were replaced.";
 
 type GlyphStats = { letters: number; replaced: number };
 
@@ -1209,11 +1349,17 @@ function isLetterLike(ch: string): boolean {
   return /\p{L}/u.test(ch);
 }
 
-function toPdfText(text: string, stats?: GlyphStats): string {
-  let out = '';
+const characterSets = new WeakMap<PDFFont, Set<number>>();
+function toPdfText(text: string, stats?: GlyphStats, font?: PDFFont): string {
+  let characters = font ? characterSets.get(font) : undefined;
+  if (font && !characters) {
+    characters = new Set(font.getCharacterSet());
+    characterSets.set(font, characters);
+  }
+  let out = "";
   for (const ch of text) {
-    if (ch === '\n' || ch === '\r') {
-      out += ch === '\n' ? '\n' : '';
+    if (ch === "\n" || ch === "\r") {
+      out += ch === "\n" ? "\n" : "";
       continue;
     }
     const letter = isLetterLike(ch);
@@ -1223,29 +1369,34 @@ function toPdfText(text: string, stats?: GlyphStats): string {
       const cp = unit.codePointAt(0);
       if (cp === undefined) continue;
       if (cp < 0x20) continue;
-      if (isWinAnsi(cp)) {
+      if (characters ? characters.has(cp) : isWinAnsi(cp)) {
         out += unit;
       } else {
-        out += '?';
-        if (letter) replacedLetter = true;
+        out += "?";
+        replacedLetter = true;
       }
     }
-    if (stats && letter) {
-      stats.letters += 1;
+    if (stats) {
+      if (letter) stats.letters += 1;
       if (replacedLetter) stats.replaced += 1;
     }
   }
   return out;
 }
 
-function collectGlyphStats(blocks: Block[]): GlyphStats {
+function collectGlyphStats(blocks: Block[], fonts?: Fonts): GlyphStats {
   const stats: GlyphStats = { letters: 0, replaced: 0 };
   const addRuns = (runs: Run[]): void => {
-    for (const run of runs) toPdfText(run.text, stats);
+    for (const run of runs)
+      toPdfText(
+        run.text,
+        stats,
+        fonts ? pickFont(fonts, run.bold, run.italic) : undefined,
+      );
   };
   for (const block of blocks) {
-    if (block.kind === 'para') addRuns(block.runs);
-    else if (block.kind === 'table') {
+    if (block.kind === "para") addRuns(block.runs);
+    else if (block.kind === "table") {
       for (const row of block.rows) {
         for (const cell of row) {
           for (const para of cell.paras) addRuns(para.runs);
@@ -1256,10 +1407,8 @@ function collectGlyphStats(blocks: Block[]): GlyphStats {
   return stats;
 }
 
-function wordToPdfExtra(stats: GlyphStats): JobOk['extra'] | undefined {
+function wordToPdfExtra(stats: GlyphStats): JobOk["extra"] | undefined {
   if (stats.replaced <= 0) return undefined;
-  const fraction = stats.letters > 0 ? stats.replaced / stats.letters : 0;
-  if (stats.replaced < 4 && fraction < 0.1) return undefined;
   return {
     wordToPdf: {
       replacedChars: stats.replaced,
@@ -1280,13 +1429,13 @@ function followingInkReserve(
   for (let i = index + 1; i < blocks.length; i++) {
     const next = blocks[i];
     if (!next) continue;
-    if (next.kind === 'break') break;
+    if (next.kind === "break") break;
     let h = 0;
-    if (next.kind === 'para') {
+    if (next.kind === "para") {
       if (next.empty) continue;
       h = next.size * next.lineMult;
-    } else if (next.kind === 'image') h = 8;
-    else if (next.kind === 'table') h = 16;
+    } else if (next.kind === "image") h = 8;
+    else if (next.kind === "table") h = 16;
     if (h <= 0) continue;
     if (reserved + h > available) break;
     reserved += h;
@@ -1302,7 +1451,12 @@ function pickFont(fonts: Fonts, bold: boolean, italic: boolean): PDFFont {
 }
 
 function hasJpegMagic(bytes: Uint8Array): boolean {
-  return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  return (
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  );
 }
 
 function hasPngMagic(bytes: Uint8Array): boolean {
@@ -1315,12 +1469,15 @@ function hasPngMagic(bytes: Uint8Array): boolean {
   );
 }
 
-function imageFormat(bytes: Uint8Array, path: string): 'jpg' | 'png' | undefined {
-  if (hasJpegMagic(bytes)) return 'jpg';
-  if (hasPngMagic(bytes)) return 'png';
+function imageFormat(
+  bytes: Uint8Array,
+  path: string,
+): "jpg" | "png" | undefined {
+  if (hasJpegMagic(bytes)) return "jpg";
+  if (hasPngMagic(bytes)) return "png";
   const lower = path.toLowerCase();
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'jpg';
-  if (lower.endsWith('.png')) return 'png';
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "jpg";
+  if (lower.endsWith(".png")) return "png";
   return undefined;
 }
 
@@ -1328,7 +1485,7 @@ async function loadImage(
   zip: JSZip,
   rels: Map<string, Rel>,
   relId: string,
-): Promise<{ bytes: Uint8Array; format: 'jpg' | 'png' } | undefined> {
+): Promise<{ bytes: Uint8Array; format: "jpg" | "png" } | undefined> {
   const rel = rels.get(relId);
   if (!rel || rel.external) return undefined;
   const path = resolveZipTarget(rel.target);
@@ -1364,11 +1521,21 @@ function wrapLine(
     height = Math.max(height, part.size * lineMult);
   };
 
-  const measure = (text: string, bold: boolean, italic: boolean, size: number): number => {
+  const measure = (
+    text: string,
+    bold: boolean,
+    italic: boolean,
+    size: number,
+  ): number => {
     return pickFont(fonts, bold, italic).widthOfTextAtSize(text, size);
   };
 
-  const addToken = (text: string, bold: boolean, italic: boolean, size: number): void => {
+  const addToken = (
+    text: string,
+    bold: boolean,
+    italic: boolean,
+    size: number,
+  ): void => {
     if (!text) return;
     const w = measure(text, bold, italic, size);
     const isSpace = /^[ \t]+$/.test(text);
@@ -1377,12 +1544,18 @@ function wrapLine(
       if (isSpace) return;
     }
     if (w > maxWidth && !isSpace) {
-      let chunk = '';
+      let chunk = "";
       for (const ch of text) {
         const next = chunk + ch;
         const nw = measure(next, bold, italic, size);
         if (nw > maxWidth && chunk) {
-          pushPart({ text: chunk, bold, italic, size, width: measure(chunk, bold, italic, size) });
+          pushPart({
+            text: chunk,
+            bold,
+            italic,
+            size,
+            width: measure(chunk, bold, italic, size),
+          });
           flush();
           chunk = ch;
         } else {
@@ -1390,7 +1563,13 @@ function wrapLine(
         }
       }
       if (chunk) {
-        pushPart({ text: chunk, bold, italic, size, width: measure(chunk, bold, italic, size) });
+        pushPart({
+          text: chunk,
+          bold,
+          italic,
+          size,
+          width: measure(chunk, bold, italic, size),
+        });
       }
       return;
     }
@@ -1398,23 +1577,27 @@ function wrapLine(
   };
 
   for (const run of runs) {
-    const text = toPdfText(run.text);
+    const text = toPdfText(
+      run.text,
+      undefined,
+      pickFont(fonts, run.bold, run.italic),
+    );
     let i = 0;
     while (i < text.length) {
-      if (text[i] === '\n') {
+      if (text[i] === "\n") {
         flush();
         i += 1;
         continue;
       }
-      if (text[i] === ' ') {
+      if (text[i] === " ") {
         let j = i + 1;
-        while (j < text.length && text[j] === ' ') j += 1;
+        while (j < text.length && text[j] === " ") j += 1;
         addToken(text.slice(i, j), run.bold, run.italic, run.size);
         i = j;
         continue;
       }
       let j = i + 1;
-      while (j < text.length && text[j] !== ' ' && text[j] !== '\n') j += 1;
+      while (j < text.length && text[j] !== " " && text[j] !== "\n") j += 1;
       addToken(text.slice(i, j), run.bold, run.italic, run.size);
       i = j;
     }
@@ -1431,7 +1614,8 @@ function colWidths(weights: number[], count: number, inner: number): number[] {
 
 function cellWidth(widths: number[], start: number, span: number): number {
   let w = 0;
-  for (let i = start; i < start + span && i < widths.length; i++) w += widths[i] ?? 0;
+  for (let i = start; i < start + span && i < widths.length; i++)
+    w += widths[i] ?? 0;
   return Math.max(16, w);
 }
 
@@ -1439,9 +1623,17 @@ function measureCell(
   cell: TableCell,
   width: number,
   fonts: Fonts,
-): { height: number; lines: { parts: LinePart[]; width: number; height: number; align: Align }[] } {
+): {
+  height: number;
+  lines: { parts: LinePart[]; width: number; height: number; align: Align }[];
+} {
   const inner = Math.max(20, width - CELL_PAD * 2);
-  const lines: { parts: LinePart[]; width: number; height: number; align: Align }[] = [];
+  const lines: {
+    parts: LinePart[];
+    width: number;
+    height: number;
+    align: Align;
+  }[] = [];
   let height = CELL_PAD * 2;
   if (cell.vContinue || cell.paras.length === 0) {
     return { height: Math.max(height, 16), lines };
@@ -1460,7 +1652,7 @@ function measureCell(
 function resolveEdge(
   table: SideBorders,
   cell: SideBorders,
-  side: 'top' | 'left' | 'bottom' | 'right',
+  side: "top" | "left" | "bottom" | "right",
   row: number,
   col: number,
   rowCount: number,
@@ -1469,11 +1661,11 @@ function resolveEdge(
 ): Edge | null {
   const direct = cell[side];
   if (direct !== undefined) return direct;
-  if (side === 'top') return (row === 0 ? table.top : table.insideH) ?? null;
-  if (side === 'bottom') {
+  if (side === "top") return (row === 0 ? table.top : table.insideH) ?? null;
+  if (side === "bottom") {
     return (row === rowCount - 1 ? table.bottom : table.insideH) ?? null;
   }
-  if (side === 'left') return (col === 0 ? table.left : table.insideV) ?? null;
+  if (side === "left") return (col === 0 ? table.left : table.insideV) ?? null;
   return (col + span >= colCount ? table.right : table.insideV) ?? null;
 }
 
@@ -1493,7 +1685,7 @@ function strokeEdge(
 }
 
 function drawTable(
-  table: Extract<Block, { kind: 'table' }>,
+  table: Extract<Block, { kind: "table" }>,
   ctx: {
     fonts: Fonts;
     layout: PageLayout;
@@ -1505,11 +1697,19 @@ function drawTable(
   },
 ): boolean {
   const colCount = table.rows.reduce(
-    (max, row) => Math.max(max, row.reduce((n, cell) => n + cell.span, 0)),
+    (max, row) =>
+      Math.max(
+        max,
+        row.reduce((n, cell) => n + cell.span, 0),
+      ),
     0,
   );
   if (colCount < 1) return false;
-  const widths = colWidths(table.colWeights, colCount, contentWidth(ctx.layout));
+  const widths = colWidths(
+    table.colWeights,
+    colCount,
+    contentWidth(ctx.layout),
+  );
   const rowCount = table.rows.length;
   let painted = false;
 
@@ -1520,7 +1720,12 @@ function drawTable(
       cell: TableCell;
       width: number;
       col: number;
-      lines: { parts: LinePart[]; width: number; height: number; align: Align }[];
+      lines: {
+        parts: LinePart[];
+        width: number;
+        height: number;
+        align: Align;
+      }[];
     }[] = [];
     let col = 0;
     let rowH = 16;
@@ -1553,25 +1758,61 @@ function drawTable(
       const right = x + item.width;
       strokeEdge(
         dest,
-        resolveEdge(table.edges, item.cell.edges, 'top', r, item.col, rowCount, colCount, item.cell.span),
+        resolveEdge(
+          table.edges,
+          item.cell.edges,
+          "top",
+          r,
+          item.col,
+          rowCount,
+          colCount,
+          item.cell.span,
+        ),
         { x, y: top },
         { x: right, y: top },
       );
       strokeEdge(
         dest,
-        resolveEdge(table.edges, item.cell.edges, 'bottom', r, item.col, rowCount, colCount, item.cell.span),
+        resolveEdge(
+          table.edges,
+          item.cell.edges,
+          "bottom",
+          r,
+          item.col,
+          rowCount,
+          colCount,
+          item.cell.span,
+        ),
         { x, y: bottom },
         { x: right, y: bottom },
       );
       strokeEdge(
         dest,
-        resolveEdge(table.edges, item.cell.edges, 'left', r, item.col, rowCount, colCount, item.cell.span),
+        resolveEdge(
+          table.edges,
+          item.cell.edges,
+          "left",
+          r,
+          item.col,
+          rowCount,
+          colCount,
+          item.cell.span,
+        ),
         { x, y: top },
         { x, y: bottom },
       );
       strokeEdge(
         dest,
-        resolveEdge(table.edges, item.cell.edges, 'right', r, item.col, rowCount, colCount, item.cell.span),
+        resolveEdge(
+          table.edges,
+          item.cell.edges,
+          "right",
+          r,
+          item.col,
+          rowCount,
+          colCount,
+          item.cell.span,
+        ),
         { x: right, y: top },
         { x: right, y: bottom },
       );
@@ -1580,9 +1821,9 @@ function drawTable(
         for (const line of item.lines) {
           ty -= line.height;
           let tx = x + CELL_PAD;
-          if (line.align === 'center') {
+          if (line.align === "center") {
             tx = x + (item.width - line.width) / 2;
-          } else if (line.align === 'right') {
+          } else if (line.align === "right") {
             tx = x + item.width - CELL_PAD - line.width;
           }
           let cursor = tx;
@@ -1596,7 +1837,7 @@ function drawTable(
               color: INK,
             });
             cursor += part.width;
-            if (part.text.replace(/\s/g, '').length > 0) painted = true;
+            if (part.text.replace(/\s/g, "").length > 0) painted = true;
           }
         }
       }
@@ -1608,8 +1849,8 @@ function drawTable(
 }
 
 function pdfNameFromDocx(name: string): string {
-  const base = name.replace(/\\/g, '/').split('/').pop() ?? 'document';
-  const stem = base.replace(/\.docx$/i, '').trim() || 'document';
+  const base = name.replace(/\\/g, "/").split("/").pop() ?? "document";
+  const stem = base.replace(/\.docx$/i, "").trim() || "document";
   return `${stem}.pdf`;
 }
 
@@ -1623,12 +1864,10 @@ async function renderPdf(
   const filename = pdfNameFromDocx(sourceName);
   const inner = contentWidth(layout);
   const pdf = await PDFDocument.create();
-  const fonts: Fonts = {
-    r: await pdf.embedFont(StandardFonts.Helvetica),
-    b: await pdf.embedFont(StandardFonts.HelveticaBold),
-    i: await pdf.embedFont(StandardFonts.HelveticaOblique),
-    bi: await pdf.embedFont(StandardFonts.HelveticaBoldOblique),
-  };
+  const fonts = await documentFonts(
+    pdf,
+    collectGlyphStats(blocks).replaced > 0,
+  );
 
   let page: PDFPage | undefined;
   let y = 0;
@@ -1636,7 +1875,13 @@ async function renderPdf(
   let hadImage = false;
   const pageInk: boolean[] = [];
   const imageCache = new Map<string, PDFImage | null>();
-  const glyphStats = collectGlyphStats(blocks);
+  const glyphStats = collectGlyphStats(blocks, fonts);
+  if (glyphStats.replaced > 0)
+    return {
+      ok: false,
+      message:
+        "This document contains characters that the bundled fonts cannot preserve. Export it to PDF from Word or your original editor to keep every character.",
+    };
   const extra = wordToPdfExtra(glyphStats);
 
   const newPage = (): void => {
@@ -1674,24 +1919,22 @@ async function renderPdf(
     }
     const loaded = await loadImage(zip, rels, relId);
     if (!loaded) {
-      imageCache.set(relId, null);
-      return undefined;
+      throw new Error("An embedded image could not be preserved. Export this document from Word to keep its complete contents.");
     }
     try {
       const img =
-        loaded.format === 'jpg'
+        loaded.format === "jpg"
           ? await pdf.embedJpg(loaded.bytes)
           : await pdf.embedPng(loaded.bytes);
       imageCache.set(relId, img);
       return img;
     } catch {
-      imageCache.set(relId, null);
-      return undefined;
+      throw new Error("An embedded image could not be preserved. Export this document from Word to keep its complete contents.");
     }
   };
 
   for (const [i, block] of blocks.entries()) {
-    if (block.kind === 'table') {
+    if (block.kind === "table") {
       const painted = drawTable(block, {
         fonts,
         layout,
@@ -1706,11 +1949,11 @@ async function renderPdf(
       if (painted) hadText = true;
       continue;
     }
-    if (block.kind === 'break') {
+    if (block.kind === "break") {
       if (page) newPage();
       continue;
     }
-    if (block.kind === 'image') {
+    if (block.kind === "image") {
       const img = await embedImage(block.relId);
       if (!img) continue;
       hadImage = true;
@@ -1725,8 +1968,8 @@ async function renderPdf(
       if (drawH > y - layout.bottom) newPage();
       const dest = page as PDFPage;
       let x = layout.left;
-      if (block.align === 'center') x = layout.left + (inner - drawW) / 2;
-      else if (block.align === 'right') x = layout.width - layout.right - drawW;
+      if (block.align === "center") x = layout.left + (inner - drawW) / 2;
+      else if (block.align === "right") x = layout.width - layout.right - drawW;
       dest.drawImage(img, {
         x,
         y: y - drawH,
@@ -1759,9 +2002,9 @@ async function renderPdf(
       const baseline = y - line.height + line.height * 0.2;
       const indentExtra = lineIndex === 0 ? block.firstIndent : 0;
       let x = layout.left + block.indent + indentExtra;
-      if (block.align === 'center') {
+      if (block.align === "center") {
         x = layout.left + block.indent + (maxW - line.width) / 2;
-      } else if (block.align === 'right') {
+      } else if (block.align === "right") {
         x = layout.width - layout.right - line.width;
       }
       let cursor = x;
@@ -1776,12 +2019,15 @@ async function renderPdf(
         });
         markInk();
         cursor += part.width;
-        if (part.text.replace(/\s/g, '').length > 0) hadText = true;
+        if (part.text.replace(/\s/g, "").length > 0) hadText = true;
       }
       y -= line.height;
       lineIndex += 1;
     }
-    tryAdvanceY(block.spaceAfter, followingInkReserve(blocks, i, y, layout.bottom));
+    tryAdvanceY(
+      block.spaceAfter,
+      followingInkReserve(blocks, i, y, layout.bottom),
+    );
   }
 
   if (!hadText && !hadImage) {

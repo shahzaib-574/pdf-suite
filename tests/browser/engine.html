@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <base href="/" />
+    <link rel="icon" href="data:," />
+    <title>Ream engine regression checks</title>
+    <style>
+      body {
+        font: 16px system-ui;
+        padding: 24px;
+        max-width: 1000px;
+        margin: auto;
+      }
+      button {
+        padding: 14px;
+      }
+      pre {
+        white-space: pre-wrap;
+      }
+      img {
+        max-width: 48%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Ream engine regression checks</h1>
+    <p>Synthetic files only. Checks execute locally in this browser.</p>
+    <button id="run">Run engine checks</button>
+    <pre id="results" role="status">Ready</pre>
+    <div id="images"></div>
+    <script type="module">
+      import { PDFDocument, StandardFonts } from "pdf-lib";
+      import { engine } from "/src/pdf/index.ts";
+      import JSZip from "jszip";
+      const results = document.getElementById("results");
+      const report = (text) => {
+        results.textContent += "\n" + text;
+      };
+      const assert = (truth, message) => {
+        if (!truth) throw new Error(message);
+      };
+      const file = (bytes, name = "fixture.pdf") => ({
+        bytes,
+        name,
+        mime: "application/pdf",
+      });
+
+      async function makePdf(count) {
+        const pdf = await PDFDocument.create();
+        const font = await pdf.embedFont(StandardFonts.Helvetica);
+        for (let i = 0; i < count; i++) {
+          const page = pdf.addPage([300, 400]);
+          page.drawText(`Synthetic page ${i + 1}`, {
+            x: 24,
+            y: 350,
+            font,
+            size: 14,
+          });
+        }
+        return await pdf.save();
+      }
+      async function textOfDocx(bytes) {
+        const zip = await JSZip.loadAsync(bytes);
+        const xml = await zip.file("word/document.xml").async("string");
+        return new DOMParser().parseFromString(xml, "application/xml")
+          .documentElement.textContent;
+      }
+      document.getElementById("run").onclick = async () => {
+        document.getElementById("run").disabled = true;
+        results.textContent = "Running";
+        let checks = 0;
+        try {
+          const source = file(await makePdf(41));
+          let indexed = 0;
+          const start = performance.now();
+          const reader = await engine.openViewer(
+            source,
+            (current) => (indexed = current),
+          );
+          assert(indexed === 0, "Reader waited for full-document indexing");
+          report(
+            `PASS first-page session ready before indexing (${Math.round(performance.now() - start)} ms)`,
+          );
+          checks++;
+          await reader.destroy();
+          const protectedResult = await engine.protect(source, {
+            userPassword: " secret ",
+          });
+          assert(protectedResult.ok, "Protection failed");
+          let prompts = 0;
+          const locked = await engine.openViewer(
+            file(protectedResult.bytes),
+            undefined,
+            {
+              indexText: false,
+              onPassword: async (incorrect) => {
+                prompts++;
+                return incorrect ? " secret " : "wrong";
+              },
+            },
+          );
+          assert(
+            prompts === 2 && locked.document.pageCount === 41,
+            "Password retry failed",
+          );
+          await locked.destroy();
+          report(
+            "PASS password prompt, wrong-password retry, and spaces preserved",
+          );
+          checks++;
+          const exportStart = performance.now();
+          const images = await engine.pdfToImages(source, {
+            scale: 1,
+            format: "jpeg",
+          });
+          assert(images.ok, "41-page export failed: " + images.message);
+          assert(
+            Object.keys((await JSZip.loadAsync(images.bytes)).files).length ===
+              41,
+            "ZIP is incomplete",
+          );
+          report(
+            `PASS 41-page export is saveable ZIP (${Math.round(performance.now() - exportStart)} ms, ${images.bytes.length} bytes)`,
+          );
+          checks++;
+          const abort = new AbortController();
+          const cancelled = await engine.pdfToImages(
+            source,
+            { scale: 2, format: "png" },
+            {
+              signal: abort.signal,
+              onProgress: (update) => {
+                if (update.progress > 0) abort.abort();
+              },
+            },
+          );
+          assert(!cancelled.ok, "Cancelled export returned a result");
+          report("PASS image-export cancellation");
+          checks++;
+          const optimized = await engine.compress(source, "keep");
+          assert(
+            optimized.ok && optimized.bytes.length <= source.bytes.length,
+            "Lossless optimization enlarged file",
+          );
+          report(
+            `PASS preserve-text compression ${source.bytes.length} → ${optimized.bytes.length} bytes`,
+          );
+          checks++;
+          const scan = document.createElement("canvas");
+          scan.width = 1275;
+          scan.height = 1650;
+          const ctx = scan.getContext("2d");
+          ctx.fillStyle = "white";
+          ctx.fillRect(0, 0, scan.width, scan.height);
+          ctx.fillStyle = "black";
+          ctx.font = "bold 45px Arial";
+          ctx.fillText("OPERATIONS REPORT", 100, 160);
+          ctx.font = "32px Arial";
+          [
+            "Invoice number SN12345",
+            "Customer North Trading",
+            "Amount due 1240 dollars",
+            "Payment reference 84200",
+            "Please preserve every line of this scanned document.",
+          ].forEach((t, i) => ctx.fillText(t, 100, 260 + i * 100));
+          const jpeg = await new Promise((resolve) =>
+            scan.toBlob(resolve, "image/jpeg", 0.96),
+          );
+          const scanPdf = await PDFDocument.create();
+          const img = await scanPdf.embedJpg(await jpeg.arrayBuffer());
+          const page = scanPdf.addPage([612, 792]);
+          page.drawImage(img, { x: 0, y: 0, width: 612, height: 792 });
+          page.drawText("Selectable document header", {
+            x: 24,
+            y: 770,
+            size: 10,
+          });
+          const mixed = file(await scanPdf.save(), "mixed-scan.pdf");
+          const ocrStart = performance.now();
+          const word = await engine.pdfToDocx(mixed, (update) => {
+            document.title = update.label;
+          });
+          assert(word.ok, "Mixed scan conversion failed: " + word.message);
+          const text = await textOfDocx(word.bytes);
+          assert(
+            text.includes("SN12345") && text.includes("1240"),
+            "Scanned body omitted: " + text,
+          );
+          assert(
+            word.extra.pdfToDocx.warnings.some((w) => w.includes("OCR")),
+            "OCR report missing",
+          );
+          report(
+            `PASS mixed scan body retained through OCR (${Math.round(performance.now() - ocrStart)} ms)`,
+          );
+          checks++;
+          const worker = new Worker(
+            new URL("/src/pdf/scanWorker.ts", location.href),
+            { type: "module" },
+          );
+          const bytes = await jpeg.arrayBuffer();
+          const edited = await new Promise((resolve, reject) => {
+            worker.onmessage = (e) => resolve(e.data);
+            worker.onerror = (e) => reject(new Error(e.message));
+            worker.postMessage(
+              {
+                bytes,
+                mime: "image/jpeg",
+                edit: {
+                  corners: [
+                    { x: 0.03, y: 0.03 },
+                    { x: 0.97, y: 0.05 },
+                    { x: 0.94, y: 0.97 },
+                    { x: 0.04, y: 0.95 },
+                  ],
+                  mode: "bw",
+                  rotate: false,
+                },
+              },
+              { transfer: [bytes] },
+            );
+          });
+          worker.terminate();
+          assert(edited.ok, "Scan correction failed");
+          const bitmap = await createImageBitmap(
+            new Blob([edited.bytes], { type: "image/jpeg" }),
+          );
+          assert(
+            bitmap.width > 1000 && bitmap.height > 1400,
+            "Corrected scan lost resolution",
+          );
+          bitmap.close();
+          const preview = document.createElement("img");
+          preview.src = URL.createObjectURL(
+            new Blob([edited.bytes], { type: "image/jpeg" }),
+          );
+          preview.alt = "Corrected synthetic scan";
+          document.getElementById("images").append(preview);
+          report("PASS perspective and black-and-white worker");
+          checks++;
+          const converted = await engine.docxToPdf({
+            name: "round-trip.docx",
+            mime: word.mime,
+            bytes: word.bytes,
+          });
+          assert(
+            converted.ok,
+            "OCR DOCX could not convert back to PDF: " + converted.message,
+          );
+          report("PASS scanned PDF → editable Word → PDF");
+          checks++;
+          results.dataset.complete = "true";
+          results.dataset.passed = String(checks);
+          report(`COMPLETE ${checks} checks passed`);
+          document.title = "Engine checks passed";
+        } catch (error) {
+          report("FAIL " + (error.stack || error.message));
+          results.dataset.failed = "true";
+          document.title = "Engine checks failed";
+        }
+      };
+    </script>
+  </body>
+</html>

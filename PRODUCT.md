@@ -31,7 +31,7 @@ On-device processing is the current implementation and a marketing plus. It is n
 - Android app (`com.reampdf.mobile`, Capacitor 8 WebView) is the store product. The same React app also runs in a browser / PWA shell.
 - Typical session: pick or capture → one tool → result → system save or share. Interrupted; one-handed; often on cellular.
 - Documents are PDFs, DOCX, and camera/gallery images (JPEG, PNG, WebP). English OCR is bundled for scanned pages.
-- Play Console, AdMob banners on Tools and Recents, and a public privacy policy are part of shipping, not of the document job.
+- Play Console and a public privacy policy are part of shipping, not of the document job.
 - No Ream account exists today.
 
 ## Capabilities and Constraints
@@ -40,9 +40,9 @@ Shipped today:
 
 - Tools: merge, split, images → PDF, PDF → images, compress, scan, organize, watermark, page numbers, protect (AES-256), view, Word → PDF (simplified), PDF → Word (layout rebuild + English OCR).
 - Reader: continuous pages, search, outlines, thumbnails, pinch zoom, save/share.
-- Recents in IndexedDB (20 items; files over 8 MB keep metadata only).
+- Recents in IndexedDB: separate metadata and file bytes, up to 200 items / 512 MB subject to storage availability; search, rename, delete and external save.
 - Light / dark / system theme and a reduce-motion setting.
-- Adaptive AdMob banners on discovery screens, UMP consent-gated.
+- Ad-free Android and web builds; no advertising or analytics SDK.
 - All tools unlocked. `pro` flags exist for a future paywall; they are not charged.
 
 Confirmed product direction:

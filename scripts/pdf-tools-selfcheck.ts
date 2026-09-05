@@ -313,27 +313,11 @@ if (namedDocx.extra?.wordToPdf?.warnings?.length) {
   throw new Error('Latin-only worker conversion must not attach glyph warnings');
 }
 
-const cjkDocx = await invoke({
-  id: 14,
-  op: 'docxToPdf',
-  file: transfer(
-    'cjk.docx',
-    DOCX_MIME,
-    await buildDocx({
-      documentXml: documentXml(paragraphXml('你好世界')),
-    }),
-  ),
-});
-if (
-  !cjkDocx.bytes ||
-  !cjkDocx.extra?.wordToPdf ||
-  cjkDocx.extra.wordToPdf.replacedChars <= 0 ||
-  cjkDocx.extra.wordToPdf.warnings.length === 0
-) {
-  throw new Error(
-    `docxToPdf worker must report replaced glyphs, got ${JSON.stringify(cjkDocx.extra)}`,
-  );
-}
+let rejectedUnsupportedCharacters = false;
+try {
+  await invoke({ id: 14, op: 'docxToPdf', file: transfer('cjk.docx', DOCX_MIME, await buildDocx({ documentXml: documentXml(paragraphXml('你好世界')) })) });
+} catch (error) { rejectedUnsupportedCharacters = error instanceof Error && error.message.includes('cannot preserve'); }
+if (!rejectedUnsupportedCharacters) throw new Error('Word conversion must reject unsupported characters rather than replace them.');
 
 let rejectedBadDocx = false;
 try {

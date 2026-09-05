@@ -1,22 +1,24 @@
 // Canvas rendering must run on the main thread (DOM canvas and toBlob).
-import { PDFDocument } from 'pdf-lib';
-import * as pdfjs from 'pdfjs-dist';
-import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
-import pdfjsWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import jbig2FallbackUrl from 'pdfjs-dist/wasm/jbig2_nowasm_fallback.js?url';
-import jbig2WasmUrl from 'pdfjs-dist/wasm/jbig2.wasm?url';
-import openjpegFallbackUrl from 'pdfjs-dist/wasm/openjpeg_nowasm_fallback.js?url';
-import openjpegWasmUrl from 'pdfjs-dist/wasm/openjpeg.wasm?url';
-import qcmsWasmUrl from 'pdfjs-dist/wasm/qcms_bg.wasm?url';
-import quickjsJsUrl from 'pdfjs-dist/wasm/quickjs-eval.js?url';
-import quickjsWasmUrl from 'pdfjs-dist/wasm/quickjs-eval.wasm?url';
+import { PDFDocument } from "pdf-lib";
+import * as pdfjs from "pdfjs-dist";
+import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
+import pdfjsWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import jbig2FallbackUrl from "pdfjs-dist/wasm/jbig2_nowasm_fallback.js?url";
+import jbig2WasmUrl from "pdfjs-dist/wasm/jbig2.wasm?url";
+import openjpegFallbackUrl from "pdfjs-dist/wasm/openjpeg_nowasm_fallback.js?url";
+import openjpegWasmUrl from "pdfjs-dist/wasm/openjpeg.wasm?url";
+import qcmsWasmUrl from "pdfjs-dist/wasm/qcms_bg.wasm?url";
+import quickjsJsUrl from "pdfjs-dist/wasm/quickjs-eval.js?url";
+import quickjsWasmUrl from "pdfjs-dist/wasm/quickjs-eval.wasm?url";
 import type {
   CompressLevel,
   JobResult,
   PdfToDocxProgress,
   PickedFile,
-} from '../lib/types';
-import type { OcrSession } from './ocr';
+  ExportImageOptions,
+  JobControl,
+} from "../lib/types";
+import type { OcrSession } from "./ocr";
 import {
   analyzeGlyphs,
   clusterLines,
@@ -24,35 +26,54 @@ import {
   orderAndSpaceBlocks,
   pageCharCount,
   rulingsFromOperatorList,
-} from './textLayout';
-import type { PdfBlock, PdfTextPage } from './textTypes';
-import { copyBytes, humanError } from './util';
+} from "./textLayout";
+import type { PdfBlock, PdfTextPage } from "./textTypes";
+import { copyBytes, humanError } from "./util";
+import {
+  packageImages,
+  IMAGE_ARCHIVE_MAX_FILES,
+  IMAGE_ARCHIVE_MAX_INPUT_BYTES,
+} from "../store/files";
+
+async function checkpoint(
+  control?: JobControl,
+  progress?: number,
+  label = "Processing pages",
+) {
+  control?.signal?.throwIfAborted();
+  if (progress != null) control?.onProgress?.({ progress, label });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  control?.signal?.throwIfAborted();
+}
 
 export type { PdfTextPage };
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc;
 
 const wasmAssets: Record<string, string> = {
-  'jbig2.wasm': jbig2WasmUrl,
-  'jbig2_nowasm_fallback.js': jbig2FallbackUrl,
-  'openjpeg.wasm': openjpegWasmUrl,
-  'openjpeg_nowasm_fallback.js': openjpegFallbackUrl,
-  'qcms_bg.wasm': qcmsWasmUrl,
-  'quickjs-eval.js': quickjsJsUrl,
-  'quickjs-eval.wasm': quickjsWasmUrl,
+  "jbig2.wasm": jbig2WasmUrl,
+  "jbig2_nowasm_fallback.js": jbig2FallbackUrl,
+  "openjpeg.wasm": openjpegWasmUrl,
+  "openjpeg_nowasm_fallback.js": openjpegFallbackUrl,
+  "qcms_bg.wasm": qcmsWasmUrl,
+  "quickjs-eval.js": quickjsJsUrl,
+  "quickjs-eval.wasm": quickjsWasmUrl,
 };
 
 const cmapAssets = import.meta.glob<string>(
-  '../../node_modules/pdfjs-dist/cmaps/*',
-  { query: '?url', import: 'default', eager: true, exhaustive: true },
+  "../../node_modules/pdfjs-dist/cmaps/*",
+  { query: "?url", import: "default", eager: true, exhaustive: true },
 );
 
 const fontAssets = import.meta.glob<string>(
-  '../../node_modules/pdfjs-dist/standard_fonts/*',
-  { query: '?url', import: 'default', eager: true, exhaustive: true },
+  "../../node_modules/pdfjs-dist/standard_fonts/*",
+  { query: "?url", import: "default", eager: true, exhaustive: true },
 );
 
-function assetUrl(map: Record<string, string>, filename: string): string | undefined {
+function assetUrl(
+  map: Record<string, string>,
+  filename: string,
+): string | undefined {
   if (map[filename]) return map[filename];
   const suffix = `/${filename}`;
   for (const [key, url] of Object.entries(map)) {
@@ -65,11 +86,11 @@ class ViteBinaryDataFactory {
   async fetch(params: { kind: string; filename: string }): Promise<Uint8Array> {
     const { kind, filename } = params;
     const url =
-      kind === 'wasmUrl'
+      kind === "wasmUrl"
         ? assetUrl(wasmAssets, filename)
-        : kind === 'cMapUrl'
+        : kind === "cMapUrl"
           ? assetUrl(cmapAssets, filename)
-          : kind === 'standardFontDataUrl'
+          : kind === "standardFontDataUrl"
             ? assetUrl(fontAssets, filename)
             : undefined;
     if (!url) {
@@ -84,8 +105,8 @@ class ViteBinaryDataFactory {
 }
 
 const COMPRESS: Record<CompressLevel, { scale: number; quality: number }> = {
-  strong: { scale: 0.5, quality: 0.52 },
-  balanced: { scale: 0.75, quality: 0.72 },
+  strong: { scale: 1.2, quality: 0.55 },
+  balanced: { scale: 2, quality: 0.78 },
   keep: { scale: 1, quality: 0.92 },
 };
 
@@ -124,17 +145,20 @@ export type PdfViewerSession = {
   destroy(): Promise<void>;
 };
 
-function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+function canvasToJpeg(
+  canvas: HTMLCanvasElement,
+  quality: number,
+): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
         if (!blob) {
-          reject(new Error('Could not encode this page as JPEG.'));
+          reject(new Error("Could not encode this page as JPEG."));
           return;
         }
         resolve(blob);
       },
-      'image/jpeg',
+      "image/jpeg",
       quality,
     );
   });
@@ -145,23 +169,47 @@ async function withPdfjs<T>(
   fn: (pdf: PDFDocumentProxy) => Promise<T>,
 ): Promise<T> {
   const task = createPdfTask(file);
-  const pdf = await task.promise;
+  let pdf: PDFDocumentProxy | undefined;
   try {
+    pdf = await task.promise;
     return await fn(pdf);
   } finally {
-    await pdf.cleanup();
     await task.destroy();
   }
 }
 
-function createPdfTask(file: PickedFile) {
-  return pdfjs.getDocument({
+function createPdfTask(
+  file: PickedFile,
+  options?: {
+    signal?: AbortSignal;
+    onPassword?: (incorrect: boolean) => Promise<string>;
+  },
+) {
+  options?.signal?.throwIfAborted();
+  const task = pdfjs.getDocument({
+    password: file.password,
     data: copyBytes(file.bytes),
     useWorkerFetch: false,
     useSystemFonts: true,
     fontExtraProperties: true,
     BinaryDataFactory: ViteBinaryDataFactory,
   });
+  if (options?.onPassword)
+    task.onPassword = (update: (password: string) => void, reason: number) => {
+      void options.onPassword!(
+        reason === pdfjs.PasswordResponses.INCORRECT_PASSWORD,
+      )
+        .then(update)
+        .catch(() => task.destroy());
+    };
+  options?.signal?.addEventListener(
+    "abort",
+    () => {
+      void task.destroy();
+    },
+    { once: true },
+  );
+  return task;
 }
 
 type RawOutlineItem = {
@@ -175,18 +223,18 @@ async function outlinePageIndex(
   destination: unknown,
 ): Promise<number | undefined> {
   let resolved = destination;
-  if (typeof resolved === 'string') {
+  if (typeof resolved === "string") {
     resolved = await pdf.getDestination(resolved);
   }
   if (!Array.isArray(resolved) || resolved.length === 0) return undefined;
   const pageRef = resolved[0];
-  if (typeof pageRef === 'number') {
+  if (typeof pageRef === "number") {
     return pageRef >= 0 && pageRef < pdf.numPages ? pageRef : undefined;
   }
-  if (typeof pageRef !== 'object' || pageRef === null) return undefined;
+  if (typeof pageRef !== "object" || pageRef === null) return undefined;
   try {
     return await pdf.getPageIndex(
-      pageRef as Parameters<PDFDocumentProxy['getPageIndex']>[0],
+      pageRef as Parameters<PDFDocumentProxy["getPageIndex"]>[0],
     );
   } catch {
     return undefined;
@@ -201,9 +249,9 @@ async function flattenOutline(
   if (!Array.isArray(items)) return [];
   const flattened: PdfViewerOutlineItem[] = [];
   for (const value of items) {
-    if (typeof value !== 'object' || value === null) continue;
+    if (typeof value !== "object" || value === null) continue;
     const item = value as RawOutlineItem;
-    const title = typeof item.title === 'string' ? item.title.trim() : '';
+    const title = typeof item.title === "string" ? item.title.trim() : "";
     const pageIndex = await outlinePageIndex(pdf, item.dest);
     if (title && pageIndex != null) {
       flattened.push({ title, pageIndex, depth: Math.min(depth, 3) });
@@ -213,66 +261,109 @@ async function flattenOutline(
   return flattened;
 }
 
-function textOf(content: Awaited<ReturnType<PDFPageProxy['getTextContent']>>): string {
+function textOf(
+  content: Awaited<ReturnType<PDFPageProxy["getTextContent"]>>,
+): string {
   return content.items
     .map((item) =>
-      typeof item === 'object' && item && 'str' in item && typeof item.str === 'string'
+      typeof item === "object" &&
+      item &&
+      "str" in item &&
+      typeof item.str === "string"
         ? item.str
-        : '',
+        : "",
     )
     .filter(Boolean)
-    .join(' ')
-    .replace(/\s+/g, ' ')
+    .join(" ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
 export async function openPdfViewer(
   file: PickedFile,
   onProgress?: (current: number, total: number) => void,
+  options?: {
+    signal?: AbortSignal;
+    onPassword?: (incorrect: boolean) => Promise<string>;
+    indexText?: boolean;
+  },
 ): Promise<PdfViewerSession> {
-  const task = createPdfTask(file);
-  const pdf = await task.promise;
+  const task = createPdfTask(file, options);
+  let pdf: PDFDocumentProxy;
+  try {
+    pdf = await task.promise;
+  } catch (error) {
+    await task.destroy();
+    throw error;
+  }
   let destroyed = false;
   try {
-    const pages: PdfViewerPage[] = [];
-    for (let pageIndex = 0; pageIndex < pdf.numPages; pageIndex++) {
-      const page = await pdf.getPage(pageIndex + 1);
-      const viewport = page.getViewport({ scale: 1 });
-      const content = await page.getTextContent();
-      pages.push({
-        width: viewport.width,
-        height: viewport.height,
-        text: textOf(content),
-      });
-      page.cleanup();
-      onProgress?.(pageIndex + 1, pdf.numPages);
-    }
-    const outline = await flattenOutline(pdf, await pdf.getOutline());
+    const first = await pdf.getPage(1);
+    const firstSize = first.getViewport({ scale: 1 });
+    const pages: PdfViewerPage[] = Array.from({ length: pdf.numPages }, () => ({
+      width: firstSize.width,
+      height: firstSize.height,
+      text: "",
+    }));
     const viewerDocument: PdfViewerDocument = {
       pageCount: pdf.numPages,
       pages,
-      outline,
+      outline: [],
     };
+    // Publish page one immediately; build dimensions and the search index incrementally.
+    if (options?.indexText !== false)
+      window.setTimeout(() => {
+        void (async () => {
+          try {
+            for (let i = 0; i < pdf.numPages; i++) {
+              if (destroyed || options?.signal?.aborted) return;
+              const page = await pdf.getPage(i + 1);
+              const viewport = page.getViewport({ scale: 1 });
+              const content = await page.getTextContent();
+              pages[i] = {
+                width: viewport.width,
+                height: viewport.height,
+                text: textOf(content),
+              };
+              onProgress?.(i + 1, pdf.numPages);
+              await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+            if (!destroyed) {
+              viewerDocument.outline = await flattenOutline(
+                pdf,
+                await pdf.getOutline(),
+              );
+              onProgress?.(pdf.numPages, pdf.numPages);
+            }
+          } catch {
+            /* Visible pages remain readable if a malformed page cannot be indexed. */
+          }
+        })();
+      }, 0);
 
     return {
       document: viewerDocument,
       async renderPage(pageIndex, width) {
-        if (destroyed) throw new Error('This viewer session is closed.');
+        if (destroyed) throw new Error("This viewer session is closed.");
         if (pageIndex < 0 || pageIndex >= pdf.numPages) {
-          throw new Error('That page is out of range.');
+          throw new Error("That page is out of range.");
         }
         const page = await pdf.getPage(pageIndex + 1);
         const base = page.getViewport({ scale: 1 });
-        const scale = base.width > 0 ? Math.max(0.1, width / base.width) : 1;
+        const scale = Math.min(
+          base.width > 0 ? Math.max(0.1, width / base.width) : 1,
+          Math.sqrt(12_000_000 / Math.max(1, base.width * base.height)),
+          8192 / Math.max(1, base.width, base.height),
+        );
         const viewport = page.getViewport({ scale });
-        const canvas = document.createElement('canvas');
+        const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, Math.ceil(viewport.width));
         canvas.height = Math.max(1, Math.ceil(viewport.height));
-        const canvasContext = canvas.getContext('2d', { alpha: false });
+        const canvasContext = canvas.getContext("2d", { alpha: false });
         if (!canvasContext) {
-          throw new Error('Could not create a canvas to render this page.');
+          throw new Error("Could not create a canvas to render this page.");
         }
-        canvasContext.fillStyle = '#ffffff';
+        canvasContext.fillStyle = "#ffffff";
         canvasContext.fillRect(0, 0, canvas.width, canvas.height);
         const renderTask = page.render({ canvas, canvasContext, viewport });
         try {
@@ -284,9 +375,9 @@ export async function openPdfViewer(
         }
       },
       async renderTextLayer(pageIndex, container, scale) {
-        if (destroyed) throw new Error('This viewer session is closed.');
+        if (destroyed) throw new Error("This viewer session is closed.");
         if (pageIndex < 0 || pageIndex >= pdf.numPages) {
-          throw new Error('That page is out of range.');
+          throw new Error("That page is out of range.");
         }
         const page = await pdf.getPage(pageIndex + 1);
         const viewport = page.getViewport({ scale: Math.max(0.1, scale) });
@@ -306,12 +397,10 @@ export async function openPdfViewer(
       async destroy() {
         if (destroyed) return;
         destroyed = true;
-        await pdf.cleanup();
         await task.destroy();
       },
     };
   } catch (error) {
-    await pdf.cleanup();
     await task.destroy();
     throw error;
   }
@@ -336,15 +425,21 @@ async function renderPageCanvas(
   page: PDFPageProxy,
   scale: number,
 ): Promise<HTMLCanvasElement> {
-  const viewport = page.getViewport({ scale: Math.max(scale, 0.05) });
-  const canvas = document.createElement('canvas');
+  const base = page.getViewport({ scale: 1 });
+  const boundedScale = Math.min(
+    Math.max(scale, 0.05),
+    Math.sqrt(12_000_000 / Math.max(1, base.width * base.height)),
+    8192 / Math.max(1, base.width, base.height),
+  );
+  const viewport = page.getViewport({ scale: boundedScale });
+  const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.ceil(viewport.width));
   canvas.height = Math.max(1, Math.ceil(viewport.height));
-  const canvasContext = canvas.getContext('2d', { alpha: false });
+  const canvasContext = canvas.getContext("2d", { alpha: false });
   if (!canvasContext) {
-    throw new Error('Could not create a canvas to render this page.');
+    throw new Error("Could not create a canvas to render this page.");
   }
-  canvasContext.fillStyle = '#ffffff';
+  canvasContext.fillStyle = "#ffffff";
   canvasContext.fillRect(0, 0, canvas.width, canvas.height);
   const task = page.render({ canvas, canvasContext, viewport });
   try {
@@ -364,7 +459,7 @@ export async function renderPage(
 ): Promise<Blob> {
   return withPdfjs(file, async (pdf) => {
     if (pageIndex < 0 || pageIndex >= pdf.numPages) {
-      throw new Error('That page is out of range.');
+      throw new Error("That page is out of range.");
     }
     const page = await pdf.getPage(pageIndex + 1);
     const base = page.getViewport({ scale: 1 });
@@ -373,23 +468,67 @@ export async function renderPage(
   });
 }
 
-export async function pdfToImages(file: PickedFile): Promise<JobResult> {
+export async function pdfToImages(
+  file: PickedFile,
+  options?: ExportImageOptions,
+  control?: JobControl,
+): Promise<JobResult> {
   try {
     return await withPdfjs(file, async (pdf) => {
-      if (pdf.numPages < 1) {
-        return { ok: false, message: 'This PDF has no pages to export.' };
-      }
+      const pages =
+        options?.pages ?? Array.from({ length: pdf.numPages }, (_, i) => i);
+      if (!pages.length || pages.length > IMAGE_ARCHIVE_MAX_FILES)
+        throw new Error(
+          `Select between 1 and ${IMAGE_ARCHIVE_MAX_FILES} pages before exporting.`,
+        );
+      if (pages.some((i) => !Number.isInteger(i) || i < 0 || i >= pdf.numPages))
+        throw new Error("The selected pages are outside this PDF.");
       const images: Blob[] = [];
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        images.push(await renderPageToJpeg(page, 2, 0.82));
+      let total = 0;
+      for (const [index, pageIndex] of pages.entries()) {
+        await checkpoint(
+          control,
+          index / pages.length,
+          `Exporting page ${index + 1} of ${pages.length}`,
+        );
+        const page = await pdf.getPage(pageIndex + 1);
+        const canvas = await renderPageCanvas(page, options?.scale ?? 2);
+        let blob: Blob;
+        try {
+          blob =
+            options?.format === "png"
+              ? await new Promise<Blob>((resolve, reject) =>
+                  canvas.toBlob(
+                    (b) =>
+                      b
+                        ? resolve(b)
+                        : reject(new Error("Could not encode PNG.")),
+                    "image/png",
+                  ),
+                )
+              : await canvasToJpeg(canvas, 0.92);
+        } finally {
+          canvas.width = 0;
+          canvas.height = 0;
+          page.cleanup();
+        }
+        total += blob.size;
+        if (total > IMAGE_ARCHIVE_MAX_INPUT_BYTES)
+          throw new Error(
+            "These images exceed 64 MB. Choose fewer pages or a lower resolution and try again.",
+          );
+        images.push(blob);
       }
+      await checkpoint(control, 0.95, "Preparing downloadable file");
+      const output = await packageImages(
+        images,
+        `${file.name.replace(/\.pdf$/i, "") || "document"}-pages`,
+      );
+      control?.signal?.throwIfAborted();
       return {
         ok: true,
-        bytes: new Uint8Array(),
-        filename: `${file.name.replace(/\.pdf$/i, '') || 'document'}-pages`,
-        pageCount: pdf.numPages,
-        mime: 'application/x-image-set',
+        ...output,
+        pageCount: pages.length,
         extra: { images },
       };
     });
@@ -401,19 +540,27 @@ export async function pdfToImages(file: PickedFile): Promise<JobResult> {
 export async function compress(
   file: PickedFile,
   level: CompressLevel,
+  control?: JobControl,
 ): Promise<JobResult> {
   try {
     const { scale, quality } = COMPRESS[level];
     return await withPdfjs(file, async (pdf) => {
       if (pdf.numPages < 1) {
-        return { ok: false, message: 'This PDF has no pages to compress.' };
+        return { ok: false, message: "This PDF has no pages to compress." };
       }
       const out = await PDFDocument.create();
       for (let i = 1; i <= pdf.numPages; i++) {
+        await checkpoint(
+          control,
+          (i - 1) / pdf.numPages,
+          `Compressing page ${i} of ${pdf.numPages}`,
+        );
         const page = await pdf.getPage(i);
         const base = page.getViewport({ scale: 1 });
         const jpeg = await renderPageToJpeg(page, scale, quality);
-        const image = await out.embedJpg(new Uint8Array(await jpeg.arrayBuffer()));
+        const image = await out.embedJpg(
+          new Uint8Array(await jpeg.arrayBuffer()),
+        );
         const pdfPage = out.addPage([base.width, base.height]);
         pdfPage.drawImage(image, {
           x: 0,
@@ -425,13 +572,23 @@ export async function compress(
       const bytes = await out.save();
       const compressed = copyBytes(bytes);
       const finalBytes =
-        compressed.byteLength < file.bytes.byteLength ? compressed : copyBytes(file.bytes);
+        compressed.byteLength < file.bytes.byteLength
+          ? compressed
+          : copyBytes(file.bytes);
       return {
         ok: true,
         bytes: finalBytes,
-        filename: 'compressed.pdf',
+        filename: "compressed.pdf",
         pageCount: out.getPageCount(),
-        mime: 'application/pdf',
+        mime: "application/pdf",
+        extra: {
+          compression: {
+            originalBytes: file.bytes.length,
+            outputBytes: finalBytes.length,
+            originalRetained: compressed.length >= file.bytes.length,
+            mode: "raster",
+          },
+        },
       };
     });
   } catch (err) {
@@ -439,9 +596,15 @@ export async function compress(
   }
 }
 
-type PdfOperatorList = Awaited<ReturnType<PDFPageProxy['getOperatorList']>>;
+type PdfOperatorList = Awaited<ReturnType<PDFPageProxy["getOperatorList"]>>;
 type Matrix = [number, number, number, number, number, number];
-type ImagePlacement = { x: number; top: number; bottom: number; width: number; height: number };
+type ImagePlacement = {
+  x: number;
+  top: number;
+  bottom: number;
+  width: number;
+  height: number;
+};
 
 function multiplyMatrix(left: Matrix, right: Matrix): Matrix {
   return [
@@ -456,15 +619,14 @@ function multiplyMatrix(left: Matrix, right: Matrix): Matrix {
 
 function imagePlacementsFromOperatorList(
   operatorList: PdfOperatorList,
-  viewport: ReturnType<PDFPageProxy['getViewport']>,
+  viewport: ReturnType<PDFPageProxy["getViewport"]>,
 ): ImagePlacement[] {
   const pageWidth = viewport.width;
   const pageHeight = viewport.height;
   const imageOps = new Set<number>(
-    [
-      pdfjs.OPS.paintImageXObject,
-      pdfjs.OPS.paintInlineImageXObject,
-    ].filter((value): value is number => typeof value === 'number'),
+    [pdfjs.OPS.paintImageXObject, pdfjs.OPS.paintInlineImageXObject].filter(
+      (value): value is number => typeof value === "number",
+    ),
   );
   const identity: Matrix = [1, 0, 0, 1, 0, 0];
   let transform: Matrix = identity;
@@ -484,7 +646,8 @@ function imagePlacementsFromOperatorList(
       const args = operatorList.argsArray[index];
       if (Array.isArray(args) && args.length >= 6) {
         const next = args.slice(0, 6).map(Number) as Matrix;
-        if (next.every(Number.isFinite)) transform = multiplyMatrix(transform, next);
+        if (next.every(Number.isFinite))
+          transform = multiplyMatrix(transform, next);
       }
       continue;
     }
@@ -508,8 +671,14 @@ function imagePlacementsFromOperatorList(
       viewport.convertToViewportPoint(sourceLeft, sourceTop),
       viewport.convertToViewportPoint(sourceRight, sourceTop),
     ];
-    const left = Math.max(0, Math.min(...viewportCorners.map((point) => Number(point[0]))));
-    const right = Math.min(pageWidth, Math.max(...viewportCorners.map((point) => Number(point[0]))));
+    const left = Math.max(
+      0,
+      Math.min(...viewportCorners.map((point) => Number(point[0]))),
+    );
+    const right = Math.min(
+      pageWidth,
+      Math.max(...viewportCorners.map((point) => Number(point[0]))),
+    );
     const viewportTop = Math.max(
       0,
       Math.min(...viewportCorners.map((point) => Number(point[1]))),
@@ -523,7 +692,7 @@ function imagePlacementsFromOperatorList(
     const width = right - left;
     const height = top - bottom;
     const areaRatio = (width * height) / Math.max(1, pageWidth * pageHeight);
-    if (width < 16 || height < 16 || areaRatio > 0.72) continue;
+    if (width < 16 || height < 16 || areaRatio < 0.0001) continue;
     if (
       placements.some(
         (item) =>
@@ -537,7 +706,7 @@ function imagePlacementsFromOperatorList(
     }
     placements.push({ x: left, top, bottom, width, height });
   }
-  return placements.slice(0, 16);
+  return placements;
 }
 
 async function extractPlacedImages(
@@ -547,30 +716,40 @@ async function extractPlacedImages(
   pageHeight: number,
 ): Promise<PdfBlock[]> {
   if (placements.length === 0) return [];
-  const scale = Math.max(1.4, Math.min(2.4, 1800 / Math.max(1, pageWidth)));
-  const canvas = await renderPageCanvas(page, scale);
+  const desiredScale = Math.max(
+    1.4,
+    Math.min(2.4, 1800 / Math.max(1, pageWidth)),
+  );
+  const canvas = await renderPageCanvas(page, desiredScale);
+  const scale = canvas.width / Math.max(1, pageWidth);
   try {
     const blocks: PdfBlock[] = [];
     for (const placement of placements) {
       const sx = Math.max(0, Math.floor(placement.x * scale));
       const sy = Math.max(0, Math.floor((pageHeight - placement.top) * scale));
-      const sw = Math.min(canvas.width - sx, Math.max(1, Math.ceil(placement.width * scale)));
-      const sh = Math.min(canvas.height - sy, Math.max(1, Math.ceil(placement.height * scale)));
+      const sw = Math.min(
+        canvas.width - sx,
+        Math.max(1, Math.ceil(placement.width * scale)),
+      );
+      const sh = Math.min(
+        canvas.height - sy,
+        Math.max(1, Math.ceil(placement.height * scale)),
+      );
       if (sw < 2 || sh < 2) continue;
-      const crop = document.createElement('canvas');
+      const crop = document.createElement("canvas");
       crop.width = sw;
       crop.height = sh;
-      const context = crop.getContext('2d', { alpha: false });
+      const context = crop.getContext("2d", { alpha: false });
       if (!context) continue;
-      context.fillStyle = '#ffffff';
+      context.fillStyle = "#ffffff";
       context.fillRect(0, 0, sw, sh);
       context.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
       try {
         const jpeg = await canvasToJpeg(crop, 0.9);
         blocks.push({
-          kind: 'image',
+          kind: "image",
           bytes: new Uint8Array(await jpeg.arrayBuffer()),
-          mime: 'image/jpeg',
+          mime: "image/jpeg",
           widthPt: placement.width,
           heightPt: placement.height,
           x: placement.x,
@@ -592,6 +771,7 @@ async function extractPlacedImages(
 export async function extractPdfText(
   file: PickedFile,
   onProgress?: (update: PdfToDocxProgress) => void,
+  signal?: AbortSignal,
 ): Promise<PdfTextPage[]> {
   return withPdfjs(file, async (pdf) => {
     if (pdf.numPages < 1) return [];
@@ -600,156 +780,182 @@ export async function extractPdfText(
     let ocrUnavailable = false;
     try {
       for (let i = 1; i <= pdf.numPages; i++) {
+        await checkpoint({ signal });
         onProgress?.({
           progress: (i - 1) / pdf.numPages,
           label: `Reading page ${i} of ${pdf.numPages}`,
         });
         const page = await pdf.getPage(i);
         try {
-        const viewport = page.getViewport({ scale: 1 });
-        const content = await page.getTextContent();
-        const operatorList = await page.getOperatorList();
-        const styles = { ...content.styles } as Record<
-          string,
-          {
-            fontFamily?: string;
-            ascent?: number;
-            descent?: number;
-            vertical?: boolean;
-            bold?: boolean;
-            italic?: boolean;
-          }
-        >;
-        const fontNames = new Set<string>();
-        for (const item of content.items) {
-          if (typeof item === 'object' && item && 'fontName' in item) {
-            const fontName = (item as { fontName?: unknown }).fontName;
-            if (typeof fontName === 'string') fontNames.add(fontName);
-          }
-        }
-        for (const fontName of fontNames) {
-          try {
-            const font = page.commonObjs.get(fontName) as {
-              name?: string;
-              fallbackName?: string;
+          const viewport = page.getViewport({ scale: 1 });
+          const content = await page.getTextContent();
+          const operatorList = await page.getOperatorList();
+          const styles = { ...content.styles } as Record<
+            string,
+            {
+              fontFamily?: string;
+              ascent?: number;
+              descent?: number;
+              vertical?: boolean;
               bold?: boolean;
               italic?: boolean;
-            };
-            const previous = styles[fontName] ?? {};
-            styles[fontName] = {
-              ...previous,
-              fontFamily: font.name ?? font.fallbackName ?? previous.fontFamily,
-              bold: font.bold,
-              italic: font.italic,
-            };
-          } catch {
-            // Some malformed PDFs omit a resolvable font object; keep text extraction usable.
+            }
+          >;
+          const fontNames = new Set<string>();
+          for (const item of content.items) {
+            if (typeof item === "object" && item && "fontName" in item) {
+              const fontName = (item as { fontName?: unknown }).fontName;
+              if (typeof fontName === "string") fontNames.add(fontName);
+            }
           }
-        }
-        const glyphs = [];
-        for (const item of content.items) {
-          const glyph = glyphFromPdfItem(item, styles);
-          if (glyph) glyphs.push(glyph);
-        }
-        const lines = clusterLines(glyphs);
-        const chars = pageCharCount(lines);
-        if (chars >= 12) {
-          const rulings = rulingsFromOperatorList(
-            operatorList,
-            pdfjs.OPS.constructPath,
-          );
-          const textBlocks = analyzeGlyphs(
-            glyphs,
-            viewport.width,
-            viewport.height,
-            rulings,
-          );
-          let imageBlocks: PdfBlock[] = [];
-          const placements = imagePlacementsFromOperatorList(
+          for (const fontName of fontNames) {
+            try {
+              const font = page.commonObjs.get(fontName) as {
+                name?: string;
+                fallbackName?: string;
+                bold?: boolean;
+                italic?: boolean;
+              };
+              const previous = styles[fontName] ?? {};
+              styles[fontName] = {
+                ...previous,
+                fontFamily:
+                  font.name ?? font.fallbackName ?? previous.fontFamily,
+                bold: font.bold,
+                italic: font.italic,
+              };
+            } catch {
+              // Some malformed PDFs omit a resolvable font object; keep text extraction usable.
+            }
+          }
+          const glyphs = [];
+          for (const item of content.items) {
+            const glyph = glyphFromPdfItem(item, styles);
+            if (glyph) glyphs.push(glyph);
+          }
+          const lines = clusterLines(glyphs);
+          const chars = pageCharCount(lines);
+          const allPlacements = imagePlacementsFromOperatorList(
             operatorList,
             viewport,
           );
-          if (placements.length > 0) {
-            onProgress?.({
-              progress: (i - 0.35) / pdf.numPages,
-              label: `Preserving images on page ${i} of ${pdf.numPages}`,
-            });
-            try {
-              imageBlocks = await extractPlacedImages(
-                page,
-                placements,
-                viewport.width,
-                viewport.height,
-              );
-            } catch {
-              // Keep the editable text conversion usable if a malformed image cannot render.
-            }
-          }
-          pages.push({
-            width: viewport.width,
-            height: viewport.height,
-            blocks: orderAndSpaceBlocks(
-              [...textBlocks, ...imageBlocks],
+          const dominantScan = allPlacements.some(
+            (item) =>
+              item.width * item.height >
+              viewport.width * viewport.height * 0.55,
+          );
+          if (chars >= 12 && !dominantScan) {
+            const rulings = rulingsFromOperatorList(
+              operatorList,
+              pdfjs.OPS.constructPath,
+            );
+            const textBlocks = analyzeGlyphs(
+              glyphs,
+              viewport.width,
               viewport.height,
-            ),
-          });
-          continue;
-        }
-
-        const ocrScale = Math.max(1.5, Math.min(2.6, 1800 / viewport.width));
-        const jpeg = await renderPageToJpeg(page, ocrScale, 0.9);
-        let recognized = false;
-        if (!ocrUnavailable) {
-          try {
-            if (!ocr) {
+              rulings,
+            );
+            let imageBlocks: PdfBlock[] = [];
+            const placements = allPlacements;
+            if (placements.length > 0) {
               onProgress?.({
-                progress: (i - 0.9) / pdf.numPages,
-                label: 'Starting on-device OCR',
+                progress: (i - 0.35) / pdf.numPages,
+                label: `Preserving images on page ${i} of ${pdf.numPages}`,
               });
-              const module = await import('./ocr');
-              ocr = await module.createOcrSession((update) => {
-                onProgress?.({
-                  progress: (i - 1 + update.progress * 0.9) / pdf.numPages,
-                  label: `OCR page ${i} of ${pdf.numPages}`,
-                });
-              });
-            }
-            const result = await ocr.recognize(jpeg, ocrScale, viewport.height);
-            const ocrChars = result.text.replace(/\s/g, '').length;
-            if (result.confidence >= 45 && ocrChars >= 10) {
-              const blocks = analyzeGlyphs(
-                result.glyphs,
-                viewport.width,
-                viewport.height,
-              );
-              if (blocks.length > 0) {
-                pages.push({
-                  width: viewport.width,
-                  height: viewport.height,
-                  blocks,
-                });
-                recognized = true;
+              try {
+                imageBlocks = await extractPlacedImages(
+                  page,
+                  placements,
+                  viewport.width,
+                  viewport.height,
+                );
+              } catch {
+                throw new Error(
+                  `Images on page ${i} could not be preserved. Try exporting this page as an image before converting.`,
+                );
               }
             }
-          } catch {
-            ocrUnavailable = true;
+            pages.push({
+              width: viewport.width,
+              height: viewport.height,
+              blocks: orderAndSpaceBlocks(
+                [...textBlocks, ...imageBlocks],
+                viewport.height,
+              ),
+            });
+            continue;
           }
-        }
-        if (!recognized) {
-          pages.push({
-            width: viewport.width,
-            height: viewport.height,
-            blocks: [
-              {
-                kind: 'image',
-                bytes: new Uint8Array(await jpeg.arrayBuffer()),
-                mime: 'image/jpeg',
-                widthPt: viewport.width,
-                heightPt: viewport.height,
-              },
-            ],
-          });
-        }
+
+          const ocrScale = Math.min(
+            Math.max(1.5, Math.min(2.6, 1800 / viewport.width)),
+            Math.sqrt(
+              12_000_000 / Math.max(1, viewport.width * viewport.height),
+            ),
+            8192 / Math.max(1, viewport.width, viewport.height),
+          );
+          const jpeg = await renderPageToJpeg(page, ocrScale, 0.9);
+          let recognized = false;
+          if (!ocrUnavailable) {
+            try {
+              if (!ocr) {
+                onProgress?.({
+                  progress: (i - 0.9) / pdf.numPages,
+                  label: "Starting on-device OCR",
+                });
+                const module = await import("./ocr");
+                ocr = await module.createOcrSession((update) => {
+                  onProgress?.({
+                    progress: (i - 1 + update.progress * 0.9) / pdf.numPages,
+                    label: `OCR page ${i} of ${pdf.numPages}`,
+                  });
+                });
+              }
+              const activeOcr = ocr;
+              const stop = () => {
+                void activeOcr.terminate();
+              };
+              signal?.addEventListener("abort", stop, { once: true });
+              const result = await activeOcr
+                .recognize(jpeg, ocrScale, viewport.height)
+                .finally(() => signal?.removeEventListener("abort", stop));
+              signal?.throwIfAborted();
+              const ocrChars = result.text.replace(/\s/g, "").length;
+              if (result.confidence >= 65 && ocrChars >= 10) {
+                const blocks = analyzeGlyphs(
+                  result.glyphs,
+                  viewport.width,
+                  viewport.height,
+                );
+                if (blocks.length > 0) {
+                  pages.push({
+                    width: viewport.width,
+                    height: viewport.height,
+                    blocks,
+                    ocrConfidence: result.confidence,
+                  });
+                  recognized = true;
+                }
+              }
+            } catch {
+              signal?.throwIfAborted();
+              ocrUnavailable = true;
+            }
+          }
+          if (!recognized) {
+            pages.push({
+              width: viewport.width,
+              height: viewport.height,
+              blocks: [
+                {
+                  kind: "image",
+                  bytes: new Uint8Array(await jpeg.arrayBuffer()),
+                  mime: "image/jpeg",
+                  widthPt: viewport.width,
+                  heightPt: viewport.height,
+                },
+              ],
+            });
+          }
         } finally {
           page.cleanup();
         }
@@ -757,7 +963,7 @@ export async function extractPdfText(
     } finally {
       await ocr?.terminate();
     }
-    onProgress?.({ progress: 0.96, label: 'Building Word document' });
+    onProgress?.({ progress: 0.96, label: "Building Word document" });
     return pages;
   });
 }

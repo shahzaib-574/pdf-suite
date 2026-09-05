@@ -1,17 +1,17 @@
 export type ToolId =
-  | 'merge'
-  | 'split'
-  | 'images'
-  | 'pdf-images'
-  | 'compress'
-  | 'scan'
-  | 'organize'
-  | 'watermark'
-  | 'numbers'
-  | 'protect'
-  | 'view'
-  | 'docx-pdf'
-  | 'pdf-docx';
+  | "merge"
+  | "split"
+  | "images"
+  | "pdf-images"
+  | "compress"
+  | "scan"
+  | "organize"
+  | "watermark"
+  | "numbers"
+  | "protect"
+  | "view"
+  | "docx-pdf"
+  | "pdf-docx";
 
 export type PdfBytes = Uint8Array;
 
@@ -19,18 +19,41 @@ export type PickedFile = {
   name: string;
   mime: string;
   bytes: Uint8Array;
+  password?: string;
 };
 
 export type PageRange = {
   start: number;
   end: number;
+  pages?: number[];
 };
 
-export type CompressLevel = 'strong' | 'balanced' | 'keep';
+export type ImagePdfOptions = {
+  size: keyof typeof import("./paperSizes").PAPER_SIZES | "original";
+  landscape: boolean;
+  margin: number;
+};
+export type PageNumberOptions = {
+  start: number;
+  position: "left" | "center" | "right";
+  total: boolean;
+};
+export type ExportImageOptions = {
+  pages?: number[];
+  scale: number;
+  format: "jpeg" | "png";
+};
+export type JobControl = {
+  signal?: AbortSignal;
+  onProgress?: (update: PdfToDocxProgress) => void;
+};
+
+export type CompressLevel = "strong" | "balanced" | "keep";
 
 export type WatermarkInput = {
   text: string;
   opacity: number;
+  angle?: number;
 };
 
 export type ProtectInput = {
@@ -38,9 +61,9 @@ export type ProtectInput = {
 };
 
 export type OrganizeOp =
-  | { type: 'rotate'; pageIndex: number; degrees: 90 | 180 | 270 }
-  | { type: 'remove'; pageIndex: number }
-  | { type: 'reorder'; order: number[] };
+  | { type: "rotate"; pageIndex: number; degrees: 90 | 180 | 270 }
+  | { type: "remove"; pageIndex: number }
+  | { type: "reorder"; order: number[] };
 
 export type JobOk = {
   ok: true;
@@ -52,6 +75,12 @@ export type JobOk = {
     images?: Blob[];
     pdfToDocx?: PdfToDocxReport;
     wordToPdf?: WordToPdfReport;
+    compression?: {
+      originalBytes: number;
+      outputBytes: number;
+      mode: "lossless" | "raster";
+      originalRetained: boolean;
+    };
   };
 };
 
@@ -89,12 +118,13 @@ export type RecentItem = {
   createdAt: number;
   bytes: Uint8Array;
   size: number;
+  stored?: boolean;
 };
 
 export type Route =
-  | { name: 'home' }
-  | { name: 'recents' }
-  | { name: 'tool'; id: ToolId }
-  | { name: 'viewer'; recentId?: string }
-  | { name: 'result' }
-  | { name: 'settings' };
+  | { name: "home" }
+  | { name: "recents" }
+  | { name: "tool"; id: ToolId }
+  | { name: "viewer"; recentId?: string }
+  | { name: "result" }
+  | { name: "settings" };

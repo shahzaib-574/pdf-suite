@@ -1,18 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Check,
   ExternalLink,
   Monitor,
   Moon,
   ShieldCheck,
-  SlidersHorizontal,
   Sun,
   Trash2,
 } from 'lucide-react';
-import {
-  isAdPrivacyOptionsRequired,
-  showAdPrivacyOptions,
-} from '../ads/admob';
 import { AnimatedButton, AppShell } from '../components';
 import { clearRecents } from '../store/recents';
 import { useTheme } from '../theme/context';
@@ -21,33 +16,6 @@ export function Settings() {
   const { theme, setTheme, reducedMotion, setReducedMotion } = useTheme();
   const [cleared, setCleared] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
-  const [adPrivacyRequired, setAdPrivacyRequired] = useState(
-    isAdPrivacyOptionsRequired,
-  );
-  const [adPrivacyBusy, setAdPrivacyBusy] = useState(false);
-  const [adPrivacyError, setAdPrivacyError] = useState('');
-
-  async function openAdPrivacyOptions(): Promise<void> {
-    setAdPrivacyBusy(true);
-    setAdPrivacyError('');
-    try {
-      await showAdPrivacyOptions();
-    } catch {
-      setAdPrivacyError(
-        'Privacy choices could not be opened. Check your connection and try again.',
-      );
-    } finally {
-      setAdPrivacyBusy(false);
-    }
-  }
-
-  useEffect(() => {
-    const onPrivacyState = (event: Event) => {
-      setAdPrivacyRequired((event as CustomEvent<boolean>).detail);
-    };
-    window.addEventListener('ream:ad-privacy-state', onPrivacyState);
-    return () => window.removeEventListener('ream:ad-privacy-state', onPrivacyState);
-  }, []);
 
   return (
     <AppShell>
@@ -130,27 +98,10 @@ export function Settings() {
             >
               <span>
                 <strong>Privacy policy</strong>
-                <small>How local documents and advertising data are handled</small>
+                <small>How your local documents are handled</small>
               </span>
               <ExternalLink size={17} aria-hidden="true" />
             </a>
-            {adPrivacyRequired ? (
-              <AnimatedButton
-                variant="ghost"
-                block
-                icon={SlidersHorizontal}
-                disabled={adPrivacyBusy}
-                aria-busy={adPrivacyBusy}
-                onClick={() => void openAdPrivacyOptions()}
-              >
-                {adPrivacyBusy ? 'Opening privacy choices…' : 'Privacy and cookie settings'}
-              </AnimatedButton>
-            ) : null}
-            {adPrivacyError ? (
-              <p className="ps-banner ps-banner--error" role="alert">
-                {adPrivacyError}
-              </p>
-            ) : null}
             {confirmClear ? (
               <div className="ps-confirm" role="group" aria-label="Confirm clear recent files">
                 <p>This removes locally stored recent files from this device.</p>

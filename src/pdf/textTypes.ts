@@ -14,7 +14,7 @@ export type PdfTextRun = {
 };
 
 export type PdfListInfo = {
-  kind: 'bullet' | 'number';
+  kind: "bullet" | "number";
   level: number;
   sequence: number;
   start?: number;
@@ -48,12 +48,12 @@ export type PdfTextLine = {
   height: number;
   bold: boolean;
   italic: boolean;
-  direction: 'ltr' | 'rtl';
+  direction: "ltr" | "rtl";
 };
 
 export type PdfBlock =
   | {
-      kind: 'para';
+      kind: "para";
       lines: PdfParagraphLine[];
       heading: boolean;
       x: number;
@@ -62,25 +62,25 @@ export type PdfBlock =
       bottom?: number;
       spaceBeforePt?: number;
       lineSpacingPt?: number;
-      alignment?: 'left' | 'center' | 'right';
-      direction?: 'ltr' | 'rtl';
+      alignment?: "left" | "center" | "right";
+      direction?: "ltr" | "rtl";
       firstLineIndentPt?: number;
       list?: PdfListInfo;
     }
   | {
-      kind: 'table';
+      kind: "table";
       rows: string[][];
       x?: number;
       top?: number;
       bottom?: number;
       spaceBeforePt?: number;
       columnWidthsPt?: number[];
-      columnAlignments?: Array<'left' | 'center' | 'right'>;
+      columnAlignments?: Array<"left" | "center" | "right">;
       headerRows?: number;
       bordered?: boolean;
     }
   | {
-      kind: 'columns';
+      kind: "columns";
       columns: PdfBlock[][];
       widthsPt?: number[];
       x?: number;
@@ -89,9 +89,9 @@ export type PdfBlock =
       spaceBeforePt?: number;
     }
   | {
-      kind: 'image';
+      kind: "image";
       bytes: Uint8Array;
-      mime: 'image/jpeg' | 'image/png';
+      mime: "image/jpeg" | "image/png";
       widthPt: number;
       heightPt: number;
       x?: number;
@@ -105,6 +105,7 @@ export type PdfTextPage = {
   height: number;
   blocks: PdfBlock[];
   rotation?: number;
+  ocrConfidence?: number;
 };
 
 export type TextGlyph = {
@@ -118,5 +119,5 @@ export type TextGlyph = {
   fontFamily?: string;
   bold?: boolean;
   italic?: boolean;
-  direction?: 'ltr' | 'rtl';
+  direction?: "ltr" | "rtl";
 };

@@ -1,3 +1,7 @@
+# Archived: former ad-supported build
+
+The current build removes AdMob. This historical test plan must not be used as the release checklist. See [internal testing](internal-testing.md).
+
 # AdMob privacy-message test matrix
 
 Use this checklist only with an Android debug build and Google's test ads. UMP

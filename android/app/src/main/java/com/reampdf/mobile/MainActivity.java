@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(FileExporterPlugin.class);
+        registerPlugin(FileImporterPlugin.class);
         SplashScreen.installSplashScreen(this);
         super.onCreate(savedInstanceState);
         WindowCompat.enableEdgeToEdge(getWindow());

@@ -1,60 +1,60 @@
-import { get, set, update } from 'idb-keyval';
-import { toolById } from '../lib/catalog';
-import type { RecentItem, ToolId } from '../lib/types';
+import { get, set, setMany, delMany } from "idb-keyval";
+import { toolById } from "../lib/catalog";
+import type { RecentItem, ToolId } from "../lib/types";
 
-const KEY = 'pdf.recents';
-const MAX_ITEMS = 20;
-const MAX_BYTES = 8 * 1024 * 1024;
+const LEGACY_KEY = "pdf.recents";
+const KEY = "pdf.library.v2";
+const byteKey = (id: string) => `pdf.file.${id}`;
+const MAX_ITEMS = 200;
+const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
+type Metadata = Omit<RecentItem, "bytes">;
+let migration: Promise<void> | undefined;
+let operations: Promise<unknown> = Promise.resolve();
 
-function asBytes(value: unknown): Uint8Array {
-  if (value instanceof Uint8Array) return value;
-  if (value instanceof ArrayBuffer) return new Uint8Array(value);
-  return new Uint8Array();
+function serialize<T>(fn: () => Promise<T>): Promise<T> {
+  const next = operations.then(fn, fn);
+  operations = next.catch(() => undefined);
+  return next;
 }
 
-function isToolId(value: unknown): value is ToolId {
-  return typeof value === 'string' && toolById(value) !== undefined;
-}
-
-function mimeFromName(name: string): string {
-  return name.toLowerCase().endsWith('.docx')
-    ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    : 'application/pdf';
-}
-
-function normalizeItem(raw: unknown): RecentItem | null {
-  if (typeof raw !== 'object' || raw === null) return null;
-  const item = raw as Record<string, unknown>;
-  if (typeof item.id !== 'string' || typeof item.name !== 'string') return null;
-  if (!isToolId(item.tool)) return null;
-  if (typeof item.createdAt !== 'number' || typeof item.size !== 'number') {
-    return null;
-  }
-  return {
-    id: item.id,
-    name: item.name,
-    mime: typeof item.mime === 'string' ? item.mime : mimeFromName(item.name),
-    tool: item.tool,
-    createdAt: item.createdAt,
-    bytes: asBytes(item.bytes),
-    size: item.size,
-  };
-}
-
-function readList(raw: unknown): RecentItem[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map(normalizeItem)
-    .filter((item): item is RecentItem => item !== null)
-    .sort((a, b) => b.createdAt - a.createdAt);
+async function ready(): Promise<void> {
+  migration ??= (async () => {
+    if ((await get(KEY)) !== undefined) return;
+    const old = await get<RecentItem[]>(LEGACY_KEY);
+    const rows: Metadata[] = [];
+    const entries: [IDBValidKey, unknown][] = [];
+    for (const item of Array.isArray(old) ? old : []) {
+      if (!item || typeof item.id !== "string" || !toolById(item.tool))
+        continue;
+      const bytes =
+        item.bytes instanceof Uint8Array ? item.bytes : new Uint8Array();
+      const { bytes: _bytes, ...meta } = item;
+      rows.push({
+        ...meta,
+        mime:
+          item.mime ||
+          (item.name.endsWith(".docx")
+            ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            : "application/pdf"),
+        stored: bytes.length > 0,
+      });
+      if (bytes.length) entries.push([byteKey(item.id), bytes]);
+    }
+    entries.push([KEY, rows], [LEGACY_KEY, []]);
+    await setMany(entries);
+  })().catch((error) => {
+    migration = undefined;
+    throw error;
+  });
+  await migration;
 }
 
 export async function listRecents(): Promise<RecentItem[]> {
-  try {
-    return readList(await get<unknown>(KEY));
-  } catch {
-    return [];
-  }
+  await ready();
+  const rows = (await get<Metadata[]>(KEY)) ?? [];
+  return rows
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((row) => ({ ...row, bytes: new Uint8Array() }));
 }
 
 export async function saveRecent(input: {
@@ -63,32 +63,78 @@ export async function saveRecent(input: {
   tool: ToolId;
   bytes: Uint8Array;
 }): Promise<RecentItem> {
-  const size = input.bytes.byteLength;
-  const item: RecentItem = {
-    id: crypto.randomUUID(),
-    name: input.name,
-    mime: input.mime ?? mimeFromName(input.name),
-    tool: input.tool,
-    createdAt: Date.now(),
-    bytes: size > MAX_BYTES ? new Uint8Array() : new Uint8Array(input.bytes),
-    size,
-  };
-  await update<unknown>(KEY, (old) => {
-    const prev = readList(old).filter((row) => row.id !== item.id);
-    return [item, ...prev].slice(0, MAX_ITEMS);
+  return serialize(async () => {
+    await ready();
+    const rows = (await get<Metadata[]>(KEY)) ?? [];
+    const total = rows.reduce(
+      (sum, row) => sum + (row.stored ? row.size : 0),
+      0,
+    );
+    if (
+      rows.length >= MAX_ITEMS ||
+      total + input.bytes.length > MAX_TOTAL_BYTES
+    ) {
+      throw new Error(
+        "Your local library is full. Save this result to your device, then remove files from Recents to make space.",
+      );
+    }
+    const meta: Metadata = {
+      id: crypto.randomUUID(),
+      name: input.name,
+      mime: input.mime ?? "application/pdf",
+      tool: input.tool,
+      createdAt: Date.now(),
+      size: input.bytes.length,
+      stored: true,
+    };
+    await setMany([
+      [byteKey(meta.id), input.bytes],
+      [KEY, [meta, ...rows]],
+    ]);
+    return { ...meta, bytes: input.bytes };
   });
-  return item;
 }
 
 export async function getRecent(id: string): Promise<RecentItem | undefined> {
-  const items = await listRecents();
-  return items.find((item) => item.id === id);
+  await ready();
+  const row = ((await get<Metadata[]>(KEY)) ?? []).find(
+    (item) => item.id === id,
+  );
+  if (!row) return undefined;
+  return {
+    ...row,
+    bytes: (await get<Uint8Array>(byteKey(id))) ?? new Uint8Array(),
+  };
+}
+
+export async function renameRecent(id: string, name: string): Promise<void> {
+  await serialize(async () => {
+    await ready();
+    const rows = (await get<Metadata[]>(KEY)) ?? [];
+    await set(
+      KEY,
+      rows.map((row) => (row.id === id ? { ...row, name } : row)),
+    );
+  });
 }
 
 export async function deleteRecent(id: string): Promise<void> {
-  await update<unknown>(KEY, (old) => readList(old).filter((item) => item.id !== id));
+  await serialize(async () => {
+    await ready();
+    const rows = (await get<Metadata[]>(KEY)) ?? [];
+    await set(
+      KEY,
+      rows.filter((row) => row.id !== id),
+    );
+    await delMany([byteKey(id)]);
+  });
 }
 
 export async function clearRecents(): Promise<void> {
-  await set(KEY, []);
+  await serialize(async () => {
+    await ready();
+    const rows = (await get<Metadata[]>(KEY)) ?? [];
+    await set(KEY, []);
+    await delMany(rows.map((row) => byteKey(row.id)));
+  });
 }

@@ -41,7 +41,6 @@ html {
   --radius-md: 18px;
   --radius-lg: 22px;
   --nav-height: 84px;
-  --ad-space: 0px;
   --font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica,
     Arial, sans-serif;
   color-scheme: dark;
@@ -70,9 +69,6 @@ html {
   color-scheme: light;
 }
 
-html.has-native-ad {
-  --ad-space: 62px;
-}
 
 html,
 body {
@@ -90,7 +86,7 @@ body {
 }
 
 body {
-  min-width: 320px;
+  min-width: 0;
 }
 
 #root {
@@ -240,9 +236,13 @@ ol {
 }
 
 .btn--icon {
+  box-sizing: border-box;
   width: 48px;
+  height: 48px;
   min-width: 48px;
+  min-height: 48px;
   padding: 0;
+  aspect-ratio: 1 / 1;
 }
 
 .btn--icon.btn--ghost {
@@ -298,7 +298,7 @@ ol {
   color: var(--ink);
   padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
   padding-bottom: calc(
-    var(--nav-height) + var(--ad-space) +
+    var(--nav-height) +
       var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
   );
   padding-left: max(16px, var(--safe-area-inset-left, env(safe-area-inset-left, 0px)));
@@ -459,7 +459,7 @@ html.is-scan-camera .skip-to-nav {
 .page-header {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
   padding: 8px 0 18px;
 }
 
@@ -489,13 +489,7 @@ html.is-scan-camera .skip-to-nav {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  overflow: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.stagger-grid::-webkit-scrollbar {
-  display: none;
+  overflow: visible;
 }
 
 .tile {
@@ -811,7 +805,7 @@ html.is-scan-camera .skip-to-nav {
 
   html.has-native-ad .shell {
     padding-bottom: calc(
-      var(--nav-height) + var(--ad-space) +
+      var(--nav-height) +
         var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
     );
   }

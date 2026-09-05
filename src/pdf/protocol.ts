@@ -4,7 +4,9 @@ import type {
   ProtectInput,
   WatermarkInput,
   WordToPdfReport,
-} from '../lib/types';
+  ImagePdfOptions,
+  PageNumberOptions,
+} from "../lib/types";
 
 export type TransferFile = {
   name: string;
@@ -13,15 +15,16 @@ export type TransferFile = {
 };
 
 export type WorkerOp =
-  | { op: 'merge'; files: TransferFile[] }
-  | { op: 'split'; file: TransferFile; range: PageRange }
-  | { op: 'imagesToPdf'; files: TransferFile[] }
-  | { op: 'watermark'; file: TransferFile; input: WatermarkInput }
-  | { op: 'pageNumbers'; file: TransferFile }
-  | { op: 'protect'; file: TransferFile; input: ProtectInput }
-  | { op: 'organize'; file: TransferFile; ops: OrganizeOp[] }
-  | { op: 'pageCount'; file: TransferFile }
-  | { op: 'docxToPdf'; file: TransferFile };
+  | { op: "merge"; files: TransferFile[] }
+  | { op: "split"; file: TransferFile; range: PageRange }
+  | { op: "imagesToPdf"; files: TransferFile[]; options?: ImagePdfOptions }
+  | { op: "watermark"; file: TransferFile; input: WatermarkInput }
+  | { op: "pageNumbers"; file: TransferFile; options?: PageNumberOptions }
+  | { op: "optimize"; file: TransferFile }
+  | { op: "protect"; file: TransferFile; input: ProtectInput }
+  | { op: "organize"; file: TransferFile; ops: OrganizeOp[] }
+  | { op: "pageCount"; file: TransferFile }
+  | { op: "docxToPdf"; file: TransferFile };
 
 export type WorkerRequest = WorkerOp & { id: number };
 

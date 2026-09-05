@@ -1,38 +1,64 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Clock3, FilePenLine, Search, ShieldCheck } from 'lucide-react';
-import { AppShell, StaggerGrid, ToolTile } from '../components';
-import { TOOLS, toolMatchesQuery } from '../lib/catalog';
-import type { RecentItem, ToolId } from '../lib/types';
-import { formatBytes, saveBytes } from '../store/files';
-import { listRecents } from '../store/recents';
-import { TOOL_ICONS } from './icons';
-import { navigate } from './nav';
+import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowRight,
+  Clock3,
+  FilePenLine,
+  Search,
+  ShieldCheck,
+} from "lucide-react";
+import { AppShell, StaggerGrid, ToolTile } from "../components";
+import { TOOLS, toolMatchesQuery } from "../lib/catalog";
+import type { RecentItem, ToolId } from "../lib/types";
+import { formatBytes, saveBytes } from "../store/files";
+import { listRecents } from "../store/recents";
+import { recentFile } from "../store/toolInput";
+import { TOOL_ICONS } from "./icons";
+import { navigate } from "./nav";
 
-type FilterId = 'all' | 'convert' | 'edit' | 'capture';
+type FilterId = "all" | "convert" | "edit" | "capture";
 
 const FILTERS: { id: FilterId; label: string; tools?: ToolId[] }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'convert', label: 'Convert', tools: ['images', 'pdf-images', 'docx-pdf', 'pdf-docx'] },
+  { id: "all", label: "All" },
   {
-    id: 'edit',
-    label: 'Edit',
-    tools: ['merge', 'split', 'compress', 'organize', 'watermark', 'numbers', 'protect'],
+    id: "convert",
+    label: "Convert",
+    tools: ["images", "pdf-images", "docx-pdf", "pdf-docx"],
   },
-  { id: 'capture', label: 'Scan & view', tools: ['scan', 'view'] },
+  {
+    id: "edit",
+    label: "Edit",
+    tools: [
+      "merge",
+      "split",
+      "compress",
+      "organize",
+      "watermark",
+      "numbers",
+      "protect",
+    ],
+  },
+  { id: "capture", label: "Scan & view", tools: ["scan", "view"] },
 ];
 
 export function Home() {
   const [recents, setRecents] = useState<RecentItem[]>([]);
-  const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<FilterId>('all');
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<FilterId>("all");
   const [savingRecentId, setSavingRecentId] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void listRecents().then((items) => {
-      if (!cancelled) setRecents(items.slice(0, 3));
-    });
+    void listRecents()
+      .then((items) => {
+        if (!cancelled) setRecents(items.slice(0, 3));
+      })
+      .catch(() => {
+        if (!cancelled)
+          setExportError(
+            "Recent files could not be loaded. You can still choose a file to use a tool.",
+          );
+      });
     return () => {
       cancelled = true;
     };
@@ -49,10 +75,13 @@ export function Home() {
     setExportError(null);
     setSavingRecentId(item.id);
     try {
-      const result = await saveBytes(item.bytes, item.name, item.mime);
-      if (result.status === 'cancelled') return;
+      const file = await recentFile(item.id);
+      const result = await saveBytes(file.bytes, item.name, item.mime);
+      if (result.status === "cancelled") return;
     } catch (error) {
-      setExportError(error instanceof Error ? error.message : `Could not save ${item.name}`);
+      setExportError(
+        error instanceof Error ? error.message : `Could not save ${item.name}`,
+      );
     } finally {
       setSavingRecentId(null);
     }
@@ -73,7 +102,7 @@ export function Home() {
             <button
               type="button"
               className="ps-feature-card"
-              onClick={() => navigate('#/tool/pdf-docx')}
+              onClick={() => navigate("#/tool/pdf-docx")}
             >
               <span className="ps-feature-card__icon" aria-hidden="true">
                 <FilePenLine size={22} />
@@ -115,7 +144,9 @@ export function Home() {
                 key={item.id}
                 type="button"
                 aria-pressed={filter === item.id}
-                className={filter === item.id ? 'ps-filter is-active' : 'ps-filter'}
+                className={
+                  filter === item.id ? "ps-filter is-active" : "ps-filter"
+                }
                 onClick={() => setFilter(item.id)}
               >
                 {item.label}
@@ -137,7 +168,9 @@ export function Home() {
               ))}
             </StaggerGrid>
           ) : (
-            <p className="ps-search-empty">No matching tools. Try a broader search.</p>
+            <p className="ps-search-empty">
+              No matching tools. Try a broader search.
+            </p>
           )}
         </section>
 
@@ -148,7 +181,11 @@ export function Home() {
               <h2 id="recents-title">Recent files</h2>
             </div>
             {recents.length > 0 ? (
-              <button type="button" className="ps-text-action" onClick={() => navigate('#/recents')}>
+              <button
+                type="button"
+                className="ps-text-action"
+                onClick={() => navigate("#/recents")}
+              >
                 See all <ArrowRight size={15} aria-hidden="true" />
               </button>
             ) : null}
@@ -167,9 +204,10 @@ export function Home() {
               ) : null}
               <ul className="ps-recent-list">
                 {recents.map((item) => {
-                  const canView = item.bytes.byteLength > 0;
+                  const canView = item.stored === true;
                   const isPdf =
-                    item.mime === 'application/pdf' || item.name.toLowerCase().endsWith('.pdf');
+                    item.mime === "application/pdf" ||
+                    item.name.toLowerCase().endsWith(".pdf");
                   return (
                     <li key={item.id}>
                       <button
@@ -178,13 +216,20 @@ export function Home() {
                         disabled={!canView || savingRecentId !== null}
                         onClick={() => {
                           if (!canView) return;
-                          if (isPdf) navigate(`#/viewer?id=${encodeURIComponent(item.id)}`);
+                          if (isPdf)
+                            navigate(
+                              `#/viewer?id=${encodeURIComponent(item.id)}`,
+                            );
                           else void saveRecentFile(item);
                         }}
                       >
                         <span className="ps-recent__name">{item.name}</span>
                         <span className="ps-recent__action tabular">
-                          {savingRecentId === item.id ? 'Saving…' : formatBytes(item.size)}
+                          {!canView
+                            ? "Original needed"
+                            : savingRecentId === item.id
+                              ? "Saving…"
+                              : formatBytes(item.size)}
                         </span>
                       </button>
                     </li>

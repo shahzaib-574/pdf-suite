@@ -5,6 +5,7 @@ export { BottomNav } from './BottomNav';
 export { FileWell } from './FileWell';
 export { ProgressHud } from './ProgressHud';
 export { PageHeader } from './PageHeader';
+export { SelectField } from './SelectField';
 export { StaggerGrid } from './StaggerGrid';
 
 export type { AnimatedButtonProps, AnimatedButtonVariant } from './AnimatedButton';
@@ -14,4 +15,5 @@ export type { BottomNavProps, BottomNavTab } from './BottomNav';
 export type { FileWellProps, FileWellItem } from './FileWell';
 export type { ProgressHudProps } from './ProgressHud';
 export type { PageHeaderProps } from './PageHeader';
+export type { SelectFieldProps, SelectFieldOption } from './SelectField';
 export type { StaggerGridProps } from './StaggerGrid';

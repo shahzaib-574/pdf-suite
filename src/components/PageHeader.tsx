@@ -4,10 +4,11 @@ import { AnimatedButton } from './AnimatedButton';
 export type PageHeaderProps = {
   title: string;
   onBack?: () => void;
+  backLabel?: string;
   subtitle?: string;
 };
 
-export function PageHeader({ title, onBack, subtitle }: PageHeaderProps) {
+export function PageHeader({ title, onBack, backLabel = "Back", subtitle }: PageHeaderProps) {
   return (
     <header className="page-header">
       {onBack ? (
@@ -15,7 +16,7 @@ export function PageHeader({ title, onBack, subtitle }: PageHeaderProps) {
           variant="ghost"
           className="btn--icon"
           icon={ChevronLeft}
-          aria-label="Back"
+          aria-label={backLabel}
           onClick={onBack}
         />
       ) : null}

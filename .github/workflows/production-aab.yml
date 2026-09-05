@@ -10,11 +10,6 @@ on:
         required: true
         type: boolean
         default: false
-      confirm_adults_only_audience:
-        description: Confirm Play target audience is Ages 18 and over only
-        required: true
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -25,7 +20,7 @@ concurrency:
 
 jobs:
   production-aab:
-    if: ${{ inputs.confirm_production && inputs.confirm_adults_only_audience && github.ref == 'refs/heads/main' }}
+    if: ${{ inputs.confirm_production && github.ref == 'refs/heads/main' }}
     environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -62,8 +57,6 @@ jobs:
       - name: Validate production secret configuration
         shell: bash
         env:
-          ADMOB_ANDROID_APP_ID: ca-app-pub-9959568404035601~6472905937
-          ADMOB_ANDROID_BANNER_ID: ${{ secrets.ADMOB_ANDROID_BANNER_ID }}
           ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
           ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
@@ -72,31 +65,12 @@ jobs:
           set -euo pipefail
 
           missing=()
-          [[ -n "$ADMOB_ANDROID_BANNER_ID" ]] || missing+=(ADMOB_ANDROID_BANNER_ID)
           [[ -n "$ANDROID_UPLOAD_KEYSTORE_BASE64" ]] || missing+=(ANDROID_UPLOAD_KEYSTORE_BASE64)
           [[ -n "$ANDROID_UPLOAD_STORE_PASSWORD" ]] || missing+=(ANDROID_UPLOAD_STORE_PASSWORD)
           [[ -n "$ANDROID_UPLOAD_KEY_ALIAS" ]] || missing+=(ANDROID_UPLOAD_KEY_ALIAS)
           [[ -n "$ANDROID_UPLOAD_KEY_PASSWORD" ]] || missing+=(ANDROID_UPLOAD_KEY_PASSWORD)
           if (( ${#missing[@]} > 0 )); then
             echo "::error::Missing required production secrets: ${missing[*]}"
-            exit 1
-          fi
-
-          if [[ ! "$ADMOB_ANDROID_BANNER_ID" =~ ^ca-app-pub-[0-9]{16}/[0-9]{10}$ ]]; then
-            echo "::error::ADMOB_ANDROID_BANNER_ID is not a valid AdMob banner unit ID."
-            exit 1
-          fi
-          if [[ "$ADMOB_ANDROID_BANNER_ID" == "ca-app-pub-3940256099942544/9214589741" ]]; then
-            echo "::error::The Google test banner ID cannot be used for production."
-            exit 1
-          fi
-          if [[ "$ADMOB_ANDROID_BANNER_ID" == "ca-app-pub-0000000000000000/0000000000" ||
-                "$ADMOB_ANDROID_BANNER_ID" == "ca-app-pub-1234567890123456/1234567890" ]]; then
-            echo "::error::A documentation-placeholder AdMob banner ID cannot be used for production."
-            exit 1
-          fi
-          if [[ "${ADMOB_ANDROID_APP_ID%%~*}" != "${ADMOB_ANDROID_BANNER_ID%%/*}" ]]; then
-            echo "::error::The AdMob app and banner IDs must belong to the same publisher."
             exit 1
           fi
 
@@ -113,14 +87,12 @@ jobs:
           npm run lint
           npm run docx-selfcheck
           npm run pdf-selfcheck
+          npm run quality-selfcheck
           npm run verify:store-assets
-          grep -Fqx 'google.com, pub-9959568404035601, DIRECT, f08c47fec0942fa0' store-assets/app-ads.txt
 
       - name: Stage runner-only production configuration
         shell: bash
         env:
-          ADMOB_ANDROID_APP_ID: ca-app-pub-9959568404035601~6472905937
-          ADMOB_ANDROID_BANNER_ID: ${{ secrets.ADMOB_ANDROID_BANNER_ID }}
           ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
           ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
@@ -153,8 +125,6 @@ jobs:
           import fs from 'node:fs'
 
           const required = [
-            'ADMOB_ANDROID_APP_ID',
-            'ADMOB_ANDROID_BANNER_ID',
             'RELEASE_KEYSTORE_PATH',
             'ANDROID_UPLOAD_STORE_PASSWORD',
             'ANDROID_UPLOAD_KEY_ALIAS',
@@ -183,23 +153,6 @@ jobs:
             return escaped
           }
 
-          const stringsPath = 'android/app/src/main/res/values/strings.xml'
-          const stringsXml = fs.readFileSync(stringsPath, 'utf8')
-          const appIdPattern = /(<string\b(?=[^>]*\bname=["']admob_app_id["'])[^>]*>)[^<]*(<\/string>)/s
-          let replacements = 0
-          const updatedStrings = stringsXml.replace(appIdPattern, (_match, open, close) => {
-            replacements += 1
-            return `${open}${process.env.ADMOB_ANDROID_APP_ID}${close}`
-          })
-          if (replacements !== 1) throw new Error('Could not update the Android AdMob app ID resource.')
-          fs.writeFileSync(stringsPath, updatedStrings, 'utf8')
-
-          fs.writeFileSync(
-            '.env.production.local',
-            `VITE_ADMOB_TEST_MODE=false\nVITE_ADMOB_BANNER_ID=${process.env.ADMOB_ANDROID_BANNER_ID}\nVITE_ADMOB_AUDIENCE_MODE=ADULTS_ONLY\n`,
-            { encoding: 'utf8', mode: 0o600 },
-          )
-
           const signingProperties = [
             ['storeFile', process.env.RELEASE_KEYSTORE_PATH],
             ['storePassword', process.env.ANDROID_UPLOAD_STORE_PASSWORD],
@@ -215,7 +168,7 @@ jobs:
           )
           NODE
 
-          chmod 600 .env.production.local android/keystore.properties
+          chmod 600 android/keystore.properties
           unset ANDROID_UPLOAD_KEYSTORE_BASE64
           unset ANDROID_UPLOAD_STORE_PASSWORD
           unset ANDROID_UPLOAD_KEY_ALIAS
@@ -223,6 +176,9 @@ jobs:
 
       - name: Build and sync production web assets
         run: npm run android:sync
+
+      - name: Verify ad-free assets and dependencies
+        run: npm run verify:ad-free
 
       - name: Build signed production artifacts
         working-directory: android
@@ -260,7 +216,7 @@ jobs:
           test -n "$zipalign_path"
           "$apksigner_path" verify "$apk"
           "$zipalign_path" -c -P 16 -v 4 "$apk"
-          npm run verify:android-artifact -- --require-production-ads "$apk"
+          npm run verify:android-artifact -- "$apk"
 
           release_manifest="android/app/build/outputs/release-manifest.txt"
           {
@@ -305,4 +261,4 @@ jobs:
           if [[ -n "${RUNNER_TEMP:-}" && -d "$RUNNER_TEMP" ]]; then
             rm -f -- "$RUNNER_TEMP/ream-upload.jks"
           fi
-          rm -f -- .env.production.local android/keystore.properties
+          rm -f -- android/keystore.properties

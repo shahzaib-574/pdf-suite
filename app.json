@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "Ream",
+    "slug": "ream-pdf",
+    "owner": "shahzaib574s-organization",
+    "version": "1.0.0",
+    "android": {
+      "package": "com.reampdf.mobile"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "6db70f7c-00bb-4d72-b9a1-b6257edf5cba"
+      }
+    }
+  }
+}

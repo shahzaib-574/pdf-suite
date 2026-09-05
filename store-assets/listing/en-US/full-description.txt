@@ -4,7 +4,7 @@ Ream brings practical PDF tools into one focused app. Scan pages with your camer
 
 YOUR DOCUMENTS STAY ON YOUR DEVICE
 
-Ream processes document contents on your device. There is no Ream account, and your files are not sent to a Ream document-processing server. Advertising services may process network, device, and app-interaction data as described in Ream's privacy policy.
+Ream processes document contents on your device. There is no Ream account, and your files are not sent to a Ream document-processing server. This build contains no ads or advertising SDK.
 
 SCAN AND CREATE
 

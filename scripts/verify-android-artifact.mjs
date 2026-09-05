@@ -170,25 +170,12 @@ const RELEASE_IDENTITY = readReleaseIdentity();
 const EXPECTED = Object.freeze({
   applicationId: 'com.reampdf.mobile',
   ...RELEASE_IDENTITY,
-  adMobAppId: 'ca-app-pub-9959568404035601~6472905937',
 });
 
-// This is the complete permission contract for the merged release manifest.
-// INTERNET/ACCESS_NETWORK_STATE support the web shell and ads. AD_ID and the
-// AdServices entries come from Google Mobile Ads; WAKE_LOCK/FOREGROUND_SERVICE
-// come from its pinned WorkManager dependency. AndroidX Core adds the app-scoped
-// signature permission used to protect non-exported dynamic receivers. Dependency
-// changes that alter this list must be reviewed explicitly before updating it.
+// Ad-free release permission contract: local document work and optional camera.
 const MERGED_PERMISSION_ALLOWLIST = Object.freeze([
-  'android.permission.ACCESS_ADSERVICES_AD_ID',
-  'android.permission.ACCESS_ADSERVICES_ATTRIBUTION',
-  'android.permission.ACCESS_ADSERVICES_TOPICS',
-  'android.permission.ACCESS_NETWORK_STATE',
   'android.permission.CAMERA',
-  'android.permission.FOREGROUND_SERVICE',
   'android.permission.INTERNET',
-  'android.permission.WAKE_LOCK',
-  'com.google.android.gms.permission.AD_ID',
   'com.reampdf.mobile.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
 ]);
 
@@ -244,16 +231,8 @@ const SENSITIVE_PERMISSION_DENYLIST = Object.freeze([
   'android.permission.WRITE_EXTERNAL_STORAGE',
 ]);
 
-// Google publishes sample ad units under these publisher IDs. Checking the
-// publisher prefix catches every sample format (app, banner, interstitial,
-// rewarded, native, and app-open) without chasing individual unit suffixes.
-const GOOGLE_SAMPLE_ADMOB_PUBLISHERS = Object.freeze([
-  'ca-app-pub-2934735714413707',
-  'ca-app-pub-3940256099942544',
-]);
-
 function usage() {
-  return `Usage: node scripts/verify-android-artifact.mjs [--require-production-ads] [APK_PATH]
+  return `Usage: node scripts/verify-android-artifact.mjs [APK_PATH]
        node scripts/verify-android-artifact.mjs --print-release-identity
        node scripts/verify-android-artifact.mjs --self-test
 
@@ -261,8 +240,6 @@ Verifies the packaged release manifest and Capacitor web assets. APK_PATH
 defaults to ${DEFAULT_APK}.
 
 Options:
-  --require-production-ads  Require real-shaped, non-sample AdMob IDs and the
-                            confirmed adult-only release marker.
   --print-release-identity  Print versionCode and versionName from
                             android/variables.gradle for release automation.
   --self-test  Exercise the parsers and policy checks without an Android SDK.
@@ -389,37 +366,16 @@ function runApkAnalyzer(analyzer, command, apkPath) {
   return result.stdout.trim();
 }
 
-function readPackagedAdMobAppId(analyzer, apkPath) {
-  const args = [
-    'resources',
-    'value',
-    '--config',
-    'default',
-    '--name',
-    'admob_app_id',
-    '--type',
-    'string',
-    apkPath,
-  ];
-  const result = spawnSync(analyzer, args, {
-    encoding: 'utf8',
-    maxBuffer: 16 * 1024 * 1024,
-    windowsHide: true,
-  });
-  if (result.error) {
-    throw new Error(`Unable to inspect packaged AdMob resources: ${result.error.message}`);
-  }
-  if (result.status !== 0) {
-    const details = [result.stderr, result.stdout].filter(Boolean).join('\n').trim();
-    throw new Error(
-      `apkanalyzer resources value failed with exit code ${result.status}${details ? `:\n${details}` : ''}`,
-    );
-  }
-  return result.stdout.trim().replace(/^['"]|['"]$/g, '');
-}
-
 async function checkWebBundle(apkPath, violations) {
   const apk = await JSZip.loadAsync(await readFile(apkPath));
+  for (const entry of Object.values(apk.files).filter(item => /^classes\d*\.dex$/.test(item.name))) {
+    const bytes = await entry.async('nodebuffer');
+    if (['Lcom/google/android/gms/ads/', 'Lcom/google/android/ump/'].some(marker => bytes.includes(Buffer.from(marker)))) {
+      violations.push(`Advertising SDK classes remain in ${entry.name}`);
+    }
+  }
+  const pluginEntry = apk.file('assets/capacitor.plugins.json');
+  if (pluginEntry && /admob/i.test(await pluginEntry.async('string'))) violations.push('AdMob plugin remains registered in the APK');
   const webEntries = Object.values(apk.files)
     .filter((entry) => !entry.dir && entry.name.startsWith('assets/public/'))
     .sort((left, right) => left.name.localeCompare(right.name));
@@ -436,28 +392,14 @@ async function checkWebBundle(apkPath, violations) {
   } else {
     try {
       metadata = JSON.parse((await metadataEntry.async('nodebuffer')).toString('utf8'));
-      addMismatch(violations, 'web metadata schema', metadata?.schemaVersion, 2);
-      addMismatch(violations, 'web build mode', metadata?.mode, 'production');
-      addMismatch(violations, 'web AdMob test mode', metadata?.admob?.testMode, false);
-      addMismatch(
-        violations,
-        'web UMP debug geography',
-        metadata?.admob?.umpDebugGeography,
-        '',
-      );
-      addMismatch(
-        violations,
-        'web UMP test-device count',
-        metadata?.admob?.umpTestDeviceCount,
-        0,
-      );
+      checkAdFreeMetadata(metadata, violations);
     } catch (error) {
       violations.push(`packaged production metadata is invalid JSON: ${error.message}`);
     }
   }
 
   const forbiddenHits = [];
-  const forbiddenBuffers = GOOGLE_SAMPLE_ADMOB_PUBLISHERS.map((publisher) => ({
+  const forbiddenBuffers = ['ca-app-pub-', '@capacitor-community/admob', 'com.google.android.gms.ads'].map((publisher) => ({
     publisher,
     bytes: Buffer.from(publisher, 'ascii'),
   }));
@@ -472,55 +414,21 @@ async function checkWebBundle(apkPath, violations) {
   }
 
   if (forbiddenHits.length > 0) {
-    violations.push(`Google sample AdMob IDs are packaged in the production web bundle: ${forbiddenHits.join('; ')}`);
+    violations.push(`Advertising components are packaged in the ad-free web bundle: ${forbiddenHits.join('; ')}`);
   }
 
   return { entryCount: webEntries.length, metadata };
 }
 
-function checkProductionAds(appId, metadata, violations) {
-  addMismatch(violations, 'packaged AdMob app ID', appId, EXPECTED.adMobAppId);
-  addMismatch(
-    violations,
-    'web AdMob audience mode',
-    metadata?.admob?.audienceMode,
-    'ADULTS_ONLY',
-  );
+function checkAdFreeMetadata(metadata, violations) {
+  addMismatch(violations, 'web metadata schema', metadata?.schemaVersion, 3);
+  addMismatch(violations, 'web build mode', metadata?.mode, 'production');
+  addMismatch(violations, 'advertising enabled', metadata?.advertising, false);
+}
 
-  const bannerId = metadata?.admob?.bannerId;
-  const appMatch =
-    typeof appId === 'string'
-      ? appId.match(/^ca-app-pub-(\d{16})~\d{10}$/)
-      : null;
-  const bannerMatch =
-    typeof bannerId === 'string'
-      ? bannerId.match(/^ca-app-pub-(\d{16})\/\d{10}$/)
-      : null;
-  const obviousPlaceholders = new Set([
-    'ca-app-pub-0000000000000000~0000000000',
-    'ca-app-pub-1234567890123456~1234567890',
-    'ca-app-pub-0000000000000000/0000000000',
-    'ca-app-pub-1234567890123456/1234567890',
-  ]);
-
-  if (!appMatch) violations.push('packaged AdMob app ID is missing or malformed');
-  if (!bannerMatch) {
-    violations.push('packaged AdMob banner ID is missing or malformed');
-  }
-  if (appId && obviousPlaceholders.has(appId)) {
-    violations.push('packaged AdMob app ID is a documentation placeholder');
-  }
-  if (bannerId && obviousPlaceholders.has(bannerId)) {
-    violations.push('packaged AdMob banner ID is a documentation placeholder');
-  }
-  if (
-    typeof appId === 'string' &&
-    GOOGLE_SAMPLE_ADMOB_PUBLISHERS.some((publisher) => appId.startsWith(publisher))
-  ) {
-    violations.push('packaged AdMob app ID uses a Google sample publisher');
-  }
-  if (appMatch && bannerMatch && appMatch[1] !== bannerMatch[1]) {
-    violations.push('packaged AdMob app and banner IDs belong to different publishers');
+function checkAdFreeManifest(manifest, violations) {
+  if (/com\.google\.android\.gms\.ads|com\.google\.android\.ump|admob_app_id/i.test(manifest)) {
+    violations.push('Advertising SDK components remain in the merged manifest');
   }
 }
 
@@ -589,31 +497,16 @@ function runSelfTest() {
   assert.match(expandedViolations[0], /sensitive permissions are forbidden/);
   assert.match(expandedViolations[1], /outside the merged allowlist/);
 
-  const productionAdViolations = [];
-  checkProductionAds(
-    EXPECTED.adMobAppId,
-    {
-      admob: {
-        audienceMode: 'ADULTS_ONLY',
-        bannerId: 'ca-app-pub-9959568404035601/8888999900',
-      },
-    },
-    productionAdViolations,
-  );
-  assert.deepEqual(productionAdViolations, []);
-
-  const wrongAppViolations = [];
-  checkProductionAds(
-    'ca-app-pub-1111222233334444~5555666677',
-    {
-      admob: {
-        audienceMode: 'ADULTS_ONLY',
-        bannerId: 'ca-app-pub-1111222233334444/8888999900',
-      },
-    },
-    wrongAppViolations,
-  );
-  assert.match(wrongAppViolations[0], /packaged AdMob app ID/);
+  const clean = [];
+  checkAdFreeMetadata({schemaVersion: 3, mode: 'production', advertising: false}, clean);
+  assert.deepEqual(clean, []);
+  const legacy = [];
+  checkAdFreeMetadata({schemaVersion: 2, mode: 'production', admob: {}}, legacy);
+  assert(legacy.length > 0);
+  const withAds = [];
+  checkAdFreeManifest(xml, withAds);
+  checkPermissions([...MERGED_PERMISSION_ALLOWLIST, 'com.google.android.gms.permission.AD_ID'], withAds);
+  assert.equal(withAds.length, 2);
 
   console.log('Android artifact verifier self-test passed.');
 }
@@ -637,10 +530,7 @@ async function main() {
     console.log(`versionName=${EXPECTED.versionName}`);
     return;
   }
-  const requireProductionAds = args.includes('--require-production-ads');
-  const positionalArgs = args.filter(
-    (argument) => argument !== '--require-production-ads',
-  );
+  const positionalArgs = args;
   if (positionalArgs.length > 1 || positionalArgs[0]?.startsWith('-')) {
     throw new Error(`${usage()}\n\nUnexpected arguments: ${args.join(' ')}`);
   }
@@ -715,13 +605,7 @@ async function main() {
   );
   checkPermissions(permissions, violations);
   const webBundle = await checkWebBundle(apkPath, violations);
-  if (requireProductionAds) {
-    checkProductionAds(
-      readPackagedAdMobAppId(analyzer, apkPath),
-      webBundle.metadata,
-      violations,
-    );
-  }
+  checkAdFreeManifest(manifestXml, violations);
 
   if (violations.length > 0) {
     throw new Error(`Android release artifact is not compliant:\n- ${violations.join('\n- ')}`);
@@ -734,7 +618,7 @@ async function main() {
   console.log('  non-debuggable; backup disabled; cleartext traffic disabled');
   console.log(`  exact merged permissions (${permissions.length}): ${permissions.join(', ')}`);
   console.log(
-    `  production web bundle (${webBundle.entryCount} files): no Google sample AdMob IDs`,
+    `  production web bundle (${webBundle.entryCount} files): ad-free metadata and no advertising components`,
   );
 }
 

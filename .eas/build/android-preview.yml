@@ -1,0 +1,31 @@
+build:
+  name: Ream installable Android test APK
+  steps:
+    - eas/checkout
+    - run:
+        name: Install locked JavaScript dependencies
+        command: npm ci
+    - run:
+        name: Check and bundle the ad-free app
+        command: |
+          export REAM_OTA_CHANNEL_PREFIX=preview
+          npm run lint
+          npm run quality-selfcheck
+          npm run android:sync
+          npm run verify:ad-free
+    - run:
+        name: Install Java 21 for Capacitor 8
+        command: |
+          sudo apt-get update
+          sudo apt-get install --yes openjdk-21-jdk-headless
+          set-env JAVA_HOME /usr/lib/jvm/java-21-openjdk-amd64
+    - run:
+        name: Verify native code and build the APK
+        working_directory: android
+        command: |
+          chmod +x gradlew
+          ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug
+    - eas/upload_artifact:
+        name: Download installable APK
+        inputs:
+          path: android/app/build/outputs/apk/debug/app-debug.apk

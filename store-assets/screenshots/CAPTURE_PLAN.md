@@ -10,7 +10,7 @@ Capture the release candidate itself. Do not substitute design mockups.
 - Use the canonical synthetic fixture at `../fixtures/ream-screenshot-fixture.pdf`. It contains five non-confidential pages with varied text, a ruled table, two columns, and mixed orientation.
 - Remove developer overlays, notifications, personal account details, file paths, and service-provider names.
 - Show complete system status icons or crop the status bar consistently; never edit app content into the capture.
-- Do not show test ads. Capture the production presentation only after consent and ad behavior have passed QA, or use an approved screenshot build that hides the ad placement without changing app content.
+- Capture the actual ad-free release build after device QA; do not fabricate app content.
 - Export each screenshot as a 24-bit RGB PNG with no alpha.
 
 Copy the canonical fixture into the emulator's Downloads directory before the

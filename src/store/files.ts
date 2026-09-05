@@ -1,18 +1,19 @@
-import { Capacitor, registerPlugin } from '@capacitor/core';
-import { Directory, Filesystem } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
-import type { PickedFile } from '../lib/types';
+import { Capacitor, registerPlugin } from "@capacitor/core";
+import { Directory, Filesystem } from "@capacitor/filesystem";
+import { Share } from "@capacitor/share";
+import type { PickedFile } from "../lib/types";
 
 const DOCX_MIME =
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const ZIP_MIME = 'application/zip';
-const NATIVE_EXPORT_ROOT = 'ream-exports';
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const ZIP_MIME = "application/zip";
+const NATIVE_EXPORT_ROOT = "ream-exports";
 // Keep each base64 bridge payload bounded and aligned to three bytes for appendFile.
 const NATIVE_WRITE_CHUNK_BYTES = 192 * 1024;
 const BINARY_STRING_CHUNK_BYTES = 32 * 1024;
 const STAGED_EXPORT_MAX_AGE_MS = 60 * 60 * 1000;
-const IMAGE_ARCHIVE_MAX_FILES = 40;
-const IMAGE_ARCHIVE_MAX_INPUT_BYTES = 32 * 1024 * 1024;
+export const IMAGE_ARCHIVE_MAX_FILES = 200;
+export const IMAGE_ARCHIVE_MAX_INPUT_BYTES = 64 * 1024 * 1024;
+export const MAX_INPUT_BYTES = 128 * 1024 * 1024;
 
 type FileExporterOptions = {
   sourcePath: string;
@@ -29,14 +30,12 @@ interface FileExporterPlugin {
   saveFile(options: FileExporterOptions): Promise<FileExporterResult>;
 }
 
-const FileExporter = registerPlugin<FileExporterPlugin>('FileExporter');
+const FileExporter = registerPlugin<FileExporterPlugin>("FileExporter");
 
-export type ExportResult =
-  | { status: 'completed' }
-  | { status: 'cancelled' };
+export type ExportResult = { status: "completed" } | { status: "cancelled" };
 
-const COMPLETED: ExportResult = { status: 'completed' };
-const CANCELLED: ExportResult = { status: 'cancelled' };
+const COMPLETED: ExportResult = { status: "completed" };
+const CANCELLED: ExportResult = { status: "cancelled" };
 
 type NamedBlob = {
   blob: Blob;
@@ -58,7 +57,7 @@ export function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 export function formatBytes(size: number): string {
-  if (!Number.isFinite(size) || size <= 0) return '0 B';
+  if (!Number.isFinite(size) || size <= 0) return "0 B";
   if (size < 1024) return `${Math.round(size)} B`;
   const kb = size / 1024;
   if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
@@ -68,29 +67,29 @@ export function formatBytes(size: number): string {
 
 function mimeFromFilename(filename: string): string {
   const name = filename.toLowerCase();
-  if (name.endsWith('.pdf')) return 'application/pdf';
-  if (name.endsWith('.docx')) return DOCX_MIME;
-  if (name.endsWith('.doc')) return 'application/msword';
-  if (name.endsWith('.zip')) return ZIP_MIME;
-  if (name.endsWith('.png')) return 'image/png';
-  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
-  if (name.endsWith('.webp')) return 'image/webp';
-  if (name.endsWith('.avif')) return 'image/avif';
-  if (name.endsWith('.gif')) return 'image/gif';
-  if (name.endsWith('.bmp')) return 'image/bmp';
-  if (name.endsWith('.tif') || name.endsWith('.tiff')) return 'image/tiff';
-  if (name.endsWith('.heic')) return 'image/heic';
-  if (name.endsWith('.heif')) return 'image/heif';
-  if (name.endsWith('.svg')) return 'image/svg+xml';
-  if (name.endsWith('.txt')) return 'text/plain';
-  return 'application/octet-stream';
+  if (name.endsWith(".pdf")) return "application/pdf";
+  if (name.endsWith(".docx")) return DOCX_MIME;
+  if (name.endsWith(".doc")) return "application/msword";
+  if (name.endsWith(".zip")) return ZIP_MIME;
+  if (name.endsWith(".png")) return "image/png";
+  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+  if (name.endsWith(".webp")) return "image/webp";
+  if (name.endsWith(".avif")) return "image/avif";
+  if (name.endsWith(".gif")) return "image/gif";
+  if (name.endsWith(".bmp")) return "image/bmp";
+  if (name.endsWith(".tif") || name.endsWith(".tiff")) return "image/tiff";
+  if (name.endsWith(".heic")) return "image/heic";
+  if (name.endsWith(".heif")) return "image/heif";
+  if (name.endsWith(".svg")) return "image/svg+xml";
+  if (name.endsWith(".txt")) return "text/plain";
+  return "application/octet-stream";
 }
 
 function normalizedMime(filename: string, mime?: string): string {
   const supplied = mime?.trim().toLowerCase();
-  if (supplied === 'image/jpg') return 'image/jpeg';
-  if (supplied === 'application/x-zip-compressed') return ZIP_MIME;
-  if (supplied && supplied !== 'application/octet-stream') return supplied;
+  if (supplied === "image/jpg") return "image/jpeg";
+  if (supplied === "application/x-zip-compressed") return ZIP_MIME;
+  if (supplied && supplied !== "application/octet-stream") return supplied;
   return mimeFromFilename(filename);
 }
 
@@ -100,49 +99,51 @@ function mimeOf(file: File): string {
 
 function extensionForMime(mime: string): string {
   const extensions: Record<string, string> = {
-    'application/pdf': 'pdf',
-    [DOCX_MIME]: 'docx',
-    'application/msword': 'doc',
-    [ZIP_MIME]: 'zip',
-    'image/png': 'png',
-    'image/jpeg': 'jpg',
-    'image/webp': 'webp',
-    'image/avif': 'avif',
-    'image/gif': 'gif',
-    'image/bmp': 'bmp',
-    'image/tiff': 'tiff',
-    'image/heic': 'heic',
-    'image/heif': 'heif',
-    'image/svg+xml': 'svg',
-    'text/plain': 'txt',
+    "application/pdf": "pdf",
+    [DOCX_MIME]: "docx",
+    "application/msword": "doc",
+    [ZIP_MIME]: "zip",
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+    "image/avif": "avif",
+    "image/gif": "gif",
+    "image/bmp": "bmp",
+    "image/tiff": "tiff",
+    "image/heic": "heic",
+    "image/heif": "heif",
+    "image/svg+xml": "svg",
+    "text/plain": "txt",
   };
-  return extensions[normalizedMime('', mime)] ?? 'bin';
+  return extensions[normalizedMime("", mime)] ?? "bin";
 }
 
-function sanitizedFilename(filename: string, fallback = 'export'): string {
-  const leaf = filename.split(/[\\/]/).pop() ?? '';
+function sanitizedFilename(filename: string, fallback = "export"): string {
+  const leaf = filename.split(/[\\/]/).pop() ?? "";
   const cleaned = leaf
-    .normalize('NFKC')
-    .replace(/\p{Cc}+/gu, '_')
-    .replace(/\p{Cf}+/gu, '_')
-    .replace(/[<>:"/\\|?*]+/g, '_')
-    .replace(/[. ]+$/g, '')
+    .normalize("NFKC")
+    .replace(/\p{Cc}+/gu, "_")
+    .replace(/\p{Cf}+/gu, "_")
+    .replace(/[<>:"/\\|?*]+/g, "_")
+    .replace(/[. ]+$/g, "")
     .trim();
-  const safe = cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : fallback;
+  const safe =
+    cleaned && cleaned !== "." && cleaned !== ".." ? cleaned : fallback;
   if (safe.length <= 120) return safe;
-  const extensionAt = safe.lastIndexOf('.');
-  if (extensionAt <= 0 || extensionAt < safe.length - 16) return safe.slice(0, 120);
+  const extensionAt = safe.lastIndexOf(".");
+  if (extensionAt <= 0 || extensionAt < safe.length - 16)
+    return safe.slice(0, 120);
   const extension = safe.slice(extensionAt);
   return `${safe.slice(0, Math.max(1, 120 - extension.length))}${extension}`;
 }
 
 function filenameStem(filename: string, fallback: string): string {
   const safe = sanitizedFilename(filename, fallback);
-  return safe.replace(/\.[^.]+$/, '') || fallback;
+  return safe.replace(/\.[^.]+$/, "") || fallback;
 }
 
 function isAndroidNative(): boolean {
-  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
 }
 
 function isSafeExportId(exportId: string): boolean {
@@ -180,7 +181,7 @@ export async function pruneStagedNativeExports(): Promise<void> {
       files
         .filter(
           (entry) =>
-            entry.type === 'directory' &&
+            entry.type === "directory" &&
             Number.isFinite(entry.mtime) &&
             entry.mtime < cutoff &&
             isSafeExportId(entry.name),
@@ -199,13 +200,17 @@ export async function pruneStagedNativeExports(): Promise<void> {
 }
 
 function newExportId(): string {
-  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let offset = 0; offset < bytes.byteLength; offset += BINARY_STRING_CHUNK_BYTES) {
+  let binary = "";
+  for (
+    let offset = 0;
+    offset < bytes.byteLength;
+    offset += BINARY_STRING_CHUNK_BYTES
+  ) {
     const chunk = bytes.subarray(
       offset,
       Math.min(bytes.byteLength, offset + BINARY_STRING_CHUNK_BYTES),
@@ -224,14 +229,21 @@ async function stageNativeBytes(
   const safeFilename = sanitizedFilename(filename);
   const path = `${NATIVE_EXPORT_ROOT}/${exportId}/${safeFilename}`;
   try {
-    const first = bytes.subarray(0, Math.min(bytes.byteLength, NATIVE_WRITE_CHUNK_BYTES));
+    const first = bytes.subarray(
+      0,
+      Math.min(bytes.byteLength, NATIVE_WRITE_CHUNK_BYTES),
+    );
     await Filesystem.writeFile({
       path,
       directory: Directory.Cache,
       data: bytesToBase64(first),
       recursive: true,
     });
-    for (let offset = first.byteLength; offset < bytes.byteLength; offset += NATIVE_WRITE_CHUNK_BYTES) {
+    for (
+      let offset = first.byteLength;
+      offset < bytes.byteLength;
+      offset += NATIVE_WRITE_CHUNK_BYTES
+    ) {
       const chunk = bytes.subarray(
         offset,
         Math.min(bytes.byteLength, offset + NATIVE_WRITE_CHUNK_BYTES),
@@ -242,7 +254,10 @@ async function stageNativeBytes(
         data: bytesToBase64(chunk),
       });
     }
-    const { uri } = await Filesystem.getUri({ path, directory: Directory.Cache });
+    const { uri } = await Filesystem.getUri({
+      path,
+      directory: Directory.Cache,
+    });
     return {
       path,
       uri,
@@ -256,20 +271,20 @@ async function stageNativeBytes(
 }
 
 function isShareCancellation(error: unknown): boolean {
-  if (error instanceof DOMException && error.name === 'AbortError') return true;
-  if (!error || typeof error !== 'object') return false;
+  if (error instanceof DOMException && error.name === "AbortError") return true;
+  if (!error || typeof error !== "object") return false;
   const value = error as { message?: unknown };
-  const message = typeof value.message === 'string' ? value.message : '';
+  const message = typeof value.message === "string" ? value.message : "";
   // @capacitor/share 8.0.1 rejects Android chooser cancellation with this exact text.
-  return message.trim() === 'Share canceled';
+  return message.trim() === "Share canceled";
 }
 
 function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
+  const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = sanitizedFilename(filename);
-  anchor.rel = 'noopener';
+  anchor.rel = "noopener";
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
@@ -277,7 +292,12 @@ function triggerBrowserDownload(blob: Blob, filename: string): void {
 }
 
 function hasJpegMagic(bytes: Uint8Array): boolean {
-  return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  return (
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  );
 }
 
 function hasPngMagic(bytes: Uint8Array): boolean {
@@ -292,39 +312,43 @@ function hasPngMagic(bytes: Uint8Array): boolean {
 
 /** pdf-lib only embeds JPEG/PNG. Rasterize camera WebP/HEIC on this device. */
 export async function ensureJpegOrPng(file: PickedFile): Promise<PickedFile> {
-  if (hasJpegMagic(file.bytes) || hasPngMagic(file.bytes)) return file;
   const blob = new Blob([toArrayBuffer(file.bytes)], {
-    type: file.mime || 'image/*',
+    type: file.mime || "image/*",
   });
   const bitmap = await createImageBitmap(blob);
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, bitmap.width);
-  canvas.height = Math.max(1, bitmap.height);
-  const ctx = canvas.getContext('2d', { alpha: false });
+  const ratio = Math.min(1, 3200 / Math.max(bitmap.width, bitmap.height));
+  if (ratio === 1 && (hasJpegMagic(file.bytes) || hasPngMagic(file.bytes))) {
+    bitmap.close();
+    return file;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * ratio));
+  canvas.height = Math.max(1, Math.round(bitmap.height * ratio));
+  const ctx = canvas.getContext("2d", { alpha: false });
   if (!ctx) {
     bitmap.close();
-    throw new Error('Could not convert this image on-device.');
+    throw new Error("Could not convert this image on-device.");
   }
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(bitmap, 0, 0);
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
   const jpeg = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (out) => {
-        if (!out) reject(new Error('Could not encode this image as JPEG.'));
+        if (!out) reject(new Error("Could not encode this image as JPEG."));
         else resolve(out);
       },
-      'image/jpeg',
+      "image/jpeg",
       0.92,
     );
   });
   canvas.width = 0;
   canvas.height = 0;
-  const stem = file.name.replace(/\.[^.]+$/, '') || 'image';
+  const stem = file.name.replace(/\.[^.]+$/, "") || "image";
   return {
     name: `${stem}.jpg`,
-    mime: 'image/jpeg',
+    mime: "image/jpeg",
     bytes: new Uint8Array(await jpeg.arrayBuffer()),
   };
 }
@@ -334,15 +358,24 @@ export async function fileListToPicked(
   asPdfImages = false,
 ): Promise<PickedFile[]> {
   const list = Array.from(files);
-  const picked = await Promise.all(
-    list.map(async (file) => ({
+  if (
+    list.length > 200 ||
+    list.reduce((sum, file) => sum + file.size, 0) > MAX_INPUT_BYTES
+  ) {
+    throw new Error(
+      "Choose up to 200 files totaling no more than 128 MB. Process larger jobs in smaller parts.",
+    );
+  }
+  const picked: PickedFile[] = [];
+  for (const file of list) {
+    const item = {
       name: file.name,
       mime: mimeOf(file),
       bytes: new Uint8Array(await file.arrayBuffer()),
-    })),
-  );
-  if (!asPdfImages) return picked;
-  return Promise.all(picked.map((file) => ensureJpegOrPng(file)));
+    };
+    picked.push(asPdfImages ? await ensureJpegOrPng(item) : item);
+  }
+  return picked;
 }
 
 export async function saveBlob(
@@ -360,7 +393,7 @@ export async function saveBlob(
 export async function saveBytes(
   bytes: Uint8Array,
   filename: string,
-  mime = 'application/pdf',
+  mime = "application/pdf",
 ): Promise<ExportResult> {
   const safeFilename = sanitizedFilename(filename);
   const safeMime = normalizedMime(safeFilename, mime);
@@ -375,7 +408,12 @@ export async function saveBytes(
   await pruneStagedNativeExports();
   const exportId = newExportId();
   try {
-    const staged = await stageNativeBytes(bytes, safeFilename, safeMime, exportId);
+    const staged = await stageNativeBytes(
+      bytes,
+      safeFilename,
+      safeMime,
+      exportId,
+    );
     const result = await FileExporter.saveFile({
       sourcePath: staged.path,
       filename: staged.filename,
@@ -388,14 +426,14 @@ export async function saveBytes(
 }
 
 function namedImageBlobs(blobs: Blob[], basename: string): NamedBlob[] {
-  const stem = filenameStem(basename, 'page');
+  const stem = filenameStem(basename, "page");
   return blobs.map((blob, index) => {
-    const mime = normalizedMime('', blob.type || 'image/jpeg');
+    const mime = normalizedMime("", blob.type || "image/jpeg");
     const extension = extensionForMime(mime);
     return {
       blob,
       filename: sanitizedFilename(
-        `${stem}-${String(index + 1).padStart(2, '0')}.${extension}`,
+        `${stem}-${String(index + 1).padStart(2, "0")}.${extension}`,
       ),
       mime,
     };
@@ -403,16 +441,35 @@ function namedImageBlobs(blobs: Blob[], basename: string): NamedBlob[] {
 }
 
 async function imageArchiveBytes(files: NamedBlob[]): Promise<Uint8Array> {
-  const { default: JSZip } = await import('jszip');
+  const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
   for (const file of files) {
     zip.file(file.filename, new Uint8Array(await file.blob.arrayBuffer()));
   }
   return zip.generateAsync({
-    type: 'uint8array',
+    type: "uint8array",
     // Exported page images are already compressed, so STORE avoids needless CPU work.
-    compression: 'STORE',
+    compression: "STORE",
   });
+}
+
+export async function packageImages(
+  blobs: Blob[],
+  basename: string,
+): Promise<{ bytes: Uint8Array; filename: string; mime: string }> {
+  assertImageArchiveWithinLimits(blobs);
+  const files = namedImageBlobs(blobs, basename);
+  if (files.length === 1)
+    return {
+      bytes: new Uint8Array(await files[0]!.blob.arrayBuffer()),
+      filename: files[0]!.filename,
+      mime: files[0]!.mime,
+    };
+  return {
+    bytes: await imageArchiveBytes(files),
+    filename: `${filenameStem(basename, "pages")}.zip`,
+    mime: ZIP_MIME,
+  };
 }
 
 function assertImageArchiveWithinLimits(blobs: Blob[]): void {
@@ -420,14 +477,14 @@ function assertImageArchiveWithinLimits(blobs: Blob[]): void {
   if (blobs.length > IMAGE_ARCHIVE_MAX_FILES) {
     throw new Error(
       `Ream can bundle up to ${IMAGE_ARCHIVE_MAX_FILES} images at once. ` +
-        'Use Split PDF first, then export each smaller part.',
+        "Use Split PDF first, then export each smaller part.",
     );
   }
   const totalBytes = blobs.reduce((sum, blob) => sum + blob.size, 0);
   if (totalBytes > IMAGE_ARCHIVE_MAX_INPUT_BYTES) {
     throw new Error(
       `These images total ${formatBytes(totalBytes)}, which is too large to bundle reliably. ` +
-        'Use Split PDF first, then export each smaller part.',
+        "Use Split PDF first, then export each smaller part.",
     );
   }
 }
@@ -436,19 +493,20 @@ export async function saveImageBlobs(
   blobs: Blob[],
   basename: string,
 ): Promise<ExportResult> {
-  if (blobs.length === 0) throw new Error('There are no images to save.');
+  if (blobs.length === 0) throw new Error("There are no images to save.");
   assertImageArchiveWithinLimits(blobs);
   const files = namedImageBlobs(blobs, basename);
   const first = files[0]!;
-  if (files.length === 1) return saveBlob(first.blob, first.filename, first.mime);
-  const archiveName = `${filenameStem(basename, 'pages')}.zip`;
+  if (files.length === 1)
+    return saveBlob(first.blob, first.filename, first.mime);
+  const archiveName = `${filenameStem(basename, "pages")}.zip`;
   return saveBytes(await imageArchiveBytes(files), archiveName, ZIP_MIME);
 }
 
 export async function shareOrDownload(
   bytes: Uint8Array,
   filename: string,
-  mime = 'application/pdf',
+  mime = "application/pdf",
 ): Promise<ExportResult> {
   const safeFilename = sanitizedFilename(filename);
   const safeMime = normalizedMime(safeFilename, mime);
@@ -456,7 +514,12 @@ export async function shareOrDownload(
     await pruneStagedNativeExports();
     const exportId = newExportId();
     try {
-      const staged = await stageNativeBytes(bytes, safeFilename, safeMime, exportId);
+      const staged = await stageNativeBytes(
+        bytes,
+        safeFilename,
+        safeMime,
+        exportId,
+      );
       await Share.share({
         title: staged.filename,
         dialogTitle: `Share ${staged.filename}`,
@@ -471,12 +534,14 @@ export async function shareOrDownload(
     }
   }
 
-  const file = new File([toArrayBuffer(bytes)], safeFilename, { type: safeMime });
+  const file = new File([toArrayBuffer(bytes)], safeFilename, {
+    type: safeMime,
+  });
   const payload = { files: [file], title: safeFilename };
   try {
     if (
-      typeof navigator.share === 'function' &&
-      (typeof navigator.canShare !== 'function' || navigator.canShare(payload))
+      typeof navigator.share === "function" &&
+      (typeof navigator.canShare !== "function" || navigator.canShare(payload))
     ) {
       await navigator.share(payload);
       return COMPLETED;
@@ -492,7 +557,7 @@ export async function shareOrDownloadBlobs(
   blobs: Blob[],
   basename: string,
 ): Promise<ExportResult> {
-  if (blobs.length === 0) throw new Error('There are no images to share.');
+  if (blobs.length === 0) throw new Error("There are no images to share.");
   const files = namedImageBlobs(blobs, basename);
   if (isAndroidNative()) {
     await pruneStagedNativeExports();
@@ -510,8 +575,8 @@ export async function shareOrDownloadBlobs(
         );
       }
       await Share.share({
-        title: filenameStem(basename, 'pages'),
-        dialogTitle: 'Share images',
+        title: filenameStem(basename, "pages"),
+        dialogTitle: "Share images",
         files: staged.map((file) => file.uri),
       });
       scheduleStagedNativeExportCleanup(exportId);
@@ -526,11 +591,14 @@ export async function shareOrDownloadBlobs(
   const browserFiles = files.map(
     (file) => new File([file.blob], file.filename, { type: file.mime }),
   );
-  const payload = { files: browserFiles, title: filenameStem(basename, 'pages') };
+  const payload = {
+    files: browserFiles,
+    title: filenameStem(basename, "pages"),
+  };
   try {
     if (
-      typeof navigator.share === 'function' &&
-      (typeof navigator.canShare !== 'function' || navigator.canShare(payload))
+      typeof navigator.share === "function" &&
+      (typeof navigator.canShare !== "function" || navigator.canShare(payload))
     ) {
       await navigator.share(payload);
       return COMPLETED;
@@ -542,7 +610,10 @@ export async function shareOrDownloadBlobs(
 }
 
 /** @deprecated Prefer saveBlob; retained for callers outside the React screens. */
-export async function downloadBlob(blob: Blob, filename: string): Promise<ExportResult> {
+export async function downloadBlob(
+  blob: Blob,
+  filename: string,
+): Promise<ExportResult> {
   return saveBlob(blob, filename, blob.type);
 }
 
@@ -550,21 +621,21 @@ export async function downloadBlob(blob: Blob, filename: string): Promise<Export
 export async function downloadBytes(
   bytes: Uint8Array,
   filename: string,
-  mime = 'application/pdf',
+  mime = "application/pdf",
 ): Promise<ExportResult> {
   return saveBytes(bytes, filename, mime);
 }
 
 export function pickCamera(): Promise<File[]> {
   return new Promise((resolve) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.setAttribute('capture', 'environment');
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.setAttribute("capture", "environment");
     input.onchange = () => {
       resolve(input.files ? Array.from(input.files) : []);
     };
-    input.addEventListener('cancel', () => resolve([]));
+    input.addEventListener("cancel", () => resolve([]));
     input.click();
   });
 }

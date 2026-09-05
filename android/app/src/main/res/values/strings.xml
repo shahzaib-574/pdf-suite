@@ -4,6 +4,4 @@
     <string name="title_activity_main">Ream</string>
     <string name="package_name">com.reampdf.mobile</string>
     <string name="custom_url_scheme">com.reampdf.mobile</string>
-    <!-- Google's official sample Android app ID. Replace with Ream's AdMob app ID before a production release. -->
-    <string name="admob_app_id" translatable="false">ca-app-pub-3940256099942544~3347511713</string>
 </resources>

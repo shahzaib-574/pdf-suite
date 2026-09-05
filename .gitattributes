@@ -1,2 +1,4 @@
 # PDF artifacts are binary. Never apply platform line-ending conversion.
 *.pdf binary
+android/gradlew text eol=lf
+.eas/build/*.yml text eol=lf

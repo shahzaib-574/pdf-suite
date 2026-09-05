@@ -12,39 +12,64 @@ import type {
   PickedFile,
   ProtectInput,
   WatermarkInput,
-} from '../lib/types';
-import type { PdfViewerSession } from './render';
-import type { TransferFile, WorkerOp, WorkerRequest, WorkerResponse } from './protocol';
-import { copyBuffer, humanError } from './util';
+  ImagePdfOptions,
+  PageNumberOptions,
+  ExportImageOptions,
+  JobControl,
+} from "../lib/types";
+import type { PdfViewerSession } from "./render";
+import type {
+  TransferFile,
+  WorkerOp,
+  WorkerRequest,
+  WorkerResponse,
+} from "./protocol";
+import { copyBuffer, humanError } from "./util";
 
 function renderApi() {
-  return import('./render');
+  return import("./render");
 }
 
 export type PdfEngine = {
   merge(files: PickedFile[]): Promise<JobResult>;
   split(file: PickedFile, range: PageRange): Promise<JobResult>;
-  imagesToPdf(files: PickedFile[]): Promise<JobResult>;
-  pdfToImages(file: PickedFile): Promise<JobResult>;
-  compress(file: PickedFile, level: CompressLevel): Promise<JobResult>;
+  imagesToPdf(
+    files: PickedFile[],
+    options?: ImagePdfOptions,
+  ): Promise<JobResult>;
+  pdfToImages(
+    file: PickedFile,
+    options?: ExportImageOptions,
+    control?: JobControl,
+  ): Promise<JobResult>;
+  compress(
+    file: PickedFile,
+    level: CompressLevel,
+    control?: JobControl,
+  ): Promise<JobResult>;
   watermark(file: PickedFile, input: WatermarkInput): Promise<JobResult>;
-  pageNumbers(file: PickedFile): Promise<JobResult>;
+  pageNumbers(
+    file: PickedFile,
+    options?: PageNumberOptions,
+  ): Promise<JobResult>;
   protect(file: PickedFile, input: ProtectInput): Promise<JobResult>;
   organize(file: PickedFile, ops: OrganizeOp[]): Promise<JobResult>;
   pageCount(file: PickedFile): Promise<number>;
-  renderPage(
-    file: PickedFile,
-    pageIndex: number,
-    width: number,
-  ): Promise<Blob>;
+  renderPage(file: PickedFile, pageIndex: number, width: number): Promise<Blob>;
   openViewer(
     file: PickedFile,
     onProgress?: (current: number, total: number) => void,
+    options?: {
+      signal?: AbortSignal;
+      onPassword?: (incorrect: boolean) => Promise<string>;
+      indexText?: boolean;
+    },
   ): Promise<PdfViewerSession>;
   docxToPdf(file: PickedFile): Promise<JobResult>;
   pdfToDocx(
     file: PickedFile,
     onProgress?: (update: PdfToDocxProgress) => void,
+    signal?: AbortSignal,
   ): Promise<JobResult>;
 };
 
@@ -56,6 +81,14 @@ type Pending = {
 let worker: Worker | undefined;
 let nextId = 1;
 const pending = new Map<number, Pending>();
+
+export function cancelPendingJobs(): void {
+  worker?.terminate();
+  worker = undefined;
+  for (const job of pending.values())
+    job.reject(new Error("Processing cancelled."));
+  pending.clear();
+}
 
 function packFile(file: PickedFile): TransferFile {
   return {
@@ -71,16 +104,23 @@ function transferOf(files: TransferFile | TransferFile[]): ArrayBuffer[] {
 
 function getWorker(): Worker {
   if (!worker) {
-    worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
-    worker.addEventListener('message', onWorkerMessage);
-    worker.addEventListener('error', onWorkerError);
+    worker = new Worker(new URL("./worker.ts", import.meta.url), {
+      type: "module",
+    });
+    worker.addEventListener("message", onWorkerMessage);
+    worker.addEventListener("error", onWorkerError);
   }
   return worker;
 }
 
 function onWorkerMessage(event: MessageEvent<unknown>): void {
   const data = event.data;
-  if (typeof data !== 'object' || data === null || !('id' in data) || !('ok' in data)) {
+  if (
+    typeof data !== "object" ||
+    data === null ||
+    !("id" in data) ||
+    !("ok" in data)
+  ) {
     return;
   }
   const response = data as WorkerResponse;
@@ -92,7 +132,7 @@ function onWorkerMessage(event: MessageEvent<unknown>): void {
 }
 
 function onWorkerError(): void {
-  const err = new Error('PDF worker failed to start.');
+  const err = new Error("PDF worker failed to start.");
   for (const job of pending.values()) job.reject(err);
   pending.clear();
   worker = undefined;
@@ -120,7 +160,7 @@ function toJobOk(
   fallbackName: string,
 ): JobOk {
   if (!res.bytes) {
-    throw new Error('PDF worker returned no file bytes.');
+    throw new Error("PDF worker returned no file bytes.");
   }
   return {
     ok: true,
@@ -146,69 +186,94 @@ async function workerJob(
 export const engine: PdfEngine = {
   merge(files) {
     const packed = files.map(packFile);
-    return workerJob({ op: 'merge', files: packed }, transferOf(packed), 'merged.pdf');
+    return workerJob(
+      { op: "merge", files: packed },
+      transferOf(packed),
+      "merged.pdf",
+    );
   },
   split(file, range) {
     const packed = packFile(file);
     return workerJob(
-      { op: 'split', file: packed, range },
+      { op: "split", file: packed, range },
       transferOf(packed),
-      'split.pdf',
+      "split.pdf",
     );
   },
-  imagesToPdf(files) {
+  imagesToPdf(files, options) {
     const packed = files.map(packFile);
     return workerJob(
-      { op: 'imagesToPdf', files: packed },
+      { op: "imagesToPdf", files: packed, options },
       transferOf(packed),
-      'images.pdf',
+      "images.pdf",
     );
   },
-  async pdfToImages(file) {
+  async pdfToImages(file, options, control) {
     const { pdfToImages } = await renderApi();
-    return pdfToImages(file);
+    return pdfToImages(file, options, control);
   },
-  async compress(file, level) {
+  async compress(file, level, control) {
+    if (level === "keep") {
+      const packed = packFile(file);
+      const result = await workerJob(
+        { op: "optimize", file: packed },
+        transferOf(packed),
+        "optimized.pdf",
+      );
+      if (result.ok) {
+        const originalRetained = result.bytes.length >= file.bytes.length;
+        if (originalRetained) result.bytes = file.bytes;
+        result.extra = {
+          compression: {
+            originalBytes: file.bytes.length,
+            outputBytes: result.bytes.length,
+            mode: "lossless",
+            originalRetained,
+          },
+        };
+      }
+      return result;
+    }
     const { compress } = await renderApi();
-    return compress(file, level);
+    return compress(file, level, control);
   },
   watermark(file, input) {
     const packed = packFile(file);
     return workerJob(
-      { op: 'watermark', file: packed, input },
+      { op: "watermark", file: packed, input },
       transferOf(packed),
-      'watermarked.pdf',
+      "watermarked.pdf",
     );
   },
-  pageNumbers(file) {
+  pageNumbers(file, options) {
     const packed = packFile(file);
     return workerJob(
-      { op: 'pageNumbers', file: packed },
+      { op: "pageNumbers", file: packed, options },
       transferOf(packed),
-      'numbered.pdf',
+      "numbered.pdf",
     );
   },
   protect(file, input) {
     const packed = packFile(file);
     return workerJob(
-      { op: 'protect', file: packed, input },
+      { op: "protect", file: packed, input },
       transferOf(packed),
-      'protected.pdf',
+      "protected.pdf",
     );
   },
   organize(file, ops) {
     const packed = packFile(file);
     return workerJob(
-      { op: 'organize', file: packed, ops },
+      { op: "organize", file: packed, ops },
       transferOf(packed),
-      'organized.pdf',
+      "organized.pdf",
     );
   },
   async pageCount(file) {
     try {
       const packed = packFile(file);
       const res = await callWorker(
-        { op: 'pageCount', file: packed },
+        { op: "pageCount", file: packed },
         transferOf(packed),
       );
       return res.pageCount ?? 0;
@@ -224,10 +289,10 @@ export const engine: PdfEngine = {
       throw new Error(humanError(err));
     }
   },
-  async openViewer(file, onProgress) {
+  async openViewer(file, onProgress, options) {
     try {
       const { openPdfViewer } = await renderApi();
-      return await openPdfViewer(file, onProgress);
+      return await openPdfViewer(file, onProgress, options);
     } catch (err) {
       throw new Error(humanError(err));
     }
@@ -235,15 +300,15 @@ export const engine: PdfEngine = {
   docxToPdf(file) {
     const packed = packFile(file);
     return workerJob(
-      { op: 'docxToPdf', file: packed },
+      { op: "docxToPdf", file: packed },
       transferOf(packed),
-      'document.pdf',
+      "document.pdf",
     );
   },
-  async pdfToDocx(file, onProgress) {
+  async pdfToDocx(file, onProgress, signal) {
     try {
-      const { pdfToDocx } = await import('./pdfToDocx');
-      return await pdfToDocx(file, onProgress);
+      const { pdfToDocx } = await import("./pdfToDocx");
+      return await pdfToDocx(file, onProgress, signal);
     } catch (err) {
       return { ok: false, message: humanError(err) };
     }

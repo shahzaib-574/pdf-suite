@@ -1,276 +1,430 @@
-import { useEffect, useState } from 'react';
-import { Check, Download, Eye, FolderOpen, Share2, Plus } from 'lucide-react';
-import { AnimatedButton, PageHeader } from '../components';
-import { engine } from '../pdf';
-import type { PickedFile } from '../lib/types';
+import { useEffect, useState } from "react";
+import { Check, Download, Eye, FolderOpen, Share2, Plus } from "lucide-react";
+import { AnimatedButton, PageHeader } from "../components";
+import type { JobOk, ToolId } from "../lib/types";
 import {
   formatBytes,
   saveBytes,
-  saveImageBlobs,
   shareOrDownload,
   shareOrDownloadBlobs,
-} from '../store/files';
-import { lastJob, setCurrentViewer } from '../store/lastJob';
-import { saveRecent } from '../store/recents';
-import { navigate } from './nav';
+} from "../store/files";
+import { lastJob, setCurrentViewer } from "../store/lastJob";
+import { saveRecent, renameRecent } from "../store/recents";
+import { queueToolFiles } from "../store/toolInput";
+import { navigate } from "./nav";
 
-let savedResult: typeof lastJob.result = null;
+const retained = new WeakMap<JobOk, Promise<string>>();
+function retain(job: JobOk): Promise<string> {
+  let promise = retained.get(job);
+  if (!promise) {
+    promise = saveRecent({
+      name: job.filename,
+      mime: job.mime,
+      tool: lastJob.tool ?? "view",
+      bytes: job.bytes,
+    }).then((item) => item.id);
+    retained.set(job, promise);
+  }
+  return promise;
+}
 
 export function Result() {
   const job = lastJob.result;
-  const images = job?.extra?.images;
-  const conversion = job?.extra?.pdfToDocx;
-  const wordNotes = job?.extra?.wordToPdf;
-  const [pageCount, setPageCount] = useState<number | undefined>(job?.pageCount);
+  const [filename, setFilename] = useState(job?.filename ?? "document.pdf");
   const [message, setMessage] = useState<string | null>(null);
-  const [activeExport, setActiveExport] = useState<'save' | 'share' | null>(null);
-
+  const [status, setStatus] = useState("Adding a local copy to Recents…");
+  const [activeExport, setActiveExport] = useState<"save" | "share" | null>(
+    null,
+  );
+  const [previews, setPreviews] = useState<string[]>([]);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const [wordPreview, setWordPreview] = useState<string[] | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [recentId, setRecentId] = useState<string | null>(null);
+  const images = job?.extra?.images;
   useEffect(() => {
     if (!job) return;
-    if (savedResult !== job) {
-      savedResult = job;
-      if (job.bytes.byteLength > 0) {
-        void saveRecent({
-          name: job.filename,
-          mime: job.mime,
-          tool: lastJob.tool ?? 'view',
-          bytes: job.bytes,
-        }).catch(() => {
-          setMessage('Created successfully, but it could not be added to Recents.');
-        });
-      }
-    }
-    if (job.filename.toLowerCase().endsWith('.docx') || job.pageCount != null) return;
-    if (job.bytes.byteLength === 0) return;
     let cancelled = false;
-    const file: PickedFile = {
-      name: job.filename,
-      mime: 'application/pdf',
-      bytes: job.bytes,
-    };
-    void engine
-      .pageCount(file)
-      .then((count) => {
-        if (!cancelled) setPageCount(count);
+    void retain(job)
+      .then((id) => {
+        if (!cancelled) {
+          setRecentId(id);
+          setStatus("Local copy kept in Recents. Use Save to choose a folder.");
+        }
       })
-      .catch(() => {
-        if (!cancelled) setPageCount(undefined);
+      .catch((error) => {
+        if (!cancelled)
+          setStatus(
+            `${error instanceof Error ? error.message : "Could not keep a local copy."} Save this result before leaving.`,
+          );
       });
     return () => {
       cancelled = true;
     };
   }, [job]);
+  useEffect(() => {
+    if (!images?.[previewIndex]) return;
+    const url = URL.createObjectURL(images[previewIndex]!);
+    // Object URLs must be created and revoked after commit, including Strict Mode cleanup.
+    // oxlint-disable-next-line react/set-state-in-effect
+    setPreviews([url]);
+    return () => URL.revokeObjectURL(url);
+  }, [images, previewIndex]);
 
-  if (!job) {
+  if (!job)
     return (
       <div className="ps-screen">
-        <PageHeader title="Result" onBack={() => navigate('#/')} />
-        <div className="ps-body">
-          <div className="ps-empty-state">
-            <span className="ps-empty-state__icon" aria-hidden="true">
-              <FolderOpen size={28} />
-            </span>
-            <h2>No file ready</h2>
-            <p>Finish a tool to save, share, or open the result here.</p>
-            <AnimatedButton icon={Plus} onClick={() => navigate('#/')}>
-              Browse tools
-            </AnimatedButton>
-          </div>
+        <PageHeader title="Result" onBack={() => navigate("#/")} />
+        <div className="ps-body ps-empty-state">
+          <FolderOpen size={28} />
+          <h2>No file ready</h2>
+          <p>Open a saved result from Recents or choose a tool.</p>
+          <AnimatedButton onClick={() => navigate("#/recents")}>
+            Open Recents
+          </AnimatedButton>
         </div>
       </div>
     );
-  }
-
   const done = job;
-  const isDocx =
-    done.mime ===
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-    done.filename.toLowerCase().endsWith('.docx');
-  const isPdf = done.mime === 'application/pdf' || done.filename.toLowerCase().endsWith('.pdf');
-  const docxMime =
-    done.mime ??
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-  const hasPdf = done.bytes.byteLength > 0 && isPdf;
-  const hasFile = done.bytes.byteLength > 0;
-  const hasImages = Boolean(images && images.length > 0);
+  const isPdf = done.filename.toLowerCase().endsWith(".pdf");
+  const isDocx = done.filename.toLowerCase().endsWith(".docx");
+  const mime =
+    done.mime ?? (isPdf ? "application/pdf" : "application/octet-stream");
+  const conversion = done.extra?.pdfToDocx;
+  const compression = done.extra?.compression;
+  const extension = done.filename.match(/\.[^.]+$/)?.[0] ?? "";
+  const outputName = (() => {
+    const clean =
+      filename.trim().replace(/[\\/<>:"|?*]/g, "_") || done.filename;
+    return extension && !clean.toLowerCase().endsWith(extension.toLowerCase())
+      ? clean + extension
+      : clean;
+  })();
+  const canContinue = isPdf && lastJob.tool !== "protect";
 
-  function openViewer(): void {
-    if (!hasPdf) return;
-    setCurrentViewer(done.bytes, done.filename);
-    navigate('#/viewer');
-  }
-
-  async function onShare(): Promise<void> {
+  async function exportFile(action: "save" | "share") {
     setMessage(null);
-    setActiveExport('share');
+    setActiveExport(action);
     try {
-      if (hasImages && images) {
-        const result = await shareOrDownloadBlobs(images, done.filename);
-        if (result.status === 'cancelled') return;
+      const result =
+        action === "save"
+          ? await saveBytes(done.bytes, outputName, mime)
+          : await shareOrDownload(done.bytes, outputName, mime);
+      if (result.status === "cancelled") {
+        setMessage("Cancelled. Your result is still available here.");
         return;
       }
-      if (hasFile) {
-        const result = await shareOrDownload(
-          done.bytes,
-          done.filename,
-          isDocx ? docxMime : 'application/pdf',
-        );
-        if (result.status === 'cancelled') return;
+      if (recentId && outputName !== done.filename) {
+        try {
+          await renameRecent(recentId, outputName);
+        } catch {
+          setStatus(
+            "Export completed, but the local copy could not be renamed.",
+          );
+        }
       }
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Share failed');
+      setMessage(
+        action === "save"
+          ? "Save completed. In a browser, check Downloads."
+          : "Share action completed.",
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Export failed. Try again.",
+      );
     } finally {
       setActiveExport(null);
     }
   }
-
-  async function onSave(): Promise<void> {
+  async function previewWord() {
+    setPreviewBusy(true);
     setMessage(null);
-    setActiveExport('save');
     try {
-      if (hasImages && images) {
-        const result = await saveImageBlobs(images, done.filename);
-        if (result.status === 'cancelled') return;
-        return;
-      }
-      if (hasFile) {
-        const result = await saveBytes(
-          done.bytes,
-          done.filename,
-          isDocx ? docxMime : 'application/pdf',
-        );
-        if (result.status === 'cancelled') return;
-      }
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Save failed');
+      const { default: JSZip } = await import("jszip");
+      const zip = await JSZip.loadAsync(done.bytes);
+      const xml = await zip.file("word/document.xml")?.async("string");
+      if (!xml)
+        throw new Error("This Word file has no readable document part.");
+      const doc = new DOMParser().parseFromString(xml, "application/xml");
+      const paragraphs = Array.from(doc.getElementsByTagNameNS("*", "p"))
+        .map((p) =>
+          Array.from(p.getElementsByTagNameNS("*", "t"))
+            .map((t) => t.textContent ?? "")
+            .join(""),
+        )
+        .filter(Boolean);
+      setWordPreview(paragraphs);
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Could not preview text.",
+      );
     } finally {
-      setActiveExport(null);
+      setPreviewBusy(false);
     }
   }
-
+  function continueWith(tool: ToolId) {
+    queueToolFiles(tool, [{ name: outputName, mime, bytes: done.bytes }]);
+    navigate(`#/tool/${tool}`);
+  }
   return (
     <div className="ps-screen">
-      <PageHeader title="Done" subtitle={job.filename} onBack={() => navigate('#/')} />
+      <PageHeader title="Result ready" onBack={() => navigate("#/")} />
       <div className="ps-body">
         <div className="ps-result-card">
           <span className="ps-result-card__icon" aria-hidden="true">
-            <Check size={27} strokeWidth={2.4} />
+            <Check size={27} />
           </span>
           <div>
             <h2>Your file is ready</h2>
-            <p>{job.filename}</p>
+            <p>{done.filename}</p>
           </div>
           <div className="ps-meta">
-            {hasFile ? <span className="tabular">{formatBytes(job.bytes.byteLength)}</span> : null}
-            {pageCount != null ? (
-              <span>{pageCount} page{pageCount === 1 ? '' : 's'}</span>
+            <span>{formatBytes(done.bytes.length)}</span>
+            {done.pageCount != null ? (
+              <span>
+                {done.pageCount}{" "}
+                {isDocx
+                  ? done.pageCount === 1
+                    ? "source page"
+                    : "source pages"
+                  : done.pageCount === 1
+                    ? "page"
+                    : "pages"}
+              </span>
             ) : null}
-            {hasImages && images ? (
-              <span>{images.length} image{images.length === 1 ? '' : 's'}</span>
-            ) : null}
+            {images ? <span>{images.length} images</span> : null}
           </div>
         </div>
+        <p className="ps-note" role="status">
+          {status}
+        </p>
+        <label className="ps-field">
+          File name
+          <input
+            value={filename}
+            onChange={(e) => setFilename(e.target.value)}
+            maxLength={120}
+          />
+        </label>
+        {compression ? (
+          <section
+            className="ps-conversion-report"
+            aria-label="Compression result"
+          >
+            <h3>
+              {compression.originalRetained
+                ? "Original retained"
+                : "File size reduced"}
+            </h3>
+            <p>
+              {formatBytes(compression.originalBytes)} →{" "}
+              {formatBytes(compression.outputBytes)} ·{" "}
+              {Math.max(
+                0,
+                Math.round(
+                  (1 -
+                    compression.outputBytes /
+                      Math.max(1, compression.originalBytes)) *
+                    100,
+                ),
+              )}
+              % smaller
+            </p>
+            <p>
+              {compression.originalRetained
+                ? "The attempted optimization did not produce a smaller safe file."
+                : compression.mode === "lossless"
+                  ? "Text, links, and forms are retained."
+                  : "Pages are images. Selectable text, interactive links, forms, and digital signatures are not retained."}
+            </p>
+          </section>
+        ) : null}
         {conversion ? (
-          <section className="ps-conversion-report" aria-label="PDF to Word conversion quality">
-            <div>
-              <h3>Conversion quality</h3>
-              <p>
-                Editable structure was rebuilt on this device. Review complex fonts and forms
-                before sharing the Word file.
-              </p>
-            </div>
+          <section
+            className="ps-conversion-report"
+            aria-label="Conversion summary"
+          >
+            <h3>Conversion summary</h3>
+            <p>
+              These counts describe rebuilt content, not an accuracy score.
+              Check the text below and review layout in a Word-compatible app
+              before sharing.
+            </p>
             <div className="ps-meta">
-              <span>{conversion.editablePages} editable page{conversion.editablePages === 1 ? '' : 's'}</span>
-              {conversion.tables > 0 ? (
-                <span>{conversion.tables} table{conversion.tables === 1 ? '' : 's'}</span>
-              ) : null}
-              {conversion.columnGroups > 0 ? (
-                <span>{conversion.columnGroups} column group{conversion.columnGroups === 1 ? '' : 's'}</span>
-              ) : null}
-              {conversion.images > 0 ? (
-                <span>{conversion.images} image{conversion.images === 1 ? '' : 's'}</span>
+              <span>
+                {conversion.editablePages} pages with editable content
+              </span>
+              <span>{conversion.tables} detected tables</span>
+              {conversion.images ? (
+                <span>{conversion.images} images</span>
               ) : null}
             </div>
             {conversion.warnings.map((warning) => (
-              <p className="ps-conversion-report__warning" key={warning}>
-                {warning}
-              </p>
+              <p key={warning}>{warning}</p>
             ))}
           </section>
         ) : null}
-        {wordNotes && wordNotes.warnings.length > 0 ? (
-          <section className="ps-conversion-report" aria-label="Conversion notes">
-            <div>
-              <h3>Conversion notes</h3>
+        {done.extra?.wordToPdf?.warnings.map((warning) => (
+          <p key={warning} className="ps-banner">
+            {warning}
+          </p>
+        ))}
+        {images && previews[0] ? (
+          <section
+            className="ps-image-result"
+            aria-label="Exported page preview"
+          >
+            <img src={previews[0]} alt={`Exported image ${previewIndex + 1}`} />
+            <div className="ps-row">
+              <AnimatedButton
+                variant="ghost"
+                disabled={previewIndex === 0}
+                onClick={() => setPreviewIndex((i) => i - 1)}
+              >
+                Previous
+              </AnimatedButton>
+              <span>
+                {previewIndex + 1} / {images.length}
+              </span>
+              <AnimatedButton
+                variant="ghost"
+                disabled={previewIndex + 1 >= images.length}
+                onClick={() => setPreviewIndex((i) => i + 1)}
+              >
+                Next
+              </AnimatedButton>
             </div>
-            {wordNotes.warnings.map((warning) => (
-              <p className="ps-conversion-report__warning" key={warning}>
-                {warning}
-              </p>
+            <p className="ps-note">
+              {images.length > 1
+                ? "All images are packaged in the ZIP, ready to save or share."
+                : "This image is ready to save or share."}
+            </p>
+          </section>
+        ) : null}
+        {wordPreview ? (
+          <section className="ps-word-preview" aria-label="Word text preview">
+            <h3>Text preview</h3>
+            <p className="ps-note">
+              Text only. Tables, images, and pagination must be checked in Word.
+            </p>
+            {wordPreview.map((paragraph, index) => (
+              <p key={index}>{paragraph}</p>
             ))}
+            <AnimatedButton
+              variant="ghost"
+              onClick={() => setWordPreview(null)}
+            >
+              Close text preview
+            </AnimatedButton>
           </section>
         ) : null}
         {message ? (
-          <p className="ps-banner ps-banner--error" role="alert">
+          <p className="ps-banner" role="status">
             {message}
           </p>
         ) : null}
         <div className="ps-actions">
-          {hasPdf ? (
-            <AnimatedButton block icon={Eye} onClick={openViewer}>
-              Open PDF
-            </AnimatedButton>
-          ) : (
-            <AnimatedButton
-              block
-              icon={Download}
-              disabled={(!hasFile && !hasImages) || activeExport !== null}
-              onClick={() => {
-                void onSave();
-              }}
-            >
-              {activeExport === 'save'
-                ? 'Saving…'
-                : isDocx
-                  ? 'Save Word file'
-                  : hasImages
-                    ? 'Save images'
-                    : 'Save file'}
-            </AnimatedButton>
-          )}
+          <AnimatedButton
+            block
+            icon={Download}
+            disabled={activeExport !== null}
+            onClick={() => void exportFile("save")}
+          >
+            {activeExport === "save"
+              ? "Saving…"
+              : isDocx
+                ? "Save Word file"
+                : images && images.length > 1
+                  ? "Save ZIP"
+                  : isPdf
+                    ? "Save PDF"
+                    : "Save image"}
+          </AnimatedButton>
           <AnimatedButton
             block
             variant="ghost"
             icon={Share2}
-            disabled={(!hasFile && !hasImages) || activeExport !== null}
-            onClick={() => {
-              void onShare();
-            }}
+            disabled={activeExport !== null}
+            onClick={() => void exportFile("share")}
           >
-            {activeExport === 'share' ? 'Sharing…' : 'Share'}
+            {activeExport === "share" ? "Sharing…" : "Share file"}
           </AnimatedButton>
-          {hasPdf ? (
+          {isPdf ? (
             <AnimatedButton
               block
               variant="ghost"
-              icon={Download}
-              disabled={activeExport !== null}
+              icon={Eye}
               onClick={() => {
-                void onSave();
+                setCurrentViewer(done.bytes, outputName);
+                navigate("#/viewer");
               }}
             >
-              {activeExport === 'save' ? 'Saving…' : 'Save PDF'}
+              Open PDF
             </AnimatedButton>
           ) : null}
-          <AnimatedButton
-            block
-            variant="ghost"
-            icon={Plus}
-            onClick={() => navigate('#/')}
-          >
-            New
-          </AnimatedButton>
+          {isDocx && !wordPreview ? (
+            <AnimatedButton
+              block
+              variant="ghost"
+              icon={Eye}
+              disabled={previewBusy}
+              onClick={() => void previewWord()}
+            >
+              {previewBusy ? "Preparing preview…" : "Preview Word text"}
+            </AnimatedButton>
+          ) : null}
+          {images && images.length > 1 ? (
+            <AnimatedButton
+              block
+              variant="ghost"
+              disabled={activeExport !== null}
+              onClick={() => {
+                setActiveExport("share");
+                void shareOrDownloadBlobs(
+                  images,
+                  outputName.replace(/\.zip$/i, ""),
+                )
+                  .catch((error) => setMessage(String(error)))
+                  .finally(() => setActiveExport(null));
+              }}
+            >
+              Share individual images
+            </AnimatedButton>
+          ) : null}
         </div>
+        {canContinue ? (
+          <section>
+            <h3>Use this PDF in another tool</h3>
+            <div className="ps-row">
+              {(["compress", "organize", "protect", "pdf-docx"] as const).map(
+                (tool) => (
+                  <AnimatedButton
+                    key={tool}
+                    variant="ghost"
+                    onClick={() => continueWith(tool)}
+                  >
+                    {
+                      {
+                        compress: "Compress",
+                        organize: "Organize",
+                        protect: "Protect",
+                        "pdf-docx": "Convert to Word",
+                      }[tool]
+                    }
+                  </AnimatedButton>
+                ),
+              )}
+            </div>
+          </section>
+        ) : null}
+        <AnimatedButton
+          block
+          variant="ghost"
+          icon={Plus}
+          onClick={() => navigate("#/")}
+        >
+          New task
+        </AnimatedButton>
       </div>
     </div>
   );

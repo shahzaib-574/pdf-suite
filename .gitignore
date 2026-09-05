@@ -34,3 +34,9 @@ scripts/*.png
 android/keystore.properties
 *.jks
 *.keystore
+
+# Expo local state and signing credentials
+.expo/
+credentials.json
+.ota-private/
+.impeccable/

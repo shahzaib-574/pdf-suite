@@ -55,12 +55,15 @@ jobs:
           npm run lint
           npm run build
           npm run docx-selfcheck
+          npm run quality-selfcheck
           npm run pdf-selfcheck
           npm run verify:store-assets
-          grep -Fqx 'google.com, pub-9959568404035601, DIRECT, f08c47fec0942fa0' store-assets/app-ads.txt
 
       - name: Sync Capacitor Android project
         run: npx cap sync android
+
+      - name: Verify ad-free assets and dependencies
+        run: npm run verify:ad-free
 
       - name: Verify generated Android plugin files are current
         run: git diff --exit-code -- android/app/capacitor.build.gradle android/capacitor.settings.gradle
@@ -74,8 +77,6 @@ jobs:
       - name: Stage disposable production-path configuration
         shell: bash
         env:
-          CI_ADMOB_APP_ID: ca-app-pub-9959568404035601~6472905937
-          CI_ADMOB_BANNER_ID: ca-app-pub-9959568404035601/8888999900
           CI_KEY_PASSWORD: ream-ci-only
         run: |
           set -euo pipefail
@@ -97,29 +98,6 @@ jobs:
           node --input-type=module <<'NODE'
           import fs from 'node:fs'
 
-          const stringsPath = 'android/app/src/main/res/values/strings.xml'
-          const stringsXml = fs.readFileSync(stringsPath, 'utf8')
-          let replacements = 0
-          const updatedStrings = stringsXml.replace(
-            /(<string\b(?=[^>]*\bname=["']admob_app_id["'])[^>]*>)[^<]*(<\/string>)/s,
-            (_match, open, close) => {
-              replacements += 1
-              return `${open}${process.env.CI_ADMOB_APP_ID}${close}`
-            },
-          )
-          if (replacements !== 1) throw new Error('Could not stage the CI AdMob app ID.')
-          fs.writeFileSync(stringsPath, updatedStrings, 'utf8')
-
-          fs.writeFileSync(
-            '.env.production.local',
-            [
-              'VITE_ADMOB_TEST_MODE=false',
-              `VITE_ADMOB_BANNER_ID=${process.env.CI_ADMOB_BANNER_ID}`,
-              'VITE_ADMOB_AUDIENCE_MODE=ADULTS_ONLY',
-              '',
-            ].join('\n'),
-            { encoding: 'utf8', mode: 0o600 },
-          )
           fs.writeFileSync(
             'android/keystore.properties',
             [
@@ -152,7 +130,7 @@ jobs:
           test -n "$apksigner_path"
           "$apksigner_path" verify "$apk"
           jarsigner -verify "$aab" >/dev/null
-          npm run verify:android-artifact -- --require-production-ads "$apk"
+          npm run verify:android-artifact -- "$apk"
 
       - name: Verify release APK 16 KB page alignment
         working-directory: android
@@ -168,7 +146,7 @@ jobs:
         if: ${{ always() }}
         shell: bash
         run: |
-          rm -f -- .env.production.local android/keystore.properties
+          rm -f -- android/keystore.properties
           if [[ -n "${RUNNER_TEMP:-}" && -d "$RUNNER_TEMP" ]]; then
             rm -f -- "$RUNNER_TEMP/ream-ci-upload.jks"
           fi
