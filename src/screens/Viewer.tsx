@@ -8,7 +8,6 @@ import {
 } from "react";
 import {
   Bookmark,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -52,7 +51,8 @@ type SearchResult = {
 };
 
 const MIN_ZOOM = 0.65;
-const MAX_ZOOM = 2.5;
+const MAX_ZOOM = 20;
+const ZOOM_FACTOR = 1.2;
 
 function clampZoom(value: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
@@ -312,9 +312,9 @@ export function Viewer({ recentId }: ViewerProps) {
       const target = event.target as HTMLElement | null;
       if (target?.matches("input, textarea, select")) return;
       if (event.key === "+" || event.key === "=") {
-        setZoom((value) => clampZoom(value + 0.15));
+        setZoom((value) => clampZoom(value * ZOOM_FACTOR));
       } else if (event.key === "-") {
-        setZoom((value) => clampZoom(value - 0.15));
+        setZoom((value) => clampZoom(value / ZOOM_FACTOR));
       } else if (event.key === "0") {
         setZoom(1);
       }
@@ -390,13 +390,19 @@ export function Viewer({ recentId }: ViewerProps) {
   const fitScale = Math.max(0.1, (viewportWidth - pageGutter) / maxPageWidth);
   const displayScale = fitScale * zoom;
   const renderWidth = Math.min(
-    1800,
+    4096,
     Math.max(
       900,
       (viewportWidth - pageGutter) *
-        Math.min(window.devicePixelRatio || 1, 2.5),
+        zoom *
+        Math.min(window.devicePixelRatio || 1, 2),
     ),
   );
+  const [paintWidth, setPaintWidth] = useState(renderWidth);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setPaintWidth(renderWidth), 140);
+    return () => window.clearTimeout(timer);
+  }, [renderWidth]);
 
   function onTouchStart(event: ReactTouchEvent<HTMLDivElement>): void {
     if (event.touches.length !== 2) return;
@@ -534,7 +540,7 @@ export function Viewer({ recentId }: ViewerProps) {
               <ReaderIconButton
                 label="Zoom out"
                 disabled={zoom <= MIN_ZOOM}
-                onClick={() => setZoom((value) => clampZoom(value - 0.15))}
+                onClick={() => setZoom((value) => clampZoom(value / ZOOM_FACTOR))}
               >
                 <Minus size={17} />
               </ReaderIconButton>
@@ -550,7 +556,7 @@ export function Viewer({ recentId }: ViewerProps) {
               <ReaderIconButton
                 label="Zoom in"
                 disabled={zoom >= MAX_ZOOM}
-                onClick={() => setZoom((value) => clampZoom(value + 0.15))}
+                onClick={() => setZoom((value) => clampZoom(value * ZOOM_FACTOR))}
               >
                 <Plus size={17} />
               </ReaderIconButton>
@@ -717,20 +723,13 @@ export function Viewer({ recentId }: ViewerProps) {
                     page={page}
                     pageIndex={pageIndex}
                     displayScale={displayScale}
-                    renderWidth={renderWidth}
+                    renderWidth={paintWidth}
                     query={normalizedQuery}
                     active={activePage === pageIndex}
                   />
                 ))}
               </div>
             </div>
-          </div>
-          <div className="ps-reader-mobile-status" aria-hidden="true">
-            <span>
-              Page {activePage + 1} of {session.document.pageCount}
-            </span>
-            <ChevronDown size={14} />
-            <span>Pinch to zoom · Drag to pan</span>
           </div>
         </div>
       )}
@@ -821,7 +820,7 @@ function ReaderPage({
   }, []);
 
   useEffect(() => {
-    if (!visible || src) return;
+    if (!visible) return;
     let cancelled = false;
     void session
       .renderPage(pageIndex, renderWidth)
@@ -831,6 +830,7 @@ function ReaderPage({
           URL.revokeObjectURL(url);
           return;
         }
+        if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = url;
         setSrc(url);
       })
@@ -844,7 +844,7 @@ function ReaderPage({
     return () => {
       cancelled = true;
     };
-  }, [pageIndex, renderWidth, session, src, visible]);
+  }, [pageIndex, renderWidth, session, visible]);
 
   useEffect(
     () => () => {

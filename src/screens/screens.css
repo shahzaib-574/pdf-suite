@@ -841,7 +841,7 @@
 }
 
 .ps-reader-zoom__value {
-  min-width: 55px;
+  min-width: 72px;
   color: var(--ink);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -1163,10 +1163,6 @@
   background: color-mix(in srgb, var(--primary) 38%, transparent);
 }
 
-.ps-reader-mobile-status {
-  display: none;
-}
-
 @media (max-width: 760px) {
   .ps-screen--viewer {
     padding-inline: 0;
@@ -1221,16 +1217,6 @@
   .ps-reader-pages {
     gap: 21px;
     padding: 12px;
-  }
-
-  .ps-reader-mobile-status {
-    min-height: 27px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    color: var(--muted);
-    font-size: 10px;
   }
 }
 
