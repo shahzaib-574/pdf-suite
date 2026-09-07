@@ -222,6 +222,12 @@ ol {
   transform: translateX(-50%);
 }
 
+@media (hover: none), (pointer: coarse) {
+  .skip-to-nav {
+    display: none !important;
+  }
+}
+
 .tabular {
   font-variant-numeric: tabular-nums;
 }

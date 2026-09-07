@@ -113,7 +113,8 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      {Capacitor.isNativePlatform() ? null : (
+      {Capacitor.isNativePlatform() ||
+      window.matchMedia("(hover: none) and (pointer: coarse)").matches ? null : (
         <button
           type="button"
           hidden={route.name === "tool" && route.id === "scan"}
