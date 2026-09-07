@@ -19,6 +19,7 @@ import "./screens/screens.css";
 import { pruneStagedNativeExports, MAX_INPUT_BYTES } from "./store/files";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { markUpdateReady } from "./store/updates";
+import { Capacitor } from "@capacitor/core";
 
 export default function App() {
   useEffect(() => {
@@ -112,20 +113,22 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      <button
-        type="button"
-        hidden={route.name === "tool" && route.id === "scan"}
-        className="skip-to-nav"
-        onClick={() => {
-          document
-            .querySelector<HTMLButtonElement>(
-              "#primary-navigation button:not(:disabled)",
-            )
-            ?.focus();
-        }}
-      >
-        Skip to primary navigation
-      </button>
+      {Capacitor.isNativePlatform() ? null : (
+        <button
+          type="button"
+          hidden={route.name === "tool" && route.id === "scan"}
+          className="skip-to-nav"
+          onClick={() => {
+            document
+              .querySelector<HTMLButtonElement>(
+                "#primary-navigation button:not(:disabled)",
+              )
+              ?.focus();
+          }}
+        >
+          Skip to primary navigation
+        </button>
+      )}
       <div className={`app-frame${route.name === "tool" && route.id === "scan" ? " app-frame--scan" : ""}`}>
         {importError ? (
           <p className="ps-banner" role="alert">
