@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -11,6 +12,8 @@ import { Check, Images, X } from "lucide-react";
 import type { PickedFile } from "../lib/types";
 import { fileListToPicked, toArrayBuffer } from "../store/files";
 import { pickGalleryImages } from "../store/incoming";
+import { useBackHandler, useOverlayBack } from "./back";
+import { replaceWith } from "./nav";
 
 export type ScanCameraProps = {
   pages: PickedFile[];
@@ -48,21 +51,38 @@ function statusCopy(status: CameraStatus): { title: string; body: string } {
   };
 }
 
-async function captureFrame(video: HTMLVideoElement): Promise<File> {
+async function captureFrame(video: HTMLVideoElement): Promise<PickedFile> {
   if (video.videoWidth < 2 || video.videoHeight < 2) {
     throw new Error("Camera is not ready yet.");
   }
-  const canvas = document.createElement("canvas");
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+  // Match the image importer limit before encoding, avoiding a second decode/encode.
+  const scale = Math.min(1, 3200 / Math.max(video.videoWidth, video.videoHeight));
+  const width = Math.round(video.videoWidth * scale);
+  const height = Math.round(video.videoHeight * scale);
+  const canvas = typeof OffscreenCanvas !== "undefined"
+    ? new OffscreenCanvas(width, height)
+    : document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
   const context = canvas.getContext("2d", { alpha: false });
   if (!context) throw new Error("Could not capture this page.");
-  context.drawImage(video, 0, 0);
-  const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob(resolve, "image/jpeg", 0.92);
-  });
-  if (!blob) throw new Error("Could not capture this page.");
-  return new File([blob], `scan-${Date.now()}.jpg`, { type: "image/jpeg" });
+  context.drawImage(video, 0, 0, width, height);
+  try {
+    const blob = "convertToBlob" in canvas
+      ? await canvas.convertToBlob({ type: "image/jpeg", quality: 0.92 })
+      : await new Promise<Blob | null>((resolve) => {
+          canvas.toBlob(resolve, "image/jpeg", 0.92);
+        });
+    if (!blob) throw new Error("Could not capture this page.");
+    return {
+      name: `scan-${Date.now()}.jpg`,
+      mime: "image/jpeg",
+      bytes: new Uint8Array(await blob.arrayBuffer()),
+    };
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
+  }
 }
 
 export function ScanCamera({
@@ -78,11 +98,18 @@ export function ScanCamera({
   const galleryRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const pagesRef = useRef(pages);
+  const capturePending = useRef(false);
+  const mounted = useRef(false);
   const [status, setStatus] = useState<CameraStatus>("starting");
   const [cameraAttempt, setCameraAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
     pagesRef.current = pages;
@@ -104,6 +131,16 @@ export function ScanCamera({
     [pages],
   );
   const lastThumb = thumbs[thumbs.length - 1];
+  const goHome = useCallback(() => {
+    onClose();
+    replaceWith("#/");
+  }, [onClose]);
+  useOverlayBack(onClose);
+  useBackHandler(() => {
+    onClose();
+    if (pagesRef.current.length === 0) replaceWith("#/");
+    return true;
+  });
 
   useEffect(() => {
     return () => {
@@ -204,12 +241,12 @@ export function ScanCamera({
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        goHome();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [goHome]);
 
   async function addImageFiles(files: FileList | File[]): Promise<void> {
     if (files.length === 0) return;
@@ -236,19 +273,26 @@ export function ScanCamera({
 
   async function takePage(): Promise<void> {
     const video = videoRef.current;
-    if (!video || !canShoot) return;
+    if (!video || !canShoot || capturePending.current) return;
+    capturePending.current = true;
     setBusy(true);
     setMessage(null);
     setFlash(true);
     window.setTimeout(() => setFlash(false), 120);
     try {
-      const file = await captureFrame(video);
-      await addImageFiles([file]);
+      const page = await captureFrame(video);
+      if (!mounted.current) return;
+      const next = [...pagesRef.current, page].slice(0, maxPages);
+      pagesRef.current = next;
+      onPages(next);
     } catch (error) {
+      if (!mounted.current) return;
       setMessage(
         error instanceof Error ? error.message : "Could not capture this page.",
       );
-      setBusy(false);
+    } finally {
+      capturePending.current = false;
+      if (mounted.current) setBusy(false);
     }
   }
 
@@ -318,7 +362,7 @@ export function ScanCamera({
           type="button"
           className="scan-cam__icon-btn"
           aria-label="Close camera"
-          onClick={onClose}
+          onClick={goHome}
         >
           <X size={22} strokeWidth={2.2} aria-hidden="true" />
         </button>

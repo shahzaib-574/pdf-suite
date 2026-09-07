@@ -17,7 +17,22 @@ export async function applyScanEdit(
       "Place the four corners around the page without crossing the edges.",
     );
   const bitmap = await createImageBitmap(new Blob([bytes], { type: mime }));
-  const scale = Math.min(1, 2200 / Math.max(bitmap.width, bitmap.height));
+  const angle = edit.rotate === true ? 90 : Number(edit.rotate);
+  const turn = ((angle % 360) + 360) % 360;
+  if (![0, 90, 180, 270].includes(turn)) { bitmap.close(); throw new Error("Invalid page rotation."); }
+  const uncropped = edit.corners.every((p, i) => p.x === [0, 1, 1, 0][i] && p.y === [0, 0, 1, 1][i]);
+  if (uncropped && edit.mode === "color") {
+    // Rotation does not need resampling or JPEG compression.
+    const swapped = turn === 90 || turn === 270;
+    const target = new OffscreenCanvas(swapped ? bitmap.height : bitmap.width, swapped ? bitmap.width : bitmap.height);
+    const context = context2d(target);
+    context.translate(turn === 90 ? bitmap.height : turn === 180 ? bitmap.width : 0, turn === 90 ? 0 : turn === 180 ? bitmap.height : bitmap.width);
+    context.rotate(turn * Math.PI / 180);
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return (await target.convertToBlob({ type: "image/png" })).arrayBuffer();
+  }
+  const scale = Math.min(1, 3200 / Math.max(bitmap.width, bitmap.height));
   const w = Math.max(1, Math.round(bitmap.width * scale)),
     h = Math.max(1, Math.round(bitmap.height * scale));
   const source = new OffscreenCanvas(w, h);
@@ -110,10 +125,6 @@ export async function applyScanEdit(
   }
   oc.putImageData(result, 0, 0);
   let target = out;
-  const angle = edit.rotate === true ? 90 : Number(edit.rotate);
-  const turn = ((angle % 360) + 360) % 360;
-  if (![0, 90, 180, 270].includes(turn))
-    throw new Error("Invalid page rotation.");
   if (turn) {
     target = new OffscreenCanvas(
       turn === 180 ? width : height,
@@ -128,8 +139,7 @@ export async function applyScanEdit(
     context.drawImage(out, 0, 0);
   }
   const blob = await target.convertToBlob({
-    type: "image/jpeg",
-    quality: 0.94,
+    type: "image/png",
   });
   return blob.arrayBuffer();
 }

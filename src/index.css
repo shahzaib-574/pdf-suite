@@ -16,6 +16,26 @@ html {
   -webkit-tap-highlight-color: transparent;
 }
 
+@font-face {
+  font-family: "Ream Urdu";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/NotoNastaliqUrdu-Regular.woff2") format("woff2");
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-089F, U+08A0-08FF, U+FB50-FDFF,
+    U+FE70-FEFF;
+}
+
+@font-face {
+  font-family: "Ream Urdu";
+  font-style: normal;
+  font-weight: 600 700;
+  font-display: swap;
+  src: url("./assets/fonts/NotoNastaliqUrdu-Bold.woff2") format("woff2");
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-089F, U+08A0-08FF, U+FB50-FDFF,
+    U+FE70-FEFF;
+}
+
 :root {
   --bg: #13141d;
   --bg-elev: #191b26;
@@ -41,8 +61,8 @@ html {
   --radius-md: 18px;
   --radius-lg: 22px;
   --nav-height: 84px;
-  --font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica,
-    Arial, sans-serif;
+  --font: "Ream Urdu", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
   color-scheme: dark;
 }
 
@@ -508,22 +528,24 @@ html.is-scan-camera .skip-to-nav {
 
 .stagger-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
   overflow: visible;
 }
 
 .tile {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 12px;
-  min-height: 142px;
-  padding: 15px;
+  gap: 8px;
+  min-width: 0;
+  min-height: 104px;
+  padding: 10px;
   text-align: left;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   color: var(--ink);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -545,13 +567,18 @@ html.is-scan-camera .skip-to-nav {
 }
 
 .tile__icon {
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
   color: var(--brass);
   background: var(--primary-soft);
-  border-radius: 12px;
+  border-radius: 10px;
+}
+
+.tile__icon svg {
+  width: 15px;
+  height: 15px;
 }
 
 .tile__pro {
@@ -570,16 +597,22 @@ html.is-scan-camera .skip-to-nav {
 }
 
 .tile__title {
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 720;
   letter-spacing: -0.02em;
   line-height: 1.25;
+  overflow-wrap: break-word;
 }
 
 .tile__blurb {
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 11px;
   line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .tile__bottom {
@@ -592,7 +625,12 @@ html.is-scan-camera .skip-to-nav {
 }
 
 .tile__arrow {
+  position: absolute;
+  top: 10px;
+  right: 8px;
   flex-shrink: 0;
+  width: 14px;
+  height: 14px;
   color: var(--primary);
   transition: transform 180ms ease;
 }
@@ -784,14 +822,6 @@ html.is-scan-camera .skip-to-nav {
     padding-left: max(12px, var(--safe-area-inset-left, env(safe-area-inset-left, 0px)));
     padding-right: max(12px, var(--safe-area-inset-right, env(safe-area-inset-right, 0px)));
   }
-
-  .stagger-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .tile {
-    min-height: 126px;
-  }
 }
 
 @media (min-width: 840px) {
@@ -866,6 +896,41 @@ html.is-scan-camera .skip-to-nav {
 
   .stagger-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .tile {
+    gap: 12px;
+    min-height: 142px;
+    padding: 15px;
+    border-radius: var(--radius-lg);
+  }
+
+  .tile__icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+  }
+
+  .tile__icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .tile__title {
+    font-size: 16px;
+  }
+
+  .tile__blurb {
+    font-size: 12.5px;
+  }
+
+  .tile__arrow {
+    position: relative;
+    top: auto;
+    right: auto;
+    width: 17px;
+    height: 17px;
   }
 }
 

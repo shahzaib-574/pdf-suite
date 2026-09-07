@@ -1,11 +1,12 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type TouchEvent as ReactTouchEvent,
 } from "react";
+import { flushSync } from "react-dom";
 import {
   Bookmark,
   ChevronLeft,
@@ -26,6 +27,7 @@ import type { PickedFile } from "../lib/types";
 import { engine } from "../pdf";
 import type {
   PdfViewerPage,
+  PdfViewerPageRegion,
   PdfViewerSession,
   PdfViewerTextLayer,
 } from "../pdf/render";
@@ -51,8 +53,37 @@ type SearchResult = {
 };
 
 const MIN_ZOOM = 0.65;
-const MAX_ZOOM = 20;
+const MAX_ZOOM = 100;
 const ZOOM_FACTOR = 1.2;
+const DETAIL_MAX_PIXELS = 8_000_000;
+const DETAIL_MAX_DIM = 4096;
+
+type ZoomFocal = {
+  pageIndex: number;
+  relX: number;
+  relY: number;
+  clientX: number;
+  clientY: number;
+};
+
+type PinchSession = {
+  distance: number;
+  zoom: number;
+  pageIndex: number;
+  relX: number;
+  relY: number;
+  originX: number;
+  originY: number;
+  startMidX: number;
+  startMidY: number;
+  lastZoom: number;
+  lastMid: { x: number; y: number };
+  pending: { mid: { x: number; y: number }; distance: number } | null;
+};
+
+function zoomLabel(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
 
 function clampZoom(value: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
@@ -71,7 +102,7 @@ function occurrences(text: string, query: string): number {
   return count;
 }
 
-function touchDistance(event: ReactTouchEvent): number {
+function touchDistance(event: TouchEvent): number {
   const first = event.touches[0];
   const second = event.touches[1];
   if (!first || !second) return 0;
@@ -79,6 +110,102 @@ function touchDistance(event: ReactTouchEvent): number {
     first.clientX - second.clientX,
     first.clientY - second.clientY,
   );
+}
+
+function touchMidpoint(event: TouchEvent): { x: number; y: number } | null {
+  const first = event.touches[0];
+  const second = event.touches[1];
+  if (!first || !second) return null;
+  return {
+    x: (first.clientX + second.clientX) / 2,
+    y: (first.clientY + second.clientY) / 2,
+  };
+}
+
+function captureZoomFocal(
+  viewport: HTMLElement,
+  clientX: number,
+  clientY: number,
+): ZoomFocal | null {
+  const pages = viewport.querySelectorAll<HTMLElement>("[data-page-index]");
+  let nearest: { el: HTMLElement; dist: number } | null = null;
+  for (const el of pages) {
+    const box = el.getBoundingClientRect();
+    if (
+      clientX >= box.left &&
+      clientX <= box.right &&
+      clientY >= box.top &&
+      clientY <= box.bottom
+    ) {
+      return {
+        pageIndex: Number(el.dataset.pageIndex ?? 0),
+        relX: box.width > 0 ? (clientX - box.left) / box.width : 0.5,
+        relY: box.height > 0 ? (clientY - box.top) / box.height : 0.5,
+        clientX,
+        clientY,
+      };
+    }
+    const dx = clientX - Math.max(box.left, Math.min(clientX, box.right));
+    const dy = clientY - Math.max(box.top, Math.min(clientY, box.bottom));
+    const dist = dx * dx + dy * dy;
+    if (!nearest || dist < nearest.dist) nearest = { el, dist };
+  }
+  if (!nearest) return null;
+  const box = nearest.el.getBoundingClientRect();
+  return {
+    pageIndex: Number(nearest.el.dataset.pageIndex ?? 0),
+    relX:
+      box.width > 0
+        ? Math.min(1, Math.max(0, (clientX - box.left) / box.width))
+        : 0.5,
+    relY:
+      box.height > 0
+        ? Math.min(1, Math.max(0, (clientY - box.top) / box.height))
+        : 0.5,
+    clientX,
+    clientY,
+  };
+}
+
+function applyZoomFocal(viewport: HTMLElement, focal: ZoomFocal): void {
+  const pages = viewport.querySelector<HTMLElement>(".ps-reader-pages");
+  clearLivePinchTransform(pages);
+  const page = viewport.querySelector<HTMLElement>(
+    `[data-page-index="${focal.pageIndex}"]`,
+  );
+  if (!page) return;
+  void pages?.offsetWidth;
+  const box = page.getBoundingClientRect();
+  const width = page.offsetWidth;
+  const height = page.offsetHeight;
+  viewport.scrollLeft += box.left + focal.relX * width - focal.clientX;
+  viewport.scrollTop += box.top + focal.relY * height - focal.clientY;
+}
+
+function clearLivePinchTransform(pages: HTMLElement | null): void {
+  if (!pages) return;
+  pages.style.transition = "none";
+  pages.style.transform = "";
+  pages.style.transformOrigin = "";
+  pages.style.willChange = "";
+  void pages.offsetWidth;
+}
+
+function applyLivePinch(pages: HTMLElement, pinch: PinchSession): number {
+  const pending = pinch.pending;
+  if (!pending) return pinch.lastZoom;
+  const nextZoom = clampZoom(
+    pinch.zoom * (pending.distance / pinch.distance),
+  );
+  const ratio = nextZoom / pinch.zoom;
+  pages.style.transition = "none";
+  pages.style.willChange = "transform";
+  pages.style.transformOrigin = `${pinch.originX}px ${pinch.originY}px`;
+  pages.style.transform = `translate(${pending.mid.x - pinch.startMidX}px, ${pending.mid.y - pinch.startMidY}px) scale(${ratio})`;
+  pinch.lastZoom = nextZoom;
+  pinch.lastMid = pending.mid;
+  pinch.pending = null;
+  return nextZoom;
 }
 
 export function Viewer({ recentId }: ViewerProps) {
@@ -108,7 +235,13 @@ export function Viewer({ recentId }: ViewerProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
-  const pinchRef = useRef<{ distance: number; zoom: number } | null>(null);
+  const zoomRef = useRef(1);
+  const pagesRef = useRef<HTMLDivElement>(null);
+  const zoomLabelRef = useRef<HTMLButtonElement>(null);
+  const pinchRafRef = useRef(0);
+  const wheelRafRef = useRef(0);
+  const pinchRef = useRef<PinchSession | null>(null);
+  const focalRef = useRef<ZoomFocal | null>(null);
 
   const backHash = recentId ? "#/recents" : lastJob.result ? "#/result" : "#/";
 
@@ -295,6 +428,34 @@ export function Viewer({ recentId }: ViewerProps) {
     [reducedMotion, session],
   );
 
+  const rememberFocal = useCallback((clientX: number, clientY: number) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const focal = captureZoomFocal(viewport, clientX, clientY);
+    if (focal) focalRef.current = focal;
+  }, []);
+
+  const zoomAroundViewportCenter = useCallback(
+    (factor: number) => {
+      const viewport = viewportRef.current;
+      if (viewport) {
+        const box = viewport.getBoundingClientRect();
+        rememberFocal(box.left + box.width / 2, box.top + box.height / 2);
+      }
+      setZoom((value) => clampZoom(value * factor));
+    },
+    [rememberFocal],
+  );
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+
+  const writeZoomLabel = useCallback((value: number) => {
+    const label = zoomLabelRef.current;
+    if (label) label.textContent = zoomLabel(value);
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
@@ -312,16 +473,16 @@ export function Viewer({ recentId }: ViewerProps) {
       const target = event.target as HTMLElement | null;
       if (target?.matches("input, textarea, select")) return;
       if (event.key === "+" || event.key === "=") {
-        setZoom((value) => clampZoom(value * ZOOM_FACTOR));
+        zoomAroundViewportCenter(ZOOM_FACTOR);
       } else if (event.key === "-") {
-        setZoom((value) => clampZoom(value / ZOOM_FACTOR));
+        zoomAroundViewportCenter(1 / ZOOM_FACTOR);
       } else if (event.key === "0") {
         setZoom(1);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [zoomAroundViewportCenter]);
 
   useEffect(() => {
     if (searchOpen)
@@ -389,36 +550,158 @@ export function Viewer({ recentId }: ViewerProps) {
   const pageGutter = viewportWidth < 620 ? 24 : 52;
   const fitScale = Math.max(0.1, (viewportWidth - pageGutter) / maxPageWidth);
   const displayScale = fitScale * zoom;
-  const renderWidth = Math.min(
-    4096,
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const focal = focalRef.current;
+    if (!viewport || !focal || pinchRef.current) return;
+    applyZoomFocal(viewport, focal);
+  }, [displayScale, viewportWidth, zoom]);
+
+  const paintWidth = Math.min(
+    2048,
     Math.max(
-      900,
-      (viewportWidth - pageGutter) *
-        zoom *
-        Math.min(window.devicePixelRatio || 1, 2),
+      720,
+      (viewportWidth - pageGutter) * Math.min(window.devicePixelRatio || 1, 2),
     ),
   );
-  const [paintWidth, setPaintWidth] = useState(renderWidth);
+
   useEffect(() => {
-    const timer = window.setTimeout(() => setPaintWidth(renderWidth), 140);
-    return () => window.clearTimeout(timer);
-  }, [renderWidth]);
+    const viewport = viewportRef.current;
+    const pages = pagesRef.current;
+    if (!viewport || !pages || !session) return;
 
-  function onTouchStart(event: ReactTouchEvent<HTMLDivElement>): void {
-    if (event.touches.length !== 2) return;
-    pinchRef.current = { distance: touchDistance(event), zoom };
-  }
+    let pinchLive = false;
 
-  function onTouchMove(event: ReactTouchEvent<HTMLDivElement>): void {
-    const pinch = pinchRef.current;
-    if (!pinch || event.touches.length !== 2 || pinch.distance <= 0) return;
-    event.preventDefault();
-    setZoom(clampZoom(pinch.zoom * (touchDistance(event) / pinch.distance)));
-  }
+    const stopPinchRaf = () => {
+      if (pinchRafRef.current) {
+        cancelAnimationFrame(pinchRafRef.current);
+        pinchRafRef.current = 0;
+      }
+    };
 
-  function onTouchEnd(event: ReactTouchEvent<HTMLDivElement>): void {
-    if (event.touches.length < 2) pinchRef.current = null;
-  }
+    const paintPinch = () => {
+      pinchRafRef.current = 0;
+      const pinch = pinchRef.current;
+      if (!pinchLive || !pinch) return;
+      writeZoomLabel(applyLivePinch(pages, pinch));
+    };
+
+    const commitPinch = () => {
+      const pinch = pinchRef.current;
+      if (!pinch) return;
+      pinchLive = false;
+      stopPinchRaf();
+      pinchRef.current = null;
+      if (pinch.pending) {
+        pinch.lastZoom = clampZoom(
+          pinch.zoom * (pinch.pending.distance / pinch.distance),
+        );
+        pinch.lastMid = pinch.pending.mid;
+        pinch.pending = null;
+      }
+      focalRef.current = {
+        pageIndex: pinch.pageIndex,
+        relX: pinch.relX,
+        relY: pinch.relY,
+        clientX: pinch.lastMid.x,
+        clientY: pinch.lastMid.y,
+      };
+      clearLivePinchTransform(pages);
+      writeZoomLabel(pinch.lastZoom);
+      zoomRef.current = pinch.lastZoom;
+      flushSync(() => {
+        setZoom(pinch.lastZoom);
+      });
+      applyZoomFocal(viewport, focalRef.current);
+      viewport.classList.remove("is-pinching");
+      viewport.dispatchEvent(new Event("reader-pinch-end"));
+    };
+
+    const onTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 2) return;
+      const mid = touchMidpoint(event);
+      const distance = touchDistance(event);
+      if (!mid || distance <= 0) return;
+      const focal = captureZoomFocal(viewport, mid.x, mid.y);
+      if (!focal) return;
+      const box = pages.getBoundingClientRect();
+      stopPinchRaf();
+      pinchLive = true;
+      pinchRef.current = {
+        distance,
+        zoom: zoomRef.current,
+        pageIndex: focal.pageIndex,
+        relX: focal.relX,
+        relY: focal.relY,
+        originX: mid.x - box.left,
+        originY: mid.y - box.top,
+        startMidX: mid.x,
+        startMidY: mid.y,
+        lastZoom: zoomRef.current,
+        lastMid: mid,
+        pending: null,
+      };
+      focalRef.current = focal;
+      viewport.classList.add("is-pinching");
+      viewport.dispatchEvent(new Event("reader-pinch-start"));
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      const pinch = pinchRef.current;
+      const mid = touchMidpoint(event);
+      if (!pinch || !mid || event.touches.length !== 2 || pinch.distance <= 0)
+        return;
+      event.preventDefault();
+      pinch.pending = { mid, distance: touchDistance(event) };
+      if (!pinchRafRef.current) {
+        pinchRafRef.current = window.requestAnimationFrame(paintPinch);
+      }
+    };
+
+    const onTouchEnd = (event: TouchEvent) => {
+      if (event.touches.length >= 2) return;
+      commitPinch();
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      if (pinchLive || pinchRef.current) return;
+      rememberFocal(event.clientX, event.clientY);
+      const next = clampZoom(
+        zoomRef.current * Math.exp(-event.deltaY * 0.0024),
+      );
+      zoomRef.current = next;
+      writeZoomLabel(next);
+      if (wheelRafRef.current) return;
+      wheelRafRef.current = window.requestAnimationFrame(() => {
+        wheelRafRef.current = 0;
+        setZoom(zoomRef.current);
+      });
+    };
+
+    viewport.addEventListener("touchstart", onTouchStart, { passive: true });
+    viewport.addEventListener("touchmove", onTouchMove, { passive: false });
+    viewport.addEventListener("touchend", onTouchEnd);
+    viewport.addEventListener("touchcancel", onTouchEnd);
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      pinchLive = false;
+      stopPinchRaf();
+      if (wheelRafRef.current) {
+        cancelAnimationFrame(wheelRafRef.current);
+        wheelRafRef.current = 0;
+      }
+      viewport.classList.remove("is-pinching");
+      clearLivePinchTransform(pages);
+      viewport.removeEventListener("touchstart", onTouchStart);
+      viewport.removeEventListener("touchmove", onTouchMove);
+      viewport.removeEventListener("touchend", onTouchEnd);
+      viewport.removeEventListener("touchcancel", onTouchEnd);
+      viewport.removeEventListener("wheel", onWheel);
+    };
+  }, [rememberFocal, session, writeZoomLabel]);
 
   const emptyCopy = recentId
     ? {
@@ -447,9 +730,8 @@ export function Viewer({ recentId }: ViewerProps) {
         };
 
   return (
-    <div className="ps-screen ps-screen--viewer">
+    <div className="ps-screen ps-screen--viewer" aria-label="Reader">
       <PageHeader
-        title="Reader"
         subtitle={error ? undefined : name}
         onBack={() => navigate(backHash)}
       />
@@ -540,23 +822,34 @@ export function Viewer({ recentId }: ViewerProps) {
               <ReaderIconButton
                 label="Zoom out"
                 disabled={zoom <= MIN_ZOOM}
-                onClick={() => setZoom((value) => clampZoom(value / ZOOM_FACTOR))}
+                onClick={() => zoomAroundViewportCenter(1 / ZOOM_FACTOR)}
               >
                 <Minus size={17} />
               </ReaderIconButton>
               <button
+                ref={zoomLabelRef}
                 type="button"
                 className="ps-reader-zoom__value"
                 aria-label="Fit pages to width"
                 title="Fit to width"
-                onClick={() => setZoom(1)}
+                onClick={() => {
+                  const viewport = viewportRef.current;
+                  if (viewport) {
+                    const box = viewport.getBoundingClientRect();
+                    rememberFocal(
+                      box.left + box.width / 2,
+                      box.top + box.height / 2,
+                    );
+                  }
+                  setZoom(1);
+                }}
               >
-                {Math.round(zoom * 100)}%
+                {zoomLabel(zoom)}
               </button>
               <ReaderIconButton
                 label="Zoom in"
                 disabled={zoom >= MAX_ZOOM}
-                onClick={() => setZoom((value) => clampZoom(value * ZOOM_FACTOR))}
+                onClick={() => zoomAroundViewportCenter(ZOOM_FACTOR)}
               >
                 <Plus size={17} />
               </ReaderIconButton>
@@ -707,15 +1000,8 @@ export function Viewer({ recentId }: ViewerProps) {
               </aside>
             ) : null}
 
-            <div
-              ref={viewportRef}
-              className="ps-reader-viewport"
-              onTouchStart={onTouchStart}
-              onTouchMove={onTouchMove}
-              onTouchEnd={onTouchEnd}
-              onTouchCancel={onTouchEnd}
-            >
-              <div className="ps-reader-pages">
+            <div ref={viewportRef} className="ps-reader-viewport">
+              <div ref={pagesRef} className="ps-reader-pages">
                 {session.document.pages.map((page, pageIndex) => (
                   <ReaderPage
                     key={pageIndex}
@@ -726,6 +1012,7 @@ export function Viewer({ recentId }: ViewerProps) {
                     renderWidth={paintWidth}
                     query={normalizedQuery}
                     active={activePage === pageIndex}
+                    viewportRef={viewportRef}
                   />
                 ))}
               </div>
@@ -776,6 +1063,15 @@ type ReaderPageProps = {
   renderWidth: number;
   query: string;
   active: boolean;
+  viewportRef: React.RefObject<HTMLDivElement | null>;
+};
+
+type PageDetail = {
+  src: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 };
 
 function ReaderPage({
@@ -786,6 +1082,7 @@ function ReaderPage({
   renderWidth,
   query,
   active,
+  viewportRef,
 }: ReaderPageProps) {
   const [visible, setVisible] = useState(false);
   const [src, setSrc] = useState<string | null>(null);
@@ -795,6 +1092,9 @@ function ReaderPage({
   const renderedTextRef = useRef<PdfViewerTextLayer | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const queryRef = useRef(query);
+  const [detail, setDetail] = useState<PageDetail | null>(null);
+  const detailUrlRef = useRef<string | null>(null);
+  const detailGen = useRef(0);
 
   useEffect(() => {
     queryRef.current = query;
@@ -805,15 +1105,9 @@ function ReaderPage({
     if (!element) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
-        const nearViewport = entry?.isIntersecting === true;
-        setVisible(nearViewport);
-        if (!nearViewport && objectUrlRef.current) {
-          URL.revokeObjectURL(objectUrlRef.current);
-          objectUrlRef.current = null;
-          setSrc(null);
-        }
+        setVisible(entry?.isIntersecting === true);
       },
-      { rootMargin: "900px 0px" },
+      { rootMargin: "1400px 0px" },
     );
     observer.observe(element);
     return () => observer.disconnect();
@@ -883,6 +1177,126 @@ function ReaderPage({
     if (renderedTextRef.current) markTextLayer(renderedTextRef.current, query);
   }, [query]);
 
+  const dpr = Math.min(
+    typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
+    3,
+  );
+  const sharpEnough =
+    page.width * displayScale * dpr <= renderWidth * 1.12;
+  const needsDetail = visible && displayScale > 0 && !sharpEnough;
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const pageEl = pageRef.current;
+    if (!viewport || !pageEl || !needsDetail) {
+      return;
+    }
+
+    let timer = 0;
+    const paint = () => {
+      if (viewport.classList.contains("is-pinching")) return;
+      const pageBox = pageEl.getBoundingClientRect();
+      const viewBox = viewport.getBoundingClientRect();
+      const pad = 64;
+      const cssLeft = Math.max(0, viewBox.left - pageBox.left - pad);
+      const cssTop = Math.max(0, viewBox.top - pageBox.top - pad);
+      const cssRight = Math.min(
+        pageBox.width,
+        viewBox.right - pageBox.left + pad,
+      );
+      const cssBottom = Math.min(
+        pageBox.height,
+        viewBox.bottom - pageBox.top + pad,
+      );
+      const cssW = cssRight - cssLeft;
+      const cssH = cssBottom - cssTop;
+      if (cssW < 8 || cssH < 8) {
+        return;
+      }
+      let outW = Math.max(1, Math.round(cssW * dpr));
+      let outH = Math.max(1, Math.round(cssH * dpr));
+      const fit = Math.min(
+        1,
+        DETAIL_MAX_DIM / outW,
+        DETAIL_MAX_DIM / outH,
+        Math.sqrt(DETAIL_MAX_PIXELS / Math.max(1, outW * outH)),
+      );
+      outW = Math.max(1, Math.round(outW * fit));
+      outH = Math.max(1, Math.round(outH * fit));
+      const generation = ++detailGen.current;
+      void session
+        .renderPageRegion(
+          pageIndex,
+          {
+            x: cssLeft / displayScale,
+            y: cssTop / displayScale,
+            width: cssW / displayScale,
+            height: cssH / displayScale,
+          },
+          outW,
+          outH,
+        )
+        .then(async (region: PdfViewerPageRegion) => {
+          if (generation !== detailGen.current) return;
+          const url = URL.createObjectURL(region.blob);
+          // Decode before swapping so sharpening never flashes an empty patch.
+          const image = new Image();
+          image.src = url;
+          try {
+            await image.decode();
+          } catch {
+            URL.revokeObjectURL(url);
+            return;
+          }
+          if (generation !== detailGen.current) {
+            URL.revokeObjectURL(url);
+            return;
+          }
+          if (detailUrlRef.current) URL.revokeObjectURL(detailUrlRef.current);
+          detailUrlRef.current = url;
+          setDetail({
+            src: url,
+            // Store page coordinates: the previous sharp patch stays aligned
+            // during zoom while its replacement is rendered at the new density.
+            left: cssLeft / displayScale,
+            top: cssTop / displayScale,
+            width: cssW / displayScale,
+            height: cssH / displayScale,
+          });
+        })
+        .catch(() => undefined);
+    };
+
+    const schedule = () => {
+      window.clearTimeout(timer);
+      if (!viewport.classList.contains("is-pinching")) {
+        timer = window.setTimeout(paint, 50);
+      }
+    };
+    const pause = () => {
+      window.clearTimeout(timer);
+      detailGen.current += 1;
+    };
+    schedule();
+    viewport.addEventListener("scroll", schedule, { passive: true });
+    viewport.addEventListener("reader-pinch-start", pause);
+    viewport.addEventListener("reader-pinch-end", schedule);
+    return () => {
+      window.clearTimeout(timer);
+      viewport.removeEventListener("scroll", schedule);
+      viewport.removeEventListener("reader-pinch-start", pause);
+      viewport.removeEventListener("reader-pinch-end", schedule);
+      detailGen.current += 1;
+    };
+  }, [displayScale, dpr, needsDetail, pageIndex, session, viewportRef]);
+
+  useEffect(
+    () => () => {
+      if (detailUrlRef.current) URL.revokeObjectURL(detailUrlRef.current);
+    },
+    [],
+  );
+
   const width = page.width * displayScale;
   const height = page.height * displayScale;
 
@@ -896,18 +1310,12 @@ function ReaderPage({
     >
       <div
         className="ps-reader-page__surface"
-        style={{
-          width: page.width,
-          height: page.height,
-          transform: `scale(${displayScale})`,
-        }}
       >
         {src ? (
           <img
             src={src}
             alt=""
             draggable={false}
-            style={{ width: page.width, height: page.height }}
           />
         ) : (
           <div className="ps-reader-page__placeholder" aria-hidden="true">
@@ -918,8 +1326,30 @@ function ReaderPage({
             )}
           </div>
         )}
-        <div ref={textLayerRef} className="textLayer ps-reader-text-layer" />
       </div>
+      {needsDetail && detail ? (
+        <img
+          className="ps-reader-page__detail"
+          src={detail.src}
+          alt=""
+          draggable={false}
+          style={{
+            left: detail.left * displayScale,
+            top: detail.top * displayScale,
+            width: detail.width * displayScale,
+            height: detail.height * displayScale,
+          }}
+        />
+      ) : null}
+      <div
+        ref={textLayerRef}
+        className="textLayer ps-reader-text-layer"
+        style={{
+          width: page.width,
+          height: page.height,
+          transform: `scale(${displayScale})`,
+        }}
+      />
       <span className="ps-reader-page__number" aria-hidden="true">
         {pageIndex + 1}
       </span>

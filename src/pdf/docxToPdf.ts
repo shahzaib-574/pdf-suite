@@ -174,6 +174,23 @@ export async function docxToPdf(file: PickedFile): Promise<JobResult> {
   }
 }
 
+export async function inspectDocx(file: PickedFile): Promise<string[]> {
+  validateDocxArchive(file.bytes);
+  const zip = await JSZip.loadAsync(file.bytes);
+  const xml = await readZipString(zip, 'word/document.xml') ?? '';
+  return docxWarnings(zip, xml);
+}
+
+function docxWarnings(zip: JSZip, xml: string): string[] {
+  const warnings: string[] = [];
+  if (/<w:(?:footnoteReference|endnoteReference)\b/.test(xml)) warnings.push('Footnotes and endnotes are preserved as numbered notes at the end, rather than in their original page positions.');
+  if (Object.keys(zip.files).some(name => /^word\/(header|footer)\d*\.xml$/.test(name))) warnings.push('Headers and footers are not included. Export from Word when they contain required text or page numbers.');
+  if (/<(?:w:txbxContent|wp:anchor)\b/.test(xml)) warnings.push('Text boxes and floating objects may move or lose their layout. Check the PDF before sharing.');
+  if (/<c:chart\b/.test(xml)) warnings.push('Embedded charts are not rendered. Export from Word to keep them.');
+  if (/<w:(?:ins|del|moveFrom|moveTo)\b/.test(xml)) warnings.push('Tracked changes are converted as the final text; revision markup is not retained.');
+  return warnings;
+}
+
 function fail(err: unknown): JobResult {
   const message = humanError(err);
   if (message === "PDF processing failed") {
@@ -228,10 +245,23 @@ async function convert(file: PickedFile): Promise<JobResult> {
     };
   }
 
-  const docXml = await readZipString(zip, "word/document.xml");
+  let docXml = await readZipString(zip, "word/document.xml");
   if (docXml === undefined) {
     return { ok: false, message: NOT_DOCX };
   }
+  const warnings = docxWarnings(zip, docXml);
+  let notes = '';
+  for (const [part, tag, prefix] of [['footnotes','footnote','F'],['endnotes','endnote','E']]) {
+    const xml = await readZipString(zip, `word/${part}.xml`);
+    if (!xml) continue;
+    const matcher = new RegExp(`<w:${tag}\\b([^>]*)>([\\s\\S]*?)<\\/w:${tag}>`, 'g');
+    for (const match of xml.matchAll(matcher)) {
+      const id = /w:id=["'](\d+)["']/.exec(match[1]!)?.[1];
+      if (!id || Number(id) <= 0 || !new RegExp(`<w:${tag}Reference\\b[^>]*w:id=["']${id}["']`).test(docXml)) continue;
+      notes += `<w:p><w:r><w:t>[${prefix}${id}]</w:t></w:r></w:p>${match[2]}`;
+    }
+  }
+  if (notes) docXml = docXml.replace('</w:body>', `<w:p><w:r><w:br w:type="page"/></w:r></w:p><w:p><w:r><w:t>Document notes</w:t></w:r></w:p>${notes}</w:body>`);
 
   let parsed: unknown;
   try {
@@ -246,7 +276,11 @@ async function convert(file: PickedFile): Promise<JobResult> {
   const blocks = walkBody(parsed, styles, numbering);
   const layout = parsePageLayout(parsed);
 
-  return renderPdf(zip, rels, blocks, file.name, layout);
+  const result = await renderPdf(zip, rels, blocks, file.name, layout);
+  if (result.ok && warnings.length) {
+    result.extra = {...result.extra, wordToPdf: {replacedChars:result.extra?.wordToPdf?.replacedChars ?? 0, warnings:[...warnings,...(result.extra?.wordToPdf?.warnings ?? [])]}};
+  }
+  return result;
 }
 
 function parsePageLayout(parsed: unknown): PageLayout {
@@ -1221,6 +1255,11 @@ function walkContent(
 ): void {
   for (const node of nodes) {
     const name = tagOf(node);
+    if(name === 'footnotereference' || name === 'endnotereference') {
+      const id = attr(node,'id');
+      ctx.pieces.push({kind:'text',text:`[${name === 'footnotereference' ? 'F' : 'E'}${id ?? ''}]`,bold:ctx.bold,italic:ctx.italic,size:ctx.size});
+      continue;
+    }
     if (
       name === "ppr" ||
       name === "rpr" ||

@@ -255,10 +255,12 @@ export function Result() {
                 {conversion.editablePages} pages with editable content
               </span>
               <span>{conversion.tables} detected tables</span>
+              <span>{conversion.imageOnlyPages} image-only pages</span>
               {conversion.images ? (
                 <span>{conversion.images} images</span>
               ) : null}
             </div>
+            {conversion.imageOnlyPageNumbers?.length ? <p>Text is not editable on pages {conversion.imageOnlyPageNumbers.join(', ')}. Those pages keep the original appearance as images.</p> : null}
             {conversion.warnings.map((warning) => (
               <p key={warning}>{warning}</p>
             ))}

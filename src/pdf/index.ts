@@ -2,6 +2,7 @@
  * PDF engine public API.
  * Implementation lives in this folder. Screens import only from here.
  */
+import type { OcrLanguage } from '../lib/ocrLanguages';
 import type {
   CompressLevel,
   JobOk,
@@ -70,6 +71,7 @@ export type PdfEngine = {
     file: PickedFile,
     onProgress?: (update: PdfToDocxProgress) => void,
     signal?: AbortSignal,
+    language?: OcrLanguage,
   ): Promise<JobResult>;
 };
 
@@ -305,10 +307,10 @@ export const engine: PdfEngine = {
       "document.pdf",
     );
   },
-  async pdfToDocx(file, onProgress, signal) {
+  async pdfToDocx(file, onProgress, signal, language) {
     try {
       const { pdfToDocx } = await import("./pdfToDocx");
-      return await pdfToDocx(file, onProgress, signal);
+      return await pdfToDocx(file, onProgress, signal, language);
     } catch (err) {
       return { ok: false, message: humanError(err) };
     }

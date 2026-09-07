@@ -48,9 +48,10 @@ function runXml(text: string, fontSize: number, style?: Partial<PdfTextRun>): st
   const family = xmlEscape(fontFamily(style?.fontFamily));
   const bold = style?.bold ? '<w:b/><w:bCs/>' : '';
   const italic = style?.italic ? '<w:i/><w:iCs/>' : '';
+  const rtl = /[\u0590-\u08ff]/u.test(text) ? '<w:rtl/>' : '';
   return (
     `<w:r><w:rPr><w:rFonts w:ascii="${family}" w:hAnsi="${family}" w:cs="${family}"/>` +
-    `${bold}${italic}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/></w:rPr>` +
+    `${bold}${italic}${rtl}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/></w:rPr>` +
     `<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r>`
   );
 }
@@ -141,15 +142,21 @@ function cellParagraphXml(
   text: string,
   bold = false,
   alignment: 'left' | 'center' | 'right' = 'left',
+  sourceLines?: PdfParagraphLine[],
 ): string {
-  const lines = (text || '').split('\n').map((value) => ({
+  const lines = sourceLines?.length ? sourceLines : (text || '').split('\n').map((value) => ({
     text: value,
     fontSize: 10.5,
     runs: [{ text: value, fontSize: 10.5, bold }],
   }));
+  const gaps = sourceLines?.slice(1).flatMap((line,index)=>{
+    const previous=sourceLines[index]?.y;
+    return previous != null && line.y != null && previous>line.y ? [previous-line.y] : [];
+  }).sort((a,b)=>a-b) ?? [];
   return paraXml(lines, false, 0, {
     alignment,
-    lineSpacingPt: 13,
+    direction: sourceLines?.[0]?.direction,
+    lineSpacingPt: gaps.length ? gaps[Math.floor(gaps.length/2)] : Math.max(...lines.map(line=>line.fontSize)) * 1.2,
     spaceBeforePt: 0,
     spaceAfterPt: 0,
   });
@@ -182,14 +189,14 @@ function tableXml(block: Extract<PdfBlock, { kind: 'table' }>, pageWidth: number
               text,
               rowIndex < (block.headerRows ?? 0),
               block.columnAlignments?.[i] ?? 'left',
+              block.cellLines?.[rowIndex]?.[i],
             ) +
             '</w:tc>',
         );
       }
-      const rowProperties =
-        rowIndex < (block.headerRows ?? 0)
-          ? '<w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>'
-          : '<w:trPr><w:cantSplit/></w:trPr>';
+      const sourceHeight = block.rowHeightsPt?.[rowIndex];
+      const height = sourceHeight && sourceHeight > 0 ? `<w:trHeight w:val="${Math.round(sourceHeight*20)}" w:hRule="atLeast"/>` : '';
+      const rowProperties = `<w:trPr>${rowIndex < (block.headerRows ?? 0) ? '<w:tblHeader/>' : ''}<w:cantSplit/>${height}</w:trPr>`;
       return `<w:tr>${rowProperties}${cells.join('')}</w:tr>`;
     })
     .join('');
@@ -288,10 +295,6 @@ function columnTableXml(
   const rawSum = raw.reduce((sum, width) => sum + width, 0) || 1;
   const scale = rawSum > available ? available / rawSum : 1;
   const widths = raw.map((width) => Math.max(36, width * scale));
-  const fittedSum = widths.reduce((sum, width) => sum + width, 0);
-  if (fittedSum < available && widths.length > 0) {
-    widths[widths.length - 1] = (widths[widths.length - 1] ?? 0) + available - fittedSum;
-  }
   const twips = widths.map((width) => Math.round(width * 20));
   const tableW = twips.reduce((sum, width) => sum + width, 0);
   const tableIndent = indentTwips(Math.max(0, (block.x ?? xOrigin) - xOrigin), pageWidth);

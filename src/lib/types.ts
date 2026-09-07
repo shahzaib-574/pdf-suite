@@ -20,6 +20,7 @@ export type PickedFile = {
   mime: string;
   bytes: Uint8Array;
   password?: string;
+  scanSource?: { name: string; mime: string; bytes: Uint8Array };
 };
 
 export type PageRange = {
@@ -87,6 +88,7 @@ export type JobOk = {
 export type PdfToDocxReport = {
   editablePages: number;
   imageOnlyPages: number;
+  imageOnlyPageNumbers?: number[];
   tables: number;
   columnGroups: number;
   images: number;

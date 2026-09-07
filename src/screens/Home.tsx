@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
+  Camera,
   Clock3,
   FilePenLine,
   Search,
@@ -14,6 +15,7 @@ import { listRecents } from "../store/recents";
 import { recentFile } from "../store/toolInput";
 import { TOOL_ICONS } from "./icons";
 import { navigate } from "./nav";
+import { loadScanDraft } from '../store/scanDraft';
 
 type FilterId = "all" | "convert" | "edit" | "capture";
 
@@ -43,6 +45,8 @@ const FILTERS: { id: FilterId; label: string; tools?: ToolId[] }[] = [
 export function Home() {
   const [recents, setRecents] = useState<RecentItem[]>([]);
   const [query, setQuery] = useState("");
+  const [draftPages, setDraftPages] = useState(0);
+  useEffect(() => {let current=true;void loadScanDraft().then(draft=>{if(current)setDraftPages(draft?.files.length ?? 0);}).catch(()=>undefined);return()=>{current=false;};}, []);
   const [filter, setFilter] = useState<FilterId>("all");
   const [savingRecentId, setSavingRecentId] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -92,92 +96,67 @@ export function Home() {
   return (
     <AppShell>
       <div className="ps-home">
-        <section className="ps-home-hero">
-          <div className="ps-page-intro">
-            <p className="ps-eyebrow">Private PDF workspace</p>
-            <h1>What do you want to make?</h1>
-            <p>Fast, focused tools. Your files never leave this device.</p>
-          </div>
-          {searching ? null : (
-            <button
-              type="button"
-              className="ps-feature-card"
-              onClick={() => navigate("#/tool/pdf-docx")}
-            >
-              <span className="ps-feature-card__icon" aria-hidden="true">
-                <FilePenLine size={22} />
-              </span>
-              <span className="ps-feature-card__copy">
-                <strong>PDF → Word</strong>
-                <span>Rebuild text, tables, spacing, and scanned pages</span>
-              </span>
-              <ArrowRight size={20} aria-hidden="true" />
-            </button>
-          )}
-        </section>
+        <label className="ps-search">
+          <Search size={18} aria-hidden="true" />
+          <span className="sr-only">Search tools</span>
+          <input
+            type="search"
+            value={query}
+            placeholder="Search tools"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
 
-        <section className="ps-tools-section" aria-labelledby="tools-title">
-          <div className="ps-section-heading">
-            <div>
-              <p className="ps-eyebrow">Toolkit</p>
-              <h2 id="tools-title">Choose a tool</h2>
+        {searching ? null : (
+          <section className="ps-home-hero">
+            <div className="ps-page-intro">
+              <h1>Your next document, ready.</h1>
+              <p>
+                Scan a page, convert a file, or pick up where you left off.
+              </p>
             </div>
-            <span className="ps-privacy-pill">
-              <ShieldCheck size={14} aria-hidden="true" /> On-device
-            </span>
-          </div>
-
-          <label className="ps-search">
-            <Search size={18} aria-hidden="true" />
-            <span className="sr-only">Search tools</span>
-            <input
-              type="search"
-              value={query}
-              placeholder="Search tools"
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </label>
-
-          <div className="ps-filter-rail" aria-label="Filter tools by category">
-            {FILTERS.map((item) => (
+            <div className="ps-home-quick" aria-label="Quick actions">
               <button
-                key={item.id}
+                className="ps-feature-card"
                 type="button"
-                aria-pressed={filter === item.id}
-                className={
-                  filter === item.id ? "ps-filter is-active" : "ps-filter"
-                }
-                onClick={() => setFilter(item.id)}
+                onClick={() => navigate("#/tool/scan")}
               >
-                {item.label}
+                <span className="ps-feature-card__icon" aria-hidden="true">
+                  <Camera size={22} />
+                </span>
+                <span className="ps-feature-card__copy">
+                  <strong>
+                    {draftPages ? "Resume scan" : "Scan a document"}
+                  </strong>
+                  <span>
+                    {draftPages
+                      ? `${draftPages} saved ${draftPages === 1 ? "page" : "pages"} · Continue editing`
+                      : "Capture, clean up, and share a PDF"}
+                  </span>
+                </span>
+                <ArrowRight size={20} aria-hidden="true" />
               </button>
-            ))}
-          </div>
+              <button
+                type="button"
+                className="ps-feature-card"
+                onClick={() => navigate("#/tool/pdf-docx")}
+              >
+                <span className="ps-feature-card__icon" aria-hidden="true">
+                  <FilePenLine size={22} />
+                </span>
+                <span className="ps-feature-card__copy">
+                  <strong>PDF → Word</strong>
+                  <span>Make an editable copy of your PDF</span>
+                </span>
+                <ArrowRight size={20} aria-hidden="true" />
+              </button>
+            </div>
+          </section>
+        )}
 
-          {visibleTools.length > 0 ? (
-            <StaggerGrid>
-              {visibleTools.map((tool, index) => (
-                <ToolTile
-                  key={tool.id}
-                  title={tool.title}
-                  blurb={tool.blurb}
-                  icon={TOOL_ICONS[tool.id]}
-                  index={index}
-                  onSelect={() => navigate(`#/tool/${tool.id}`)}
-                />
-              ))}
-            </StaggerGrid>
-          ) : (
-            <p className="ps-search-empty">
-              No matching tools. Try a broader search.
-            </p>
-          )}
-        </section>
-
-        <section className="ps-recents" aria-labelledby="recents-title">
+        {searching ? null : <section className="ps-recents" aria-labelledby="recents-title">
           <div className="ps-section-heading ps-section-heading--compact">
             <div>
-              <p className="ps-eyebrow">Your workspace</p>
               <h2 id="recents-title">Recent files</h2>
             </div>
             {recents.length > 0 ? (
@@ -223,7 +202,9 @@ export function Home() {
                           else void saveRecentFile(item);
                         }}
                       >
-                        <span className="ps-recent__name">{item.name}</span>
+                        <span className="ps-recent__name" dir="auto">
+                          {item.name}
+                        </span>
                         <span className="ps-recent__action tabular">
                           {!canView
                             ? "Original needed"
@@ -237,6 +218,52 @@ export function Home() {
                 })}
               </ul>
             </>
+          )}
+        </section>}
+
+        <section className="ps-tools-section" aria-labelledby="tools-title">
+          <div className="ps-section-heading">
+            <div>
+              <h2 id="tools-title">All tools</h2>
+            </div>
+            <span className="ps-privacy-pill">
+              <ShieldCheck size={14} aria-hidden="true" /> On-device
+            </span>
+          </div>
+
+          <div className="ps-filter-rail" aria-label="Filter tools by category">
+            {FILTERS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                aria-pressed={filter === item.id}
+                className={
+                  filter === item.id ? "ps-filter is-active" : "ps-filter"
+                }
+                onClick={() => setFilter(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          {visibleTools.length > 0 ? (
+            <StaggerGrid>
+              {visibleTools.map((tool, index) => (
+                <ToolTile
+                  key={tool.id}
+                  title={tool.title}
+                  blurb={tool.blurb}
+                  icon={TOOL_ICONS[tool.id]}
+                  index={index}
+                  onSelect={() => navigate(`#/tool/${tool.id}`)}
+                />
+              ))}
+            </StaggerGrid>
+          ) : (
+            <p className="ps-search-empty">
+              No matching tools. Try a broader search.
+            </p>
           )}
         </section>
       </div>

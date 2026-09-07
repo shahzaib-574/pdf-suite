@@ -48,3 +48,23 @@ export function goBack(fallback = '#/'): void {
   }
   navigate(fallback);
 }
+
+export function replaceWith(hash: string): void {
+  const next = hash.startsWith("#") ? hash : `#${hash}`;
+  window.history.replaceState({ reamDepth: 0 }, "", next);
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+}
+
+export function seedHistory(): void {
+  if (!window.location.hash || window.location.hash === "#") {
+    window.history.replaceState({ reamDepth: 0 }, "", "#/");
+    return;
+  }
+  if (window.history.state?.reamDepth == null) {
+    window.history.replaceState(
+      { ...window.history.state, reamDepth: 0 },
+      "",
+      window.location.href,
+    );
+  }
+}

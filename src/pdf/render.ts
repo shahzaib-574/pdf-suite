@@ -19,6 +19,7 @@ import type {
   JobControl,
 } from "../lib/types";
 import type { OcrSession } from "./ocr";
+import type { OcrLanguage } from '../lib/ocrLanguages';
 import {
   analyzeGlyphs,
   clusterLines,
@@ -134,9 +135,21 @@ export type PdfViewerTextLayer = {
   textItems: string[];
 };
 
+export type PdfViewerPageRegion = {
+  blob: Blob;
+  width: number;
+  height: number;
+};
+
 export type PdfViewerSession = {
   document: PdfViewerDocument;
   renderPage(pageIndex: number, width: number): Promise<Blob>;
+  renderPageRegion(
+    pageIndex: number,
+    clip: { x: number; y: number; width: number; height: number },
+    outputWidth: number,
+    outputHeight: number,
+  ): Promise<PdfViewerPageRegion>;
   renderTextLayer(
     pageIndex: number,
     container: HTMLElement,
@@ -341,58 +354,130 @@ export async function openPdfViewer(
         })();
       }, 0);
 
+    const pageChain = new Map<number, Promise<unknown>>();
+    function enqueuePage<T>(
+      pageIndex: number,
+      work: () => Promise<T>,
+    ): Promise<T> {
+      const last = pageChain.get(pageIndex) ?? Promise.resolve();
+      const next = last.then(work, work);
+      pageChain.set(
+        pageIndex,
+        next.then(
+          () => undefined,
+          () => undefined,
+        ),
+      );
+      return next;
+    }
+
     return {
       document: viewerDocument,
       async renderPage(pageIndex, width) {
-        if (destroyed) throw new Error("This viewer session is closed.");
-        if (pageIndex < 0 || pageIndex >= pdf.numPages) {
-          throw new Error("That page is out of range.");
-        }
-        const page = await pdf.getPage(pageIndex + 1);
-        const base = page.getViewport({ scale: 1 });
-        const scale = Math.min(
-          base.width > 0 ? Math.max(0.1, width / base.width) : 1,
-          Math.sqrt(12_000_000 / Math.max(1, base.width * base.height)),
-          8192 / Math.max(1, base.width, base.height),
-        );
-        const viewport = page.getViewport({ scale });
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.ceil(viewport.width));
-        canvas.height = Math.max(1, Math.ceil(viewport.height));
-        const canvasContext = canvas.getContext("2d", { alpha: false });
-        if (!canvasContext) {
-          throw new Error("Could not create a canvas to render this page.");
-        }
-        canvasContext.fillStyle = "#ffffff";
-        canvasContext.fillRect(0, 0, canvas.width, canvas.height);
-        const renderTask = page.render({ canvas, canvasContext, viewport });
-        try {
-          await renderTask.promise;
-          return await canvasToJpeg(canvas, 0.9);
-        } finally {
-          canvas.width = 0;
-          canvas.height = 0;
-        }
+        return enqueuePage(pageIndex, async () => {
+          if (destroyed) throw new Error("This viewer session is closed.");
+          if (pageIndex < 0 || pageIndex >= pdf.numPages) {
+            throw new Error("That page is out of range.");
+          }
+          const page = await pdf.getPage(pageIndex + 1);
+          const base = page.getViewport({ scale: 1 });
+          const scale = Math.min(
+            base.width > 0 ? Math.max(0.1, width / base.width) : 1,
+            Math.sqrt(12_000_000 / Math.max(1, base.width * base.height)),
+            8192 / Math.max(1, base.width, base.height),
+          );
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.ceil(viewport.width));
+          canvas.height = Math.max(1, Math.ceil(viewport.height));
+          const canvasContext = canvas.getContext("2d", { alpha: false });
+          if (!canvasContext) {
+            throw new Error("Could not create a canvas to render this page.");
+          }
+          canvasContext.fillStyle = "#ffffff";
+          canvasContext.fillRect(0, 0, canvas.width, canvas.height);
+          const renderTask = page.render({ canvas, canvasContext, viewport });
+          try {
+            await renderTask.promise;
+            // Reader text and line art should not acquire JPEG ringing.
+            return await new Promise<Blob>((resolve, reject) => {
+              canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not encode this page.")), "image/png");
+            });
+          } finally {
+            canvas.width = 0;
+            canvas.height = 0;
+          }
+        });
+      },
+      async renderPageRegion(pageIndex, clip, outputWidth, _outputHeight) {
+        return enqueuePage(pageIndex, async () => {
+          if (destroyed) throw new Error("This viewer session is closed.");
+          if (pageIndex < 0 || pageIndex >= pdf.numPages) {
+            throw new Error("That page is out of range.");
+          }
+          const clipWidth = Math.max(clip.width, 0.01);
+          const clipHeight = Math.max(clip.height, 0.01);
+          const scale = Math.max(1, Math.floor(outputWidth)) / clipWidth;
+          const width = Math.max(1, Math.round(clipWidth * scale));
+          const height = Math.max(1, Math.round(clipHeight * scale));
+          const page = await pdf.getPage(pageIndex + 1);
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const canvasContext = canvas.getContext("2d", { alpha: false });
+          if (!canvasContext) {
+            throw new Error("Could not create a canvas to render this page.");
+          }
+          canvasContext.fillStyle = "#ffffff";
+          canvasContext.fillRect(0, 0, width, height);
+          const transform = [1, 0, 0, 1, -clip.x * scale, -clip.y * scale];
+          const renderTask = page.render({
+            canvas,
+            canvasContext,
+            viewport,
+            transform,
+            background: "#ffffff",
+          });
+          try {
+            await renderTask.promise;
+            const blob = await new Promise<Blob>((resolve, reject) => {
+              canvas.toBlob(
+                (value) =>
+                  value
+                    ? resolve(value)
+                    : reject(new Error("Could not encode this page region.")),
+                "image/png",
+              );
+            });
+            return { blob, width, height };
+          } finally {
+            canvas.width = 0;
+            canvas.height = 0;
+          }
+        });
       },
       async renderTextLayer(pageIndex, container, scale) {
-        if (destroyed) throw new Error("This viewer session is closed.");
-        if (pageIndex < 0 || pageIndex >= pdf.numPages) {
-          throw new Error("That page is out of range.");
-        }
-        const page = await pdf.getPage(pageIndex + 1);
-        const viewport = page.getViewport({ scale: Math.max(0.1, scale) });
-        const textContent = await page.getTextContent();
-        const layer = new pdfjs.TextLayer({
-          textContentSource: textContent,
-          container,
-          viewport,
+        return enqueuePage(pageIndex, async () => {
+          if (destroyed) throw new Error("This viewer session is closed.");
+          if (pageIndex < 0 || pageIndex >= pdf.numPages) {
+            throw new Error("That page is out of range.");
+          }
+          const page = await pdf.getPage(pageIndex + 1);
+          const viewport = page.getViewport({ scale: Math.max(0.1, scale) });
+          const textContent = await page.getTextContent();
+          const layer = new pdfjs.TextLayer({
+            textContentSource: textContent,
+            container,
+            viewport,
+          });
+          await layer.render();
+          return {
+            cancel: () => layer.cancel(),
+            textDivs: layer.textDivs,
+            textItems: layer.textContentItemsStr,
+          };
         });
-        await layer.render();
-        return {
-          cancel: () => layer.cancel(),
-          textDivs: layer.textDivs,
-          textItems: layer.textContentItemsStr,
-        };
       },
       async destroy() {
         if (destroyed) return;
@@ -772,6 +857,7 @@ export async function extractPdfText(
   file: PickedFile,
   onProgress?: (update: PdfToDocxProgress) => void,
   signal?: AbortSignal,
+  language: OcrLanguage = 'eng',
 ): Promise<PdfTextPage[]> {
   return withPdfjs(file, async (pdf) => {
     if (pdf.numPages < 1) return [];
@@ -848,6 +934,7 @@ export async function extractPdfText(
             const rulings = rulingsFromOperatorList(
               operatorList,
               pdfjs.OPS.constructPath,
+              pdfjs.OPS,
             );
             const textBlocks = analyzeGlyphs(
               glyphs,
@@ -908,7 +995,7 @@ export async function extractPdfText(
                     progress: (i - 1 + update.progress * 0.9) / pdf.numPages,
                     label: `OCR page ${i} of ${pdf.numPages}`,
                   });
-                });
+                }, language);
               }
               const activeOcr = ocr;
               const stop = () => {

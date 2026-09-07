@@ -9,6 +9,8 @@ import {
   SelectField,
 } from "../components";
 import { ScanCamera } from "./ScanCamera";
+import { OCR_LANGUAGES, type OcrLanguage } from '../lib/ocrLanguages';
+import { loadScanDraft, saveScanDraft, clearScanDraft, type ScanPageDraft } from '../store/scanDraft';
 import { ScanEditor } from "./ScanEditor";
 import { ScanPdfPreview } from "./ScanPdfPreview";
 import { TOOLS, type ToolDef } from "../lib/catalog";
@@ -30,7 +32,8 @@ import { fileListToPicked, MAX_INPUT_BYTES, saveBytes, shareOrDownload } from ".
 import { setCurrentViewer, setLastJob } from "../store/lastJob";
 import { saveRecent } from "../store/recents";
 import { takePendingScan, takePendingScanError } from "../store/pendingScan";
-import { goBack, navigate } from "./nav";
+import { goBack, navigate, replaceWith } from "./nav";
+import { useBackHandler } from "./back";
 
 type ToolFlowProps = {
   id: ToolId;
@@ -140,6 +143,34 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const [scanStep, setScanStep] = useState<"edit" | "pdf">("edit");
   const [scanName, setScanName] = useState(defaultScanPdfName);
   const scanNameEdited = useRef(false);
+  const [draftReady, setDraftReady] = useState(id !== 'scan' || initialScan.files.length > 0);
+  const [scanEdits, setScanEdits] = useState<(ScanPageDraft | null)[]>([]);
+  const [ocrLanguage, setOcrLanguage] = useState<OcrLanguage>('eng');
+  const [docxInspection, setDocxInspection] = useState<{file:PickedFile;warnings:string[]} | null>(null);
+  const docxChecking = id === 'docx-pdf' && !!picked[0] && docxInspection?.file !== picked[0];
+  const docxWarnings = docxInspection?.file === picked[0] ? docxInspection?.warnings ?? [] : [];
+  useEffect(() => {
+    const file = picked[0];
+    if(id !== 'docx-pdf' || !file) return;
+    let current=true;
+    void import('../pdf/docxToPdf').then(module=>module.inspectDocx(file))
+      .then(warnings=>{if(current)setDocxInspection({file,warnings});})
+      .catch(error=>{if(current)setDocxInspection({file,warnings:[error instanceof Error ? error.message : 'Could not inspect this document.']});});
+    return ()=>{current=false;};
+  }, [id,picked]);
+  const [draftStatus, setDraftStatus] = useState('');
+  const [retakeIndex, setRetakeIndex] = useState<number | null>(null);
+  const [scanRevision, setScanRevision] = useState(0);
+  const scanCompleted = useRef(false);
+
+  useBackHandler(() => {
+    if (id !== "scan" || cameraOpen) return false;
+    if (scanStep === "pdf") {
+      setScanStep("edit");
+      return true;
+    }
+    return false;
+  });
 
   const [jobProgress, setJobProgress] = useState<number | undefined>();
   const [jobLabel, setJobLabel] = useState("Working on-device…");
@@ -174,6 +205,27 @@ export function ToolFlow({ id }: ToolFlowProps) {
     position: "center",
     total: true,
   });
+  useEffect(() => {
+    if (id !== 'scan' || initialScan.files.length) return;
+    let cancelled = false;
+    void loadScanDraft().then(draft => {
+      if (cancelled) return;
+      if (draft) {
+        setPicked(draft.files);setScanEdits(draft.edits);setScanStep(draft.step);
+        setScanName(draft.name);scanNameEdited.current=true;setImageOptions(draft.options);setCameraOpen(false);
+      }
+    }).catch(() => {if(!cancelled)setDraftStatus('Could not restore the last scan.');})
+      .finally(() => {if(!cancelled)setDraftReady(true);});
+    return () => { cancelled = true; };
+  }, [id, initialScan]);
+  useEffect(() => {
+    if(id !== 'scan' || !draftReady || scanCompleted.current) return;
+    let current=true;
+    void saveScanDraft({version:1,files:picked,edits:scanEdits,step:scanStep,name:scanName,options:imageOptions,updatedAt:Date.now()})
+      .then(() => {if(current)setDraftStatus(picked.length ? 'Draft saved on this device' : '');})
+      .catch(() => {if(current)setDraftStatus('Draft could not be saved. Keep this screen open until you export.');});
+    return () => {current=false;};
+  }, [id,draftReady,picked,scanEdits,scanStep,scanName,imageOptions]);
   const [watermarkAngle, setWatermarkAngle] = useState(-35);
   const [organizeOffset, setOrganizeOffset] = useState(0);
   const jobController = useRef<AbortController | null>(null);
@@ -550,6 +602,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
             first,
             control.onProgress,
             controller.signal,
+            ocrLanguage,
           );
           break;
       }
@@ -569,6 +622,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
           : await shareOrDownload(result.bytes, result.filename, "application/pdf");
         if (exported.status === "cancelled") return;
       }
+      if (tool.id === 'scan') {scanCompleted.current=true;await clearScanDraft();}
       navigate("#/result");
     } catch (err) {
       if (mounted.current && !controller.signal.aborted)
@@ -589,6 +643,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
     !locked &&
     !busy &&
     !scanBusy &&
+    !(tool.id === 'docx-pdf' && docxChecking) &&
     tool.id !== "view" &&
     picked.length >= tool.minFiles &&
     extraValid();
@@ -641,19 +696,24 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const ctaHint = canRun ? null : blockedReason();
   const scanPdf = tool.id === "scan" && scanStep === "pdf";
 
-  const scanCamera = tool.id === "scan" && cameraOpen ? (
+  const scanCamera = tool.id === "scan" && cameraOpen && draftReady ? (
       <ScanCamera
-        pages={picked}
-        maxPages={scanMaxPages}
+        pages={retakeIndex === null ? picked : []}
+        maxPages={retakeIndex === null ? scanMaxPages : 1}
         onPages={(next) => {
           setError(null);
-          setPicked(next);
+          if(retakeIndex !== null && next[0]) {
+            setPicked(files => files.map((file,i) => i===retakeIndex ? next[0]! : file));
+            setScanEdits(edits => edits.map((edit,i) => i===retakeIndex ? null : edit));
+            setScanRevision(value=>value+1);setRetakeIndex(null);
+          } else setPicked(next);
           setCameraOpen(false);
           setScanStep("edit");
         }}
         onClose={() => {
-          if (picked.length === 0) goBack("#/");
-          else setCameraOpen(false);
+          setRetakeIndex(null);
+          setCameraOpen(false);
+          if (picked.length === 0) replaceWith("#/");
         }}
         onUse={() => setCameraOpen(false)}
       />
@@ -661,6 +721,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
 
   return (
     <>
+    {tool.id === 'scan' && !draftReady ? <p role="status">Restoring your scan…</p> : null}
     {scanCamera}
     <div
       style={tool.id === "scan" && cameraOpen ? {display: "none"} : undefined}
@@ -718,30 +779,48 @@ export function ToolFlow({ id }: ToolFlowProps) {
         ) : null}
 
         {tool.id === "docx-pdf" ? (
+          <>
           <p className="ps-note">
             Page margins, blank lines, and space before/after follow the Word
             file. Nested tables and text boxes still will not match. Bundled
             fonts preserve Latin, Greek and Cyrillic text. Files with
             unsupported characters are rejected instead of changing the text.
           </p>
+          {docxChecking ? <p role="status">Checking document compatibility…</p> : null}
+          {docxWarnings.length ? <div className="ps-banner" role="status"><strong>Before you convert</strong>{docxWarnings.map(warning=><p key={warning}>{warning}</p>)}</div> : null}
+          </>
         ) : null}
         {tool.id === "pdf-docx" ? (
+          <>
+          <label className="ps-field">Scanned text language<select aria-label="Scanned text language" value={ocrLanguage} disabled={busy} onChange={event=>setOcrLanguage(event.target.value as OcrLanguage)}>{OCR_LANGUAGES.map(language=><option key={language.id} value={language.id}>{language.label}</option>)}</select></label>
           <p className="ps-note">
             Rebuilds styled text, detected tables, and two-column layouts.
-            Scanned pages use bundled English OCR entirely on-device; uncertain
+            Scanned pages use the selected language entirely on-device; uncertain
             pages stay as full-page images instead of returning unreliable text.
           </p>
+          </>
         ) : null}
 
-        {tool.id === "scan" && picked.length > 0 ? (
+        {tool.id === "scan" && draftReady && picked.length > 0 ? (
           <div hidden={scanStep !== "edit"} className="ps-scan-review">
           <ScanEditor
+            key={scanRevision}
+            initialEdits={scanEdits}
+            onDrafts={setScanEdits}
+            onFiles={files => {setPicked(files);if(!files.length)setCameraOpen(true);}}
+            onRetake={index => {setRetakeIndex(index);setCameraOpen(true);}}
             onDone={() => {
               if (!scanNameEdited.current) setScanName(defaultScanPdfName());
               setScanStep("pdf");
               window.scrollTo(0, 0);
             }}
             onCamera={() => setCameraOpen(true)}
+            onDiscard={() => {
+              scanCompleted.current = true;
+              void clearScanDraft()
+                .catch(() => undefined)
+                .then(() => replaceWith("#/"));
+            }}
             onGallery={(list) => { void onPick(list); }}
             maxPages={scanMaxPages}
             files={picked}
@@ -752,6 +831,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
               )
             }
           />
+          {draftStatus ? <p className="scan-draft-status" role="status">{draftStatus}</p> : null}
           </div>
         ) : null}
         {["split", "pdf-images"].includes(tool.id) && hasFile ? (

@@ -137,7 +137,7 @@ export function Recents() {
                           else void saveRecentFile(item);
                         }}
                       >
-                        <span className="ps-library-item__name">
+                        <span className="ps-library-item__name" dir="auto">
                           {item.name}
                         </span>
                         <span className="ps-library-item__meta tabular">
@@ -148,39 +148,41 @@ export function Recents() {
                               : `${formatBytes(item.size)} · ${relativeDate(item.createdAt)}`}
                         </span>
                       </button>
-                      <AnimatedButton
-                        variant="ghost"
-                        className="btn--icon ps-library-item__action"
-                        icon={Download}
-                        aria-label={
-                          saving ? `Saving ${item.name}` : `Save ${item.name}`
-                        }
-                        disabled={!canOpen || savingId !== null}
-                        onClick={() => {
-                          void saveRecentFile(item);
-                        }}
-                      />
-                      <AnimatedButton
-                        variant="ghost"
-                        className="btn--icon"
-                        icon={Pencil}
-                        aria-label={`Rename ${item.name}`}
-                        onClick={() => {
-                          setEditing(item.id);
-                          setNewName(item.name);
-                          setDeleting(null);
-                        }}
-                      />
-                      <AnimatedButton
-                        variant="ghost"
-                        className="btn--icon"
-                        icon={Trash2}
-                        aria-label={`Remove ${item.name} from Recents`}
-                        onClick={() => {
-                          setDeleting(item.id);
-                          setEditing(null);
-                        }}
-                      />
+                      <div className="ps-library-item__actions">
+                        <AnimatedButton
+                          variant="ghost"
+                          className="btn--icon ps-library-item__action"
+                          icon={Download}
+                          aria-label={
+                            saving ? `Saving ${item.name}` : `Save ${item.name}`
+                          }
+                          disabled={!canOpen || savingId !== null}
+                          onClick={() => {
+                            void saveRecentFile(item);
+                          }}
+                        />
+                        <AnimatedButton
+                          variant="ghost"
+                          className="btn--icon"
+                          icon={Pencil}
+                          aria-label={`Rename ${item.name}`}
+                          onClick={() => {
+                            setEditing(item.id);
+                            setNewName(item.name);
+                            setDeleting(null);
+                          }}
+                        />
+                        <AnimatedButton
+                          variant="ghost"
+                          className="btn--icon"
+                          icon={Trash2}
+                          aria-label={`Remove ${item.name} from Recents`}
+                          onClick={() => {
+                            setDeleting(item.id);
+                            setEditing(null);
+                          }}
+                        />
+                      </div>
                       {editing === item.id ? (
                         <form
                           className="ps-library-edit"

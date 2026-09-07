@@ -34,6 +34,7 @@ export type PdfParagraphLine = {
   x?: number;
   xEnd?: number;
   y?: number;
+  direction?: "ltr" | "rtl";
 };
 
 export type PdfTextLine = {
@@ -70,6 +71,8 @@ export type PdfBlock =
   | {
       kind: "table";
       rows: string[][];
+      cellLines?: PdfParagraphLine[][][];
+      rowHeightsPt?: number[];
       x?: number;
       top?: number;
       bottom?: number;

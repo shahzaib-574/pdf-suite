@@ -4,6 +4,23 @@ export type ScanEdit = {
   mode: "color" | "gray" | "bw";
   rotate: boolean | number;
 };
+
+/** Translate both endpoints together, keeping the crop inside the image and convex. */
+export function moveScanEdge(points: Point[], edge: number, delta: number): Point[] {
+  if (!validCorners(points) || !Number.isInteger(edge) || edge < 0 || edge > 3 || !Number.isFinite(delta)) return points;
+  const next = (edge + 1) % 4;
+  const axis = edge % 2 === 0 ? 'y' : 'x';
+  const bounded = Math.max(-Math.min(points[edge]![axis], points[next]![axis]), Math.min(1 - Math.max(points[edge]![axis], points[next]![axis]), delta));
+  const shifted = (amount: number) => points.map((point, i) => i === edge || i === next ? {...point, [axis]:point[axis] + amount} : point);
+  if (validCorners(shifted(bounded))) return shifted(bounded);
+  let low = 0, high = 1;
+  for (let i = 0; i < 24; i++) {
+    const fraction = (low + high) / 2;
+    if (validCorners(shifted(bounded * fraction))) low = fraction;
+    else high = fraction;
+  }
+  return shifted(bounded * low);
+}
 export function validCorners(points: Point[]): boolean {
   if (
     points.length !== 4 ||

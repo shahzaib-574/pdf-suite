@@ -6,6 +6,7 @@ import {
   type Worker,
 } from 'tesseract.js';
 import type { TextGlyph } from './textTypes';
+import type { OcrLanguage } from '../lib/ocrLanguages';
 
 export type OcrProgress = {
   progress: number;
@@ -79,9 +80,10 @@ function localOcrAssetBase(): string {
 
 export async function createOcrSession(
   onProgress?: (update: OcrProgress) => void,
+  language: OcrLanguage = 'eng',
 ): Promise<OcrSession> {
   const assetBase = localOcrAssetBase();
-  const worker: Worker = await createWorker('eng', OEM.LSTM_ONLY, {
+  const worker: Worker = await createWorker(language, OEM.LSTM_ONLY, {
     workerPath: `${assetBase}worker.min.js`,
     corePath: assetBase,
     langPath: assetBase,

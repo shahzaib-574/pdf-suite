@@ -7,6 +7,7 @@ import type {
 import { DOCX_MIME, pagesToDocx } from "./docxBuild";
 import type { PdfBlock, PdfTextPage } from "./textTypes";
 import { humanError } from "./util";
+import { ocrLanguageLabel, type OcrLanguage } from '../lib/ocrLanguages';
 
 function docxNameFromPdf(name: string): string {
   const base = name.replace(/\\/g, "/").split("/").pop() ?? "document";
@@ -28,7 +29,7 @@ function countBlocks(
   }
 }
 
-function conversionReport(pages: PdfTextPage[]): PdfToDocxReport {
+function conversionReport(pages: PdfTextPage[], language: OcrLanguage): PdfToDocxReport {
   const totals = { tables: 0, columnGroups: 0, images: 0 };
   pages.forEach((page) => countBlocks(page.blocks, totals));
   const imageOnlyPages = pages.filter(
@@ -42,7 +43,7 @@ function conversionReport(pages: PdfTextPage[]): PdfToDocxReport {
   );
   if (ocrPages.length)
     warnings.push(
-      `English OCR was used on pages ${ocrPages.join(", ")}. Check names, numbers, and diagrams against the original; recognition is not guaranteed.`,
+      `${ocrLanguageLabel(language)} OCR was used on pages ${ocrPages.join(", ")}. Check names, numbers, and diagrams against the original; recognition is not guaranteed.`,
     );
   if (imageOnlyPages > 0) {
     warnings.push(
@@ -52,6 +53,7 @@ function conversionReport(pages: PdfTextPage[]): PdfToDocxReport {
   return {
     editablePages: Math.max(0, pages.length - imageOnlyPages),
     imageOnlyPages,
+    imageOnlyPageNumbers: pages.flatMap((page,index) => page.blocks.length && page.blocks.every(block=>block.kind==='image') ? [index+1] : []),
     tables: totals.tables,
     columnGroups: totals.columnGroups,
     images: totals.images,
@@ -63,10 +65,11 @@ export async function pdfToDocx(
   file: PickedFile,
   onProgress?: (update: PdfToDocxProgress) => void,
   signal?: AbortSignal,
+  language: OcrLanguage = 'eng',
 ): Promise<JobResult> {
   try {
     const { extractPdfText } = await import("./render");
-    const pages = await extractPdfText(file, onProgress, signal);
+    const pages = await extractPdfText(file, onProgress, signal, language);
     signal?.throwIfAborted();
     const bytes = await pagesToDocx(pages);
     signal?.throwIfAborted();
@@ -77,7 +80,7 @@ export async function pdfToDocx(
       filename: docxNameFromPdf(file.name),
       pageCount: Math.max(1, pages.length),
       mime: DOCX_MIME,
-      extra: { pdfToDocx: conversionReport(pages) },
+      extra: { pdfToDocx: conversionReport(pages, language) },
     };
   } catch (err) {
     return { ok: false, message: humanError(err) };

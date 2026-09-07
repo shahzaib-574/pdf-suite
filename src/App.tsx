@@ -7,6 +7,7 @@ import { subscribeIncoming } from "./store/incoming";
 import { queueToolFiles } from "./store/toolInput";
 import { setCurrentViewer, setLastJob } from "./store/lastJob";
 import { navigate } from "./screens/nav";
+import { installAppBack } from "./screens/back";
 import { AnimatedButton } from "./components";
 import { Home } from "./screens/Home";
 import { Recents } from "./screens/Recents";
@@ -81,20 +82,13 @@ export default function App() {
     const onChange = () => setRoute(parseHash(window.location.hash));
     window.addEventListener("hashchange", onChange);
     window.addEventListener("popstate", onChange);
-    if (!window.location.hash || window.location.hash === "#") {
-      window.history.replaceState({ reamDepth: 0 }, "", "#/");
-    } else if (window.history.state?.reamDepth == null) {
-      window.history.replaceState(
-        { ...window.history.state, reamDepth: 0 },
-        "",
-        window.location.href,
-      );
-    }
     return () => {
       window.removeEventListener("hashchange", onChange);
       window.removeEventListener("popstate", onChange);
     };
   }, []);
+
+  useEffect(() => installAppBack(), []);
 
   useEffect(() => {
     void pruneStagedNativeExports();

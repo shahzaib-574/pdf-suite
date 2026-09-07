@@ -30,7 +30,7 @@ On-device processing is the current implementation and a marketing plus. It is n
 
 - Android app (`com.reampdf.mobile`, Capacitor 8 WebView) is the store product. The same React app also runs in a browser / PWA shell.
 - Typical session: pick or capture → one tool → result → system save or share. Interrupted; one-handed; often on cellular.
-- Documents are PDFs, DOCX, and camera/gallery images (JPEG, PNG, WebP). English OCR is bundled for scanned pages.
+- Documents are PDFs, DOCX, and camera/gallery images (JPEG, PNG, WebP). English, Urdu + English, and Arabic + English OCR are bundled for scanned pages.
 - Play Console and a public privacy policy are part of shipping, not of the document job.
 - No Ream account exists today.
 
@@ -40,6 +40,8 @@ Shipped today:
 
 - Tools: merge, split, images → PDF, PDF → images, compress, scan, organize, watermark, page numbers, protect (AES-256), view, Word → PDF (simplified), PDF → Word (layout rebuild + English OCR).
 - Reader: continuous pages, search, outlines, thumbnails, pinch zoom, save/share.
+- Scanner: automatic edge detection on request, cleanup presets with previews, retake/delete/reorder, lossless rotation, retained originals, and an automatically saved draft that can be resumed from Home.
+- Word conversion: compatibility warnings before conversion; footnotes and endnotes are retained in a numbered notes section. Unsupported headers, footers, charts and complex layouts still require export from Word for full fidelity.
 - Recents in IndexedDB: separate metadata and file bytes, up to 200 items / 512 MB subject to storage availability; search, rename, delete and external save.
 - Light / dark / system theme and a reduce-motion setting.
 - Ad-free Android and web builds; no advertising or analytics SDK.

@@ -52,14 +52,16 @@ function cleanText(text: string): string {
 }
 
 function rowText(glyphs: TextGlyph[]): { text: string; runs: PdfTextRun[] } {
-  const ordered = [...glyphs].sort((a, b) => a.x - b.x);
+  const rtl = glyphs.filter(glyph => glyph.direction === 'rtl').length > glyphs.length / 2;
+  const ordered = [...glyphs].sort((a, b) => rtl ? b.x - a.x : a.x - b.x);
   const runs: PdfTextRun[] = [];
   let text = '';
   let lastRight = Number.NEGATIVE_INFINITY;
+  let lastLeft = Number.POSITIVE_INFINITY;
   for (const glyph of ordered) {
     const value = cleanText(glyph.str);
     if (!value) continue;
-    const gap = glyph.x - lastRight;
+    const gap = rtl ? lastLeft - (glyph.x + glyphWidth(glyph)) : glyph.x - lastRight;
     const widthPerChar = glyphWidth(glyph) / Math.max(1, value.length);
     const spaceGap = Math.max(0.8, Math.min(glyph.size * 0.32, widthPerChar * 0.55));
     const previous = text[text.length - 1];
@@ -79,6 +81,7 @@ function rowText(glyphs: TextGlyph[]): { text: string; runs: PdfTextRun[] } {
     else runs.push(run);
     text += run.text;
     lastRight = Math.max(lastRight, glyph.x + glyphWidth(glyph));
+    lastLeft = Math.min(lastLeft, glyph.x);
   }
   return { text: text.trim(), runs };
 }
@@ -546,6 +549,28 @@ function inferredHeaderRows(rows: string[][], firstLineBold: boolean): number {
     : 0;
 }
 
+function richCells(line: PdfTextLine, anchors: { x: number }[]): PdfParagraphLine[][] {
+  const cells: PdfParagraphLine[][] = anchors.map(() => []);
+  const tokens = line.tokens.length ? line.tokens : [{text:line.text,x:line.x,xEnd:line.xEnd,runs:line.runs}];
+  const groups = anchors.map(() => [] as typeof tokens);
+  for(const token of tokens) {
+    let best=0;
+    for(let i=1;i<anchors.length;i++) if(Math.abs(token.x-anchors[i]!.x)<Math.abs(token.x-anchors[best]!.x))best=i;
+    groups[best]!.push(token);
+  }
+  groups.forEach((group,index)=>{
+    if(!group.length)return;
+    const ordered=line.direction==='rtl' ? [...group].reverse() : group;
+    const runs=ordered.flatMap((token,i)=>{
+      const value=token.runs?.map(run=>({...run})) ?? [{text:token.text,fontSize:line.fontSize}];
+      if(i && value[0])value[0].text=' '+value[0].text;
+      return value;
+    });
+    cells[index]!.push({text:ordered.map(token=>token.text).join(' '),fontSize:line.fontSize,runs,y:line.y,direction:line.direction});
+  });
+  return cells;
+}
+
 function alignedTable(
   lines: PdfTextLine[],
   pageWidth = 612,
@@ -554,18 +579,21 @@ function alignedTable(
   const anchors = clusterLineAnchors(lines);
   if (anchors.length < 2) return undefined;
   const rows: string[][] = [];
+  const cellLines: PdfParagraphLine[][][] = [];
   let hits = 0;
   for (const line of lines) {
     const cells = assignCells(line, anchors);
     const filled = cells.filter((c) => c.length > 0).length;
     if (filled >= 2) {
       rows.push(cells);
+      cellLines.push(richCells(line,anchors));
       hits += 1;
     } else if (rows.length > 0 && filled === 1) {
       const col = cells.findIndex((c) => c.length > 0);
       if (col >= 0) {
         const last = rows[rows.length - 1]!;
-        last[col] = `${last[col] ?? ''} ${cells[col]}`.trim();
+        last[col] = `${last[col] ?? ''}\n${cells[col]}`.trim();
+        cellLines[cellLines.length-1]![col]!.push(...richCells(line,anchors)[col]!);
       }
     } else if (rows.length > 0) {
       break;
@@ -580,6 +608,7 @@ function alignedTable(
   return {
     kind: 'table',
     rows,
+    cellLines,
     x: geometry.x,
     columnWidthsPt: geometry.widths,
     top: Math.max(...lines.map((line) => line.y + line.height * 0.82)),
@@ -623,6 +652,7 @@ function consumeTable(
   rulings: PdfRuling[],
 ): { table: PdfBlock; next: number } | undefined {
   const rows: string[][] = [];
+  const cellLines: PdfParagraphLine[][][] = [];
   let i = start;
   let lastY = lines[start]?.y ?? 0;
   while (i < lines.length) {
@@ -636,6 +666,7 @@ function consumeTable(
     const filled = cells.filter((c) => c.length > 0).length;
     if (filled >= 2) {
       rows.push(cells);
+      cellLines.push(richCells(line,anchors));
       lastY = line.y;
       i += 1;
       continue;
@@ -645,6 +676,7 @@ function consumeTable(
       if (col >= 0) {
         const last = rows[rows.length - 1]!;
         last[col] = `${last[col] ?? ''}\n${cells[col]}`.trim();
+        cellLines[cellLines.length-1]![col]!.push(...richCells(line,anchors)[col]!);
       }
       lastY = line.y;
       i += 1;
@@ -662,6 +694,7 @@ function consumeTable(
     table: {
       kind: 'table',
       rows,
+      cellLines,
       x: geometry.x,
       columnWidthsPt: geometry.widths,
       top: Math.max(...used.map((line) => line.y + line.height * 0.82)),
@@ -934,6 +967,11 @@ export function analyzeGlyphs(
   rulings: PdfRuling[] = [],
 ): PdfBlock[] {
   if (glyphs.length === 0) return [];
+  const grid = simpleRuledGrid(glyphs, rulings);
+  if (grid) {
+    const remaining = glyphs.filter(glyph => !grid.used.has(glyph));
+    return orderAndSpaceBlocks([grid.table, ...analyzeGlyphs(remaining,pageWidth,pageHeight)],pageHeight);
+  }
   const { header, columns, widthsPt, x } = splitGlyphColumns(glyphs, pageWidth);
   const blocks: PdfBlock[] = [...paraFromLines(clusterLines(header), pageWidth)];
   if (columns.length <= 1) {
@@ -955,6 +993,36 @@ export function analyzeGlyphs(
   return addBlockSpacing(blocks, pageHeight);
 }
 
+/** Only accept complete, axis-aligned grids; partial/merged grids use the existing inference. */
+function simpleRuledGrid(glyphs: TextGlyph[], rulings: PdfRuling[]): {table:PdfBlock;used:Set<TextGlyph>} | undefined {
+  const horizontal=rulings.filter(line=>Math.abs(line.y2-line.y1)<=2.5 && Math.abs(line.x2-line.x1)>=30);
+  const vertical=rulings.filter(line=>Math.abs(line.x2-line.x1)<=2.5 && Math.abs(line.y2-line.y1)>=20);
+  if(horizontal.length<3 || vertical.length<3)return;
+  const xs=uniqueCoordinates(vertical.map(line=>(line.x1+line.x2)/2));
+  const ys=uniqueCoordinates(horizontal.map(line=>(line.y1+line.y2)/2)).sort((a,b)=>b-a);
+  if(xs.length<3||ys.length<3||xs.length*ys.length>1000)return;
+  const left=xs[0]!,right=xs[xs.length-1]!,top=ys[0]!,bottom=ys[ys.length-1]!;
+  if(!xs.every(x=>vertical.some(line=>Math.abs(line.x1-x)<=2.5&&Math.min(line.y1,line.y2)<=bottom+2.5&&Math.max(line.y1,line.y2)>=top-2.5)))return;
+  if(!ys.every(y=>horizontal.some(line=>Math.abs(line.y1-y)<=2.5&&Math.min(line.x1,line.x2)<=left+2.5&&Math.max(line.x1,line.x2)>=right-2.5)))return;
+  const cells:TextGlyph[][][]=ys.slice(1).map(()=>xs.slice(1).map(()=>[]));
+  const used=new Set<TextGlyph>();
+  for(const glyph of glyphs) {
+    if(!cleanText(glyph.str)) { used.add(glyph); continue; }
+    const x=glyph.x+glyphWidth(glyph)/2,y=glyph.y+glyph.size*.3;
+    if(x<left||x>right||y<bottom||y>top)continue;
+    // A glyph crossing a divider may be a merged cell. Do not force a grid.
+    if(xs.slice(1,-1).some(bound=>glyph.x<bound-2 && glyph.x+glyphWidth(glyph)>bound+2))return;
+    const row=ys.findIndex((bound,i)=>i<ys.length-1&&y<=bound&&y>=ys[i+1]!);
+    const col=xs.findIndex((bound,i)=>i<xs.length-1&&x>=bound&&x<=xs[i+1]!);
+    if(row>=0&&col>=0){cells[row]![col]!.push(glyph);used.add(glyph);}
+  }
+  if(cells.flat(2).length<4)return;
+  const cellLines=cells.map(row=>row.map(cell=>clusterLines(cell).map(line=>({...paragraphLine(line),direction:line.direction}))));
+  const rows=cellLines.map(row=>row.map(lines=>lines.map(line=>line.text).join('\n')));
+  const headerRows=inferredHeaderRows(rows,cells[0]!.some(cell=>cell.some(glyph=>glyph.bold)));
+  return {used,table:{kind:'table',rows,cellLines,x:left,top,bottom,columnWidthsPt:xs.slice(1).map((x,i)=>x-xs[i]!),rowHeightsPt:ys.slice(1).map((y,i)=>ys[i]!-y),headerRows,columnAlignments:tableColumnAlignments(rows,headerRows),bordered:true}};
+}
+
 export function pageCharCount(lines: PdfTextLine[]): number {
   return lines.reduce((n, line) => n + line.text.replace(/\s/g, '').length, 0);
 }
@@ -969,9 +1037,24 @@ function coordinate(value: unknown, index: number): number | undefined {
 export function rulingsFromOperatorList(
   operatorList: { fnArray: ArrayLike<number>; argsArray: unknown[] },
   constructPathOp: number,
+  ops?: {save:number;restore:number;transform:number},
 ): PdfRuling[] {
   const rulings: PdfRuling[] = [];
+  let matrix=[1,0,0,1,0,0];
+  const stack:number[][]=[];
   for (let index = 0; index < operatorList.fnArray.length; index++) {
+    const op=operatorList.fnArray[index];
+    if(ops && op===ops.save){stack.push([...matrix]);continue;}
+    if(ops && op===ops.restore){matrix=stack.pop() ?? [1,0,0,1,0,0];continue;}
+    if(ops && op===ops.transform){
+      const value=operatorList.argsArray[index];
+      if(Array.isArray(value)&&value.length>=6&&value.slice(0,6).every(Number.isFinite)){
+        const [a,b,c,d,e,f]=matrix as [number,number,number,number,number,number];
+        const [g,h,i,j,k,l]=value as [number,number,number,number,number,number];
+        matrix=[a*g+c*h,b*g+d*h,a*i+c*j,b*i+d*j,a*k+c*l+e,b*k+d*l+f];
+      }
+      continue;
+    }
     if (operatorList.fnArray[index] !== constructPathOp) continue;
     const args = operatorList.argsArray[index];
     if (!Array.isArray(args)) continue;
@@ -981,10 +1064,13 @@ export function rulingsFromOperatorList(
     const x2 = coordinate(bounds, 2);
     const y2 = coordinate(bounds, 3);
     if (x1 == null || y1 == null || x2 == null || y2 == null) continue;
-    const width = Math.abs(x2 - x1);
-    const height = Math.abs(y2 - y1);
+    const corners=[[x1,y1],[x2,y1],[x1,y2],[x2,y2]].map(([x,y])=>({x:matrix[0]!*x!+matrix[2]!*y!+matrix[4]!,y:matrix[1]!*x!+matrix[3]!*y!+matrix[5]!}));
+    const left=Math.min(...corners.map(point=>point.x)),right=Math.max(...corners.map(point=>point.x));
+    const bottom=Math.min(...corners.map(point=>point.y)),top=Math.max(...corners.map(point=>point.y));
+    const width = right-left;
+    const height = top-bottom;
     if ((width <= 2.5 && height >= 8) || (height <= 2.5 && width >= 8)) {
-      rulings.push({ x1, y1, x2, y2 });
+      rulings.push({ x1:left, y1:bottom, x2:right, y2:top });
     }
   }
   return rulings;
