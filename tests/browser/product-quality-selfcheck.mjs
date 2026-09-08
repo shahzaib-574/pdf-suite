@@ -14,9 +14,16 @@ try {
   const payload=[1,2].map(i=>({name:`paper-${i}.png`,mimeType:'image/png',buffer:Buffer.from(data,'base64')}));
   await page.locator('.scan-cam input[type=file]').setInputFiles(payload);
   await page.getByRole('heading',{name:'Crop and Edit',exact:true}).waitFor();
+  async function revealPageActions(){
+    if(await page.getByRole('button',{name:'Auto crop',exact:true}).count())return;
+    const box=await page.locator('.scan-edit__slide[aria-hidden="false"] img').boundingBox();
+    await page.mouse.click(box.x+box.width*0.5,box.y+box.height*0.4);
+    await page.getByRole('button',{name:'Auto crop',exact:true}).waitFor();
+  }
+  await revealPageActions();
   await page.getByRole('button',{name:'Auto crop',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('.ps-scan-editor__image polygon')?.getAttribute('points')!=='0,0 100,0 100,100 0,100');
-  await page.getByLabel('Scan cleanup').selectOption('bw');
+  await page.getByRole('radio',{name:'Black and white',exact:true}).click();
   await page.getByRole('button',{name:'Rotate right',exact:true}).click();
   await page.getByRole('button',{name:'Move later',exact:true}).click();
   await page.waitForFunction(async()=>{
@@ -25,7 +32,7 @@ try {
   await page.reload();
   await page.getByRole('heading',{name:'Crop and Edit',exact:true}).waitFor();
   await page.getByRole('button',{name:'Edit page 2',exact:true}).click();
-  assert.equal(await page.getByLabel('Scan cleanup').inputValue(),'bw');
+  assert.equal(await page.locator('.scan-edit__filters [aria-checked="true"]').getAttribute('data-mode'),'bw');
   assert.equal(await page.locator('.ps-scan-editor__image').nth(1).evaluate(el=>el.style.transform),'rotate(90deg)');
   await mkdir('tmp/browser-qa',{recursive:true});
   for(const width of [320,412,1000]) {
@@ -36,14 +43,16 @@ try {
     await page.screenshot({path:`tmp/browser-qa/scan-quality-${width}.png`,animations:'disabled'});
   }
   await page.setViewportSize({width:412,height:915});
+  await revealPageActions();
   await page.getByRole('button',{name:'Retake',exact:true}).click();
   await page.getByRole('button',{name:'Close camera',exact:true}).click();
   assert.equal(await page.locator('.scan-edit__slide img').count(),2,'Cancelling retake must keep the original');
+  await revealPageActions();
   await page.getByRole('button',{name:'Retake',exact:true}).click();
   await page.locator('.scan-cam input[type=file]').setInputFiles({...payload[0],name:'retaken.png'});
   await page.getByRole('heading',{name:'Crop and Edit',exact:true}).waitFor();
   await page.getByRole('button',{name:'Edit page 2',exact:true}).click();
-  assert.equal(await page.getByLabel('Scan cleanup').inputValue(),'color');
+  assert.equal(await page.locator('.scan-edit__filters [aria-checked="true"]').getAttribute('data-mode'),'color');
   await page.getByRole('button',{name:'Delete page',exact:true}).click();
   assert.equal(await page.locator('.scan-edit__slide img').count(),1);
   await page.getByRole('button',{name:'Rotate right',exact:true}).click();

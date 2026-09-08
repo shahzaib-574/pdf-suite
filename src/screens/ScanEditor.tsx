@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
-import { Camera, Images, Plus, RotateCcw, RotateCw, X } from "lucide-react";
+import { Camera, Images, Plus, RotateCcw, RotateCw, SquareArrowLeft, SquareArrowRight, Trash2, X } from "lucide-react";
 import type { PickedFile } from "../lib/types";
 import { AnimatedButton } from "../components";
 import { useBackHandler } from "./back";
@@ -17,6 +17,11 @@ const full = (): Point[] => [
 ];
 const WORKER_START = "WORKER_START";
 const PAGER_WINDOW = 6;
+const CLEANUP_MODES = [
+  { id: "color" as const, label: "Original color", short: "Color" },
+  { id: "gray" as const, label: "Grayscale", short: "Gray" },
+  { id: "bw" as const, label: "Black and white", short: "B&W" },
+];
 function pagerShift(active: number, count: number): number {
   if (count <= PAGER_WINDOW) return 0;
   const focus = Math.min(Math.max(0, active), count - 1);
@@ -102,14 +107,16 @@ export function ScanEditor({
   const [rotation, setRotation] = useState(initialEdits[0]?.rotation ?? 0);
   const [mode, setMode] = useState<ScanEdit['mode']>(initialEdits[0]?.mode ?? 'color');
   const [detecting, setDetecting] = useState(false);
-  const [cleanupPreview, setCleanupPreview] = useState<{file:PickedFile;mode:ScanEdit['mode'];url:string} | null>(null);
+  const [filterPreviews, setFilterPreviews] = useState<{file:PickedFile;gray:string;bw:string} | null>(null);
   const detectionVersion = useRef(0);
   const [previewRotations, setPreviewRotations] = useState(() => new Map(files.map((file,i) => [file,initialEdits[i]?.rotation ?? 0])));
   const [animateRotation, setAnimateRotation] = useState(false);
   const [dirty, setDirty] = useState(initialEdits[0]?.dirty ?? false);
   const [drag, setDrag] = useState<number | null>(null);
+  const [imageActionsOpen, setImageActionsOpen] = useState(false);
   const drafts = useRef(new Map<PickedFile, ScanPageDraft>(files.flatMap((file, i) => initialEdits[i] ? [[file, initialEdits[i]!] as const] : [])));
   const touchStart = useRef<number | null>(null);
+  const dragged = useRef(false);
   const edgeDrag = useRef<{pointerId:number;edge:number;x:number;y:number;width:number;height:number;points:Point[]} | null>(null);
   const [thumbnails, setThumbnails] = useState<string[]>([]);
   useBackHandler(() => {
@@ -127,24 +134,28 @@ export function ScanEditor({
   }, [files]);
   const file = files[index];
   useLayoutEffect(() => {
-    // Never reuse a revoked cleanup preview when returning to a previous mode.
+    // Never reuse a revoked cleanup preview when returning to a previous page.
     // oxlint-disable-next-line react/set-state-in-effect -- Detach the previous URL before its resource is released.
-    setCleanupPreview(null);
-    if(!file || mode==='color') return;
-    let cancelled=false, url:string | undefined;
+    setFilterPreviews(null);
+    if(!file) return;
+    let cancelled=false;
+    const urls:string[]=[];
     void (async () => {
       const bitmap=await createImageBitmap(new Blob([toArrayBuffer(file.bytes)],{type:file.mime}));
       const scale=Math.min(1,640/Math.max(bitmap.width,bitmap.height));
       const canvas=new OffscreenCanvas(Math.round(bitmap.width*scale),Math.round(bitmap.height*scale));
       canvas.getContext('2d')!.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
       const blob=await canvas.convertToBlob({type:'image/png'});
-      const result=await applyScanEdit(await blob.arrayBuffer(),'image/png',{corners:full(),mode,rotate:0});
-      if(cancelled)return;
-      url=URL.createObjectURL(new Blob([result],{type:'image/png'}));
-      setCleanupPreview({file,mode,url});
+      const grayBytes=await applyScanEdit(await blob.arrayBuffer(),'image/png',{corners:full(),mode:'gray',rotate:0});
+      const bwBytes=await applyScanEdit(await blob.arrayBuffer(),'image/png',{corners:full(),mode:'bw',rotate:0});
+      const gray=URL.createObjectURL(new Blob([grayBytes],{type:'image/png'}));
+      const bw=URL.createObjectURL(new Blob([bwBytes],{type:'image/png'}));
+      if(cancelled){URL.revokeObjectURL(gray);URL.revokeObjectURL(bw);return;}
+      urls.push(gray,bw);
+      setFilterPreviews({file,gray,bw});
     })().catch(()=>{if(!cancelled)setError('Cleanup preview is unavailable. Check the PDF preview after Next.');});
-    return()=>{cancelled=true;if(url)URL.revokeObjectURL(url);};
-  }, [file,mode]);
+    return()=>{cancelled=true;urls.forEach(url=>URL.revokeObjectURL(url));};
+  }, [file]);
   const draftCallback = useRef(onDrafts);
   useEffect(() => { draftCallback.current = onDrafts; }, [onDrafts]);
   useEffect(() => {
@@ -160,6 +171,7 @@ export function ScanEditor({
     if (busy || next < 0 || next > files.length || next === index) return;
     remember();
     detectionVersion.current++; setDetecting(false);
+    setImageActionsOpen(false);
     setAnimateRotation(false);
     const draft = files[next] ? drafts.current.get(files[next]!) : undefined;
     setIndex(next); setCorners(draft?.corners ?? full()); setRotation(draft?.rotation ?? 0); setMode(draft?.mode ?? 'color'); setDirty(draft?.dirty ?? false); setError("");
@@ -178,6 +190,7 @@ export function ScanEditor({
   }
   function changePages(next: PickedFile[], nextIndex: number) {
     remember(); detectionVersion.current++;setDetecting(false);
+    setImageActionsOpen(false);
     const draft = next[nextIndex] ? drafts.current.get(next[nextIndex]!) : undefined;
     setIndex(nextIndex);setCorners(draft?.corners ?? full());setRotation(draft?.rotation ?? 0);setMode(draft?.mode ?? 'color');setDirty(draft?.dirty ?? false);
     onFiles(next);
@@ -225,15 +238,17 @@ export function ScanEditor({
     if (pagerView.current) pagerView.current.scrollLeft = 0;
   }, [index, pagerOffset, files.length]);
   function onCarouselPointerDown(e: PointerEvent<HTMLDivElement>) {
-    if ((e.target as HTMLElement).closest("button, input")) return;
+    if ((e.target as HTMLElement).closest("button, input, select, label")) return;
     touchStart.current = e.clientX;
+    dragged.current = false;
     setSlideWidth(e.currentTarget.clientWidth || 1);
-    setDrag(0);
     e.currentTarget.setPointerCapture(e.pointerId);
   }
   function onCarouselPointerMove(e: PointerEvent<HTMLDivElement>) {
     if (touchStart.current === null) return;
     const delta = e.clientX - touchStart.current;
+    if (!dragged.current && Math.abs(delta) < 8) return;
+    dragged.current = true;
     const atStart = index === 0 && delta > 0;
     const atEnd = index === lastPage && delta < 0;
     setDrag(atStart || atEnd ? delta * 0.22 : delta);
@@ -241,9 +256,23 @@ export function ScanEditor({
   function onCarouselPointerUp(e: PointerEvent<HTMLDivElement>) {
     if (touchStart.current === null) return;
     const delta = e.clientX - touchStart.current;
+    const swiped = dragged.current && Math.abs(delta) > 45;
+    const tapped = !dragged.current && Math.abs(delta) < 8;
     touchStart.current = null;
+    dragged.current = false;
     setDrag(null);
-    if (Math.abs(delta) > 45) selectPage(index + (delta < 0 ? 1 : -1));
+    if (swiped) {
+      setImageActionsOpen(false);
+      selectPage(index + (delta < 0 ? 1 : -1));
+      return;
+    }
+    if (
+      tapped &&
+      file &&
+      !(e.target as HTMLElement).closest("button, input, select, label")
+    ) {
+      setImageActionsOpen((open) => !open);
+    }
   }
   async function openGallery(): Promise<void> {
     if (busy) return;
@@ -276,15 +305,24 @@ export function ScanEditor({
         </AnimatedButton>
       </header>
       <div className={`scan-edit__carousel${drag !== null ? " is-dragging" : ""}`} ref={carousel} role="region" aria-label="Scan pages" aria-roledescription="carousel" tabIndex={0}
-        onKeyDown={e => { if ((e.target as HTMLElement).closest('button')) return; if(e.key === 'ArrowRight') selectPage(index + 1); if(e.key === 'ArrowLeft') selectPage(index - 1); }}
+        onKeyDown={e => {
+          if ((e.target as HTMLElement).closest('button')) return;
+          if(e.key === 'ArrowRight') selectPage(index + 1);
+          if(e.key === 'ArrowLeft') selectPage(index - 1);
+          if ((e.key === 'Enter' || e.key === ' ') && file) {
+            e.preventDefault();
+            setImageActionsOpen(open => !open);
+          }
+        }}
         onPointerDown={onCarouselPointerDown}
         onPointerMove={onCarouselPointerMove}
         onPointerUp={onCarouselPointerUp}
-        onPointerCancel={() => {touchStart.current = null; setDrag(null);}}>
+        onPointerCancel={() => {touchStart.current = null; dragged.current = false; setDrag(null);}}>
         <div className="scan-edit__track" style={{transform: `translateX(calc(-${index * 100}% + ${dragPx}px))`}}>
           {thumbnails.map((thumb, pageIndex) => <div className="scan-edit__slide" key={pageIndex} inert={index !== pageIndex} aria-hidden={index !== pageIndex}>
+            <div className="scan-edit__preview">
             <div className={`ps-scan-editor__image${animateRotation && pageIndex === index ? " is-rotating" : ""}`} style={{width: (pageIndex === index ? turn : previewRotations.get(files[pageIndex]!) ?? 0) % 180 ? `min(calc(100cqh - 24px), calc((100cqw - 64px) * ${ratios[thumb] ?? 0.75}))` : `min(calc(100cqw - 64px), calc((100cqh - 24px) * ${ratios[thumb] ?? 0.75}))`, transform: `rotate(${pageIndex === index ? rotation : previewRotations.get(files[pageIndex]!) ?? 0}deg)`}}>
-              <img src={pageIndex===index && mode!=='color' && cleanupPreview?.file===file && cleanupPreview.mode===mode ? cleanupPreview.url : thumb} onLoad={e => { const img = e.currentTarget; const ratio = img.naturalWidth / img.naturalHeight; setRatios(current => current[thumb] === ratio ? current : {...current, [thumb]: ratio}); }} draggable={false} alt={`Scan page ${pageIndex + 1}`} />
+              <img src={pageIndex===index && mode!=='color' && filterPreviews?.file===file ? (mode==='gray' ? filterPreviews.gray : filterPreviews.bw) : thumb} onLoad={e => { const img = e.currentTarget; const ratio = img.naturalWidth / img.naturalHeight; setRatios(current => current[thumb] === ratio ? current : {...current, [thumb]: ratio}); }} draggable={false} alt={`Scan page ${pageIndex + 1}`} />
               {index === pageIndex ? <><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polygon points={corners.map(p => `${p.x * 100},${p.y * 100}`).join(" ")} /></svg>
         {corners.map((p, i) => (
           <button
@@ -296,6 +334,7 @@ export function ScanEditor({
             disabled={busy}
             onPointerDown={(e) => {
               detectionVersion.current++;setDetecting(false);
+              setImageActionsOpen(false);
               e.currentTarget.setPointerCapture(e.pointerId);
             }}
             onPointerMove={(e) => {
@@ -357,6 +396,7 @@ export function ScanEditor({
             aria-label={`${side} edge: drag or use arrow keys to adjust`} disabled={busy}
             onPointerDown={event => {
               event.stopPropagation();detectionVersion.current++;setDetecting(false);
+              setImageActionsOpen(false);
               const rect=event.currentTarget.parentElement!.getBoundingClientRect();
               edgeDrag.current={pointerId:event.pointerId,edge,x:event.clientX,y:event.clientY,width:rect.width,height:rect.height,points:corners};
               event.currentTarget.setPointerCapture(event.pointerId);
@@ -384,6 +424,17 @@ export function ScanEditor({
         })}
               </> : null}
             </div>
+            {pageIndex === index && imageActionsOpen && file ? (
+              <div className="scan-edit__image-actions" role="group" aria-label="Capture actions" onPointerDown={event => event.stopPropagation()}>
+                <button type="button" disabled={busy || detecting} onClick={() => void autoCrop()}>
+                  {detecting ? "Finding edges…" : "Auto crop"}
+                </button>
+                <button type="button" disabled={busy} onClick={() => leave(() => onRetake(index))}>
+                  Retake
+                </button>
+              </div>
+            ) : null}
+            </div>
           </div>)}
           <div className="scan-edit__slide" inert={index !== lastPage} aria-hidden={index !== lastPage}>
             <div className="scan-edit__add" role="group" aria-labelledby="scan-add-lead">
@@ -396,6 +447,14 @@ export function ScanEditor({
           </div>
         </div>
         <div className="scan-edit__pager" aria-label="Select page">
+          <AnimatedButton
+            variant="ghost"
+            className="btn--icon"
+            icon={SquareArrowLeft}
+            aria-label="Move earlier"
+            disabled={busy || !file || index === 0}
+            onClick={() => {const next=[...files];[next[index-1],next[index]]=[next[index]!,next[index-1]!];changePages(next,index-1);}}
+          />
           <div className="scan-edit__pager-well">
             <span className="scan-edit__pager-thumb" aria-hidden="true" style={{transform: `translateX(calc(${thumbPos} * var(--pager-slot)))`}} />
             <div
@@ -420,21 +479,58 @@ export function ScanEditor({
             </div>
             <button type="button" aria-label="Add more pages" aria-current={index === lastPage ? "page" : undefined} disabled={busy} onClick={() => selectPage(lastPage)}><Plus size={14} strokeWidth={2.4} /></button>
           </div>
+          <AnimatedButton
+            variant="ghost"
+            className="btn--icon"
+            icon={SquareArrowRight}
+            aria-label="Move later"
+            disabled={busy || !file || index >= files.length-1}
+            onClick={() => {const next=[...files];[next[index+1],next[index]]=[next[index]!,next[index+1]!];changePages(next,index+1);}}
+          />
         </div>
       </div>
       {error ? <p role="alert">{error}</p> : null}
+      {file ? (
       <div className="scan-edit__options" aria-label="Page adjustments">
-        <button type="button" disabled={busy || !file || detecting} onClick={() => void autoCrop()}>{detecting ? 'Finding edges…' : 'Auto crop'}</button>
-        <label>Cleanup <select aria-label="Scan cleanup" value={mode} disabled={busy || !file} onChange={e => {setMode(e.target.value as ScanEdit['mode']);setDirty(true);}}><option value="color">Original color</option><option value="gray">Grayscale</option><option value="bw">Black and white</option></select></label>
-        <button type="button" disabled={busy || !file} onClick={() => leave(() => onRetake(index))}>Retake</button>
-        <button type="button" disabled={busy || !file} onClick={() => changePages(files.filter((_, i) => i !== index), Math.max(0, index - 1))}>Delete page</button>
-        <button type="button" disabled={busy || !file || index === 0} onClick={() => {const next=[...files];[next[index-1],next[index]]=[next[index]!,next[index-1]!];changePages(next,index-1);}}>Move earlier</button>
-        <button type="button" disabled={busy || !file || index >= files.length-1} onClick={() => {const next=[...files];[next[index+1],next[index]]=[next[index]!,next[index+1]!];changePages(next,index+1);}}>Move later</button>
-        {file?.scanSource ? <button type="button" disabled={busy} onClick={() => {const next=[...files];next[index]=file.scanSource!;changePages(next,index);}}>Restore original</button> : null}
+        <div className="scan-edit__filters" role="radiogroup" aria-label="Scan cleanup">
+          {CLEANUP_MODES.map((filter) => {
+            const processed = filterPreviews?.file === file ? filterPreviews : null;
+            const src = filter.id === "color" || !processed
+              ? thumbnails[index]
+              : filter.id === "gray" ? processed.gray : processed.bw;
+            return (
+              <button
+                key={filter.id}
+                type="button"
+                role="radio"
+                data-mode={filter.id}
+                aria-label={filter.label}
+                aria-checked={mode === filter.id}
+                disabled={busy}
+                onClick={() => {setMode(filter.id);setDirty(true);}}
+              >
+                {src ? (
+                  <img
+                    src={src}
+                    alt=""
+                    draggable={false}
+                    style={filter.id === "color" || processed ? undefined : {filter: filter.id === "bw" ? "grayscale(1) contrast(1.7)" : "grayscale(1)"}}
+                  />
+                ) : (
+                  <span className="scan-edit__filter-blank" aria-hidden="true" />
+                )}
+                <span aria-hidden="true">{filter.short}</span>
+              </button>
+            );
+          })}
+        </div>
+        {file.scanSource ? <button type="button" disabled={busy} onClick={() => {const next=[...files];next[index]=file.scanSource!;changePages(next,index);}}>Restore original</button> : null}
       </div>
+      ) : null}
       <footer className="scan-edit__toolbar">
         <AnimatedButton variant="ghost" icon={RotateCcw} aria-label="Rotate left" disabled={busy || index === lastPage} onClick={() => rotatePreview(-90)} />
         <AnimatedButton variant="ghost" icon={RotateCw} aria-label="Rotate right" disabled={busy || index === lastPage} onClick={() => rotatePreview(90)} />
+        <AnimatedButton variant="ghost" className="scan-edit__delete" icon={Trash2} aria-label="Delete page" disabled={busy || !file} onClick={() => changePages(files.filter((_, i) => i !== index), Math.max(0, index - 1))} />
         <span className="scan-edit__spacer" />
         <AnimatedButton variant="ghost" disabled={busy || index === lastPage} onClick={() => {detectionVersion.current++;setDetecting(false);setAnimateRotation(false);setCorners(full());setRotation(0);setMode('color');setDirty(false);if(file) {drafts.current.delete(file);setPreviewRotations(current => {const next = new Map(current);next.delete(file);return next;});}}}>Reset</AnimatedButton>
         <AnimatedButton disabled={busy} onClick={() => {void complete();}}>{busy ? "Preparing…" : "Next"}</AnimatedButton>

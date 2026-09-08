@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -131,10 +130,6 @@ export function ScanCamera({
     [pages],
   );
   const lastThumb = thumbs[thumbs.length - 1];
-  const goHome = useCallback(() => {
-    onClose();
-    replaceWith("#/");
-  }, [onClose]);
   useOverlayBack(onClose);
   useBackHandler(() => {
     onClose();
@@ -241,12 +236,12 @@ export function ScanCamera({
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        goHome();
+        onClose();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [goHome]);
+  }, [onClose]);
 
   async function addImageFiles(files: FileList | File[]): Promise<void> {
     if (files.length === 0) return;
@@ -362,7 +357,7 @@ export function ScanCamera({
           type="button"
           className="scan-cam__icon-btn"
           aria-label="Close camera"
-          onClick={goHome}
+          onClick={onClose}
         >
           <X size={22} strokeWidth={2.2} aria-hidden="true" />
         </button>

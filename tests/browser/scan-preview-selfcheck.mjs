@@ -10,20 +10,24 @@ try {
   const image=page.locator('.scan-edit__slide img').first();
   const pixel=()=>image.evaluate(async img=>{await img.decode();const c=document.createElement('canvas');c.width=1;c.height=1;const ctx=c.getContext('2d');ctx.drawImage(img,0,0,1,1);return [...ctx.getImageData(0,0,1,1).data];});
   const original=await pixel();
+  const cleanup={color:'Original color',gray:'Grayscale',bw:'Black and white'};
+  async function chooseCleanup(mode){
+    await page.getByRole('radio',{name:cleanup[mode],exact:true}).click();
+  }
   for(const reload of [false,true]) {
     if(reload){await page.reload();await page.getByRole('heading',{name:'Crop and Edit',exact:true}).waitFor();}
     for(const mode of ['gray','bw','gray']) {
       const before=await image.getAttribute('src');
-      await page.getByLabel('Scan cleanup').selectOption(mode);
+      await chooseCleanup(mode);
       await page.waitForFunction(before=>{const img=document.querySelector('.scan-edit__slide img');return img.src!==before&&img.complete&&img.naturalWidth>0;},before);
       const cleaned=await pixel();assert.equal(cleaned[0],cleaned[1]);assert.equal(cleaned[1],cleaned[2]);
-      await page.getByLabel('Scan cleanup').selectOption('color');
+      await chooseCleanup('color');
       assert.deepEqual(await pixel(),original,'Original color must be readable and unchanged');
       assert.equal(await image.evaluate(async img=>(await fetch(img.src)).ok),true,'Original URL must remain live');
     }
-    await page.getByLabel('Scan cleanup').selectOption('gray');
-    await page.getByLabel('Scan cleanup').selectOption('bw');
-    await page.getByLabel('Scan cleanup').selectOption('color');
+    await chooseCleanup('gray');
+    await chooseCleanup('bw');
+    await chooseCleanup('color');
     assert.deepEqual(await pixel(),original);
   }
   console.log('PASS grayscale/BW → original, rapid switches and draft reload preserve the original color preview');
