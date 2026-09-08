@@ -12,7 +12,7 @@ const importer = registerPlugin<{
   release(options: { id: string }): Promise<void>;
   addListener(
     event: "incoming",
-    callback: () => void,
+    callback: (event?: {openingPdf?:boolean}) => void,
   ): Promise<PluginListenerHandle>;
 }>("FileImporter");
 
@@ -86,6 +86,7 @@ export async function pickGalleryImages(max: number): Promise<File[] | null> {
 export function subscribeIncoming(
   onFiles: (files: PickedFile[]) => void,
   onError: (message: string) => void,
+  onOpeningPdf?: () => void,
 ): () => void {
   if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== "android")
     return () => {};
@@ -111,6 +112,7 @@ export function subscribeIncoming(
           )
             throw new Error("Shared files exceed 128 MB.");
           const files: PickedFile[] = [];
+          if(active && batch.files.length===1 && (batch.files[0]!.mime==='application/pdf' || batch.files[0]!.name.toLowerCase().endsWith('.pdf'))) onOpeningPdf?.();
           for (const file of batch.files) {
             if (!active) break;
             const bytes = await readIncomingBytes(file);
@@ -140,7 +142,8 @@ export function subscribeIncoming(
     }
   }
   void importer
-    .addListener("incoming", () => {
+    .addListener("incoming", event => {
+      if(active && event?.openingPdf) onOpeningPdf?.();
       void drain();
     })
     .then((handle) => {

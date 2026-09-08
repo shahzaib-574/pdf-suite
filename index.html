@@ -37,6 +37,20 @@
     </script>
   </head>
   <body>
+    <style>
+      #app-boot {position:fixed;inset:0;z-index:10000;display:grid;place-items:center;background:#eef1f7;color:#181725;font-family:system-ui,sans-serif;text-align:center}
+      [data-theme=dark] #app-boot {background:#151621;color:#f8f8fc}
+      #app-boot img {width:104px;height:104px;display:block;margin:0 auto 20px}
+      #app-boot strong {display:block;font-size:28px;letter-spacing:-.7px}
+      #app-boot p {margin:8px 0 24px;font-size:14px;opacity:.7}
+      .app-boot-track {height:3px;width:96px;border-radius:4px;overflow:hidden;margin:auto;background:#cfc7eb}
+      .app-boot-track::after {content:"";display:block;width:40%;height:100%;background:#6333ed;animation:boot-progress 1s ease-in-out infinite alternate}
+      @keyframes boot-progress {to{transform:translateX(150%)}}
+      @media(prefers-reduced-motion:reduce){.app-boot-track::after{animation:none;width:100%}}
+    </style>
+    <div id="app-boot" role="status" aria-label="Opening Ream">
+      <div><img src="./ream-icon.svg" alt=""/><strong>Ream</strong><p>Opening your workspace…</p><div class="app-boot-track" aria-hidden="true"></div></div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

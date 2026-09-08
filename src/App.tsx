@@ -5,7 +5,7 @@ import { toolById } from "./lib/catalog";
 import type { Route, PickedFile, ToolId } from "./lib/types";
 import { subscribeIncoming } from "./store/incoming";
 import { queueToolFiles } from "./store/toolInput";
-import { setCurrentViewer, setLastJob } from "./store/lastJob";
+import { beginViewerImport, setCurrentViewer, setLastJob } from "./store/lastJob";
 import { navigate } from "./screens/nav";
 import { installAppBack } from "./screens/back";
 import { AnimatedButton } from "./components";
@@ -23,6 +23,7 @@ import { markUpdateReady } from "./store/updates";
 import { Capacitor } from "@capacitor/core";
 
 export default function App() {
+  useEffect(() => { document.getElementById('app-boot')?.remove(); }, []);
   useEffect(() => {
     const frame = requestAnimationFrame(() => { void markUpdateReady(); });
     return () => cancelAnimationFrame(frame);
@@ -30,18 +31,19 @@ export default function App() {
   const [inputRevision, setInputRevision] = useState(0);
   const [incoming, setIncoming] = useState<PickedFile[]>([]);
   const incomingRef = useRef<PickedFile[]>([]);
+  const openingPdf = useRef<ReturnType<typeof beginViewerImport> | null>(null);
   const [importError, setImportError] = useState("");
   useEffect(
     () =>
       subscribeIncoming((files) => {
-        const combined = [...incomingRef.current, ...files];
+        const combined = openingPdf.current ? files : [...incomingRef.current, ...files];
         if (
           combined.length > 200 ||
           combined.reduce((sum, f) => sum + f.bytes.length, 0) > MAX_INPUT_BYTES
         ) {
-          setImportError(
-            "Shared files exceed 200 files or 128 MB. Use or dismiss the current group, then share the new files again.",
-          );
+          const message="Shared files exceed 200 files or 128 MB. Use or dismiss the current group, then share the new files again.";
+          if(openingPdf.current){openingPdf.current.reject(new Error(message));openingPdf.current=null;}
+          else setImportError(message);
           return;
         }
         const file = combined[0];
@@ -53,6 +55,11 @@ export default function App() {
           // An external PDF is an open request, not a tool-selection request.
           // Clear the previous result because Viewer otherwise prefers its bytes.
           setLastJob(null, null);
+          if(openingPdf.current) {
+            openingPdf.current.resolve(file);openingPdf.current=null;
+            incomingRef.current=[];setIncoming([]);setImportError('');
+            return;
+          }
           setCurrentViewer(file.bytes, file.name);
           incomingRef.current = [];
           setIncoming([]);
@@ -64,7 +71,14 @@ export default function App() {
         }
         incomingRef.current = combined;
         setIncoming(combined);
-      }, setImportError),
+      }, message=>{
+        if(openingPdf.current){openingPdf.current.reject(new Error(message));openingPdf.current=null;}
+        else setImportError(message);
+      }, ()=>{
+        if(openingPdf.current)return;
+        setLastJob(null,null);openingPdf.current=beginViewerImport();
+        setImportError('');navigate('#/viewer');setInputRevision(revision=>revision+1);
+      }),
     [],
   );
   function openIncoming(tool: ToolId, files: PickedFile[]) {

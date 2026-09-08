@@ -35,6 +35,8 @@ import { saveBytes, shareOrDownload } from "../store/files";
 import {
   currentViewerBytes,
   currentViewerName,
+  pendingViewerImport,
+  setCurrentViewer,
   lastJob,
 } from "../store/lastJob";
 import { getRecent } from "../store/recents";
@@ -263,6 +265,15 @@ export function Viewer({ recentId }: ViewerProps) {
           return;
         }
         setBytes(item.bytes);
+        return;
+      }
+      const pending = pendingViewerImport;
+      if(pending) {
+        setName('Opening PDF');setLoadingLabel('Loading shared PDF…');
+        const file=await pending;
+        if(pendingViewerImport===pending)setCurrentViewer(file.bytes,file.name);
+        if(cancelled)return;
+        setName(file.name);setBytes(file.bytes);setLoadingLabel('Opening document…');
         return;
       }
       const job = lastJob.result;

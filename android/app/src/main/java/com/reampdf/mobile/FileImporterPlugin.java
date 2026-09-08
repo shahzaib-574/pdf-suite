@@ -61,6 +61,10 @@ public class FileImporterPlugin extends Plugin {
         else return;
         collectClipUris(intent, uris);
         if (uris.isEmpty()) return;
+        if (uris.size() == 1 && "application/pdf".equalsIgnoreCase(intent.getType())) {
+            JSObject opening = new JSObject(); opening.put("openingPdf", true);
+            notifyListeners("incoming", opening, true);
+        }
         execute(() -> {
             try {
                 JSArray imported = copyUris(uris, false, "Share up to 200 files at a time.", "The shared file is unavailable.", "Shared files exceed 128 MB. Send a smaller group.");

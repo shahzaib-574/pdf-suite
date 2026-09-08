@@ -135,6 +135,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const pro = usePro();
   const [initialScan] = useState(() => takeInitialScan(id));
   const [picked, setPicked] = useState<PickedFile[]>(initialScan.files);
+  const [error, setError] = useState<string | null>(initialScan.error);
   const [cameraOpen, setCameraOpen] = useState(
     () => id === "scan" && initialScan.files.length === 0,
   );
@@ -146,6 +147,33 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const [draftReady, setDraftReady] = useState(id !== 'scan' || initialScan.files.length > 0);
   const [scanEdits, setScanEdits] = useState<(ScanPageDraft | null)[]>([]);
   const [ocrLanguage, setOcrLanguage] = useState<OcrLanguage>('eng');
+  const [pdfAccess, setPdfAccess] = useState<{file:PickedFile;password?:string} | null>(null);
+  const [pdfFailedFile, setPdfFailedFile] = useState<PickedFile | null>(null);
+  const [passwordPrompt, setPasswordPrompt] = useState<{file:PickedFile;incorrect:boolean} | null>(null);
+  const [inputPassword, setInputPassword] = useState('');
+  const passwordReply = useRef<((password:string)=>void) | null>(null);
+  const inputPdf = picked[0];
+  const checkingPdf = id === 'pdf-docx' && !!inputPdf && pdfAccess?.file !== inputPdf;
+  useEffect(() => {
+    if(id !== 'pdf-docx' || !inputPdf)return;
+    const controller=new AbortController();
+    let enteredPassword=inputPdf.password;
+    let rejectReply:((reason:Error)=>void) | undefined;
+    void engine.openViewer(inputPdf,undefined,{
+      indexText:false,
+      signal:controller.signal,
+      onPassword:incorrect => new Promise<string>((resolve,reject)=>{
+        if(controller.signal.aborted){reject(new Error('Cancelled'));return;}
+        rejectReply=reject;
+        passwordReply.current=value=>{enteredPassword=value;passwordReply.current=null;setPasswordPrompt(null);resolve(value);};
+        setInputPassword('');setPasswordPrompt({file:inputPdf,incorrect});
+      }),
+    }).then(async session=>{
+      await session.destroy();
+      if(!controller.signal.aborted){setPdfAccess({file:inputPdf,password:enteredPassword});setPasswordPrompt(null);setInputPassword('');}
+    }).catch(error=>{if(!controller.signal.aborted){setPdfFailedFile(inputPdf);setError(error instanceof Error ? error.message : 'Could not open this PDF.');}});
+    return()=>{controller.abort();rejectReply?.(new Error('Cancelled'));passwordReply.current=null;};
+  }, [id,inputPdf]);
   const [docxInspection, setDocxInspection] = useState<{file:PickedFile;warnings:string[]} | null>(null);
   const docxChecking = id === 'docx-pdf' && !!picked[0] && docxInspection?.file !== picked[0];
   const docxWarnings = docxInspection?.file === picked[0] ? docxInspection?.warnings ?? [] : [];
@@ -174,7 +202,6 @@ export function ToolFlow({ id }: ToolFlowProps) {
 
   const [jobProgress, setJobProgress] = useState<number | undefined>();
   const [jobLabel, setJobLabel] = useState("Working on-device…");
-  const [error, setError] = useState<string | null>(initialScan.error);
   const [pageCount, setPageCount] = useState(0);
   const [startPage, setStartPage] = useState(1);
   const [endPage, setEndPage] = useState(1);
@@ -525,7 +552,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
       setError("Fill in the options first.");
       return;
     }
-    const first = picked[0];
+    if(checkingPdf)return;
+    const first = tool.id === 'pdf-docx' && pdfAccess?.file === picked[0] ? {...picked[0]!,password:pdfAccess.password} : picked[0];
     if (!first) return;
     const controller = new AbortController();
     jobController.current = controller;
@@ -643,6 +671,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
     !locked &&
     !busy &&
     !scanBusy &&
+    !checkingPdf &&
     !(tool.id === 'docx-pdf' && docxChecking) &&
     tool.id !== "view" &&
     picked.length >= tool.minFiles &&
@@ -792,6 +821,15 @@ export function ToolFlow({ id }: ToolFlowProps) {
         ) : null}
         {tool.id === "pdf-docx" ? (
           <>
+          {passwordPrompt?.file === inputPdf && inputPdf ? (
+            <form className="ps-banner" aria-label="Unlock PDF" onSubmit={event=>{event.preventDefault();passwordReply.current?.(inputPassword);}}>
+              <p>This PDF is password protected. Enter its password to continue.</p>
+              {passwordPrompt.incorrect ? <p role="alert">That password was incorrect. Try again.</p> : null}
+              <label className="ps-field">Document password<input autoFocus type="password" autoComplete="off" value={inputPassword} onChange={event=>setInputPassword(event.target.value)} /></label>
+              <button type="submit" className="btn">Unlock PDF</button>
+              <button type="button" className="btn" onClick={()=>{setPicked([]);setPasswordPrompt(null);setInputPassword('');}}>Cancel</button>
+            </form>
+          ) : checkingPdf && pdfFailedFile !== inputPdf ? <p role="status">Checking PDF access…</p> : null}
           <label className="ps-field">Scanned text language<select aria-label="Scanned text language" value={ocrLanguage} disabled={busy} onChange={event=>setOcrLanguage(event.target.value as OcrLanguage)}>{OCR_LANGUAGES.map(language=><option key={language.id} value={language.id}>{language.label}</option>)}</select></label>
           <p className="ps-note">
             Rebuilds styled text, detected tables, and two-column layouts.

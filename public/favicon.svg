@@ -1,10 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-5 -6 58 58" role="img" aria-label="Ream">
-  <defs>
-    <linearGradient id="ream-gradient" x1="7" y1="2" x2="41" y2="44" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#5c46e6"/>
-      <stop offset="0.55" stop-color="#866cff"/>
-      <stop offset="1" stop-color="#48bff0"/>
-    </linearGradient>
-  </defs>
-  <path fill="url(#ream-gradient)" d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Ream PDF tools">
+  <defs><linearGradient id="violet" x2="1" y2="1"><stop stop-color="#743cff"/><stop offset="1" stop-color="#5630e8"/></linearGradient></defs>
+  <rect width="512" height="512" rx="108" fill="url(#violet)"/>
+  <path d="M148 64H100Q64 64 64 100V148M364 64H412Q448 64 448 100V148M64 364V412Q64 448 100 448H148M448 364V412Q448 448 412 448H364" fill="none" stroke="#fff" stroke-width="22" stroke-linecap="round"/>
+  <path d="M162 112H300L374 186V370Q374 394 350 394H162Q138 394 138 370V136Q138 112 162 112Z" fill="#fff"/>
+  <path d="M300 112V162Q300 186 324 186H374Z" fill="#d9caff"/>
+  <g fill="#6333ed" fill-rule="evenodd">
+    <path d="M169 232H195Q222 232 222 257Q222 282 195 282H185V307H169ZM185 246V268H195Q206 268 206 257Q206 246 195 246Z"/>
+    <path d="M231 232H252Q285 232 285 269Q285 307 252 307H231ZM247 247V292H253Q269 292 269 269Q269 247 253 247Z"/>
+    <path d="M296 232H343V247H312V263H339V278H312V307H296Z"/>
+  </g>
 </svg>

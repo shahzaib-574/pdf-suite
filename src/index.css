@@ -367,11 +367,11 @@ ol {
   height: 34px;
   flex-shrink: 0;
   object-fit: contain;
-  padding: 5px;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  padding: 0;
+  background: transparent;
+  border: 0;
   border-radius: 11px;
-  box-shadow: var(--shadow-soft);
+  box-shadow: none;
 }
 
 .shell__titles {
@@ -571,14 +571,19 @@ html.is-scan-camera .skip-to-nav {
   height: 32px;
   display: grid;
   place-items: center;
-  color: var(--brass);
-  background: var(--primary-soft);
+  color: #fff;
+  background: #6333ed;
   border-radius: 10px;
 }
 
 .tile__icon svg {
   width: 15px;
   height: 15px;
+}
+.tile .tile__icon svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 1.8;
 }
 
 .tile__pro {
