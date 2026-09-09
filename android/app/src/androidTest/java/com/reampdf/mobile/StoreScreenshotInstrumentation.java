@@ -1,6 +1,8 @@
 package com.reampdf.mobile;
 
 import android.app.Activity;
+import android.app.Instrumentation;
+import android.os.Bundle;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -14,27 +16,37 @@ import android.os.ParcelFileDescriptor;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
-import androidx.core.content.FileProvider;
-import androidx.test.core.app.ActivityScenario;
-import androidx.test.ext.junit.runners.AndroidJUnit4;
-import androidx.test.platform.app.InstrumentationRegistry;
 import org.json.JSONArray;
 import org.json.JSONObject;
-import org.junit.Assume;
-import org.junit.Test;
-import org.junit.runner.RunWith;
 import java.io.*;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import static org.junit.Assert.*;
 
 /** Captures real, signed-release Android framebuffer pixels using a synthetic PDF. */
-@RunWith(AndroidJUnit4.class)
-public class StoreScreenshotsTest {
-    private ActivityScenario<Activity> scenario;
+public class StoreScreenshotInstrumentation extends Instrumentation {
+    private Activity activity;
+    private Bundle arguments;
+    @Override public void onCreate(Bundle values) { arguments=values; start(); }
+    @Override public void onStart() {
+        Bundle result=new Bundle();
+        try {
+            captureSignedReleaseListing();
+            result.putString("stream", "REAM_CAPTURE_SUCCESS\n");
+            finish(Activity.RESULT_OK,result);
+        } catch(Throwable failure) {
+            result.putString("stream", "REAM_CAPTURE_FAILURE: "+android.util.Log.getStackTraceString(failure));
+            finish(Activity.RESULT_CANCELED,result);
+        }
+    }
+    private static void assertTrue(boolean value) { assertTrue("Assertion failed",value); }
+    private static void assertTrue(String message,boolean value) { if(!value)throw new AssertionError(message); }
+    private static void assertFalse(String message,boolean value) { assertTrue(message,!value); }
+    private static void assertNotNull(Object value) { assertTrue("Unexpected null",value!=null); }
+    private static void assertEquals(Object expected,Object actual) { assertTrue("Expected "+expected+", got "+actual,java.util.Objects.equals(expected,actual)); }
+    private static void assertEquals(String message,int expected,int actual) { assertTrue(message,expected==actual); }
     private File directory;
     private final JSONArray screenshots = new JSONArray();
 
@@ -47,7 +59,7 @@ public class StoreScreenshotsTest {
     }
     private String js(String expression) throws Exception {
         CountDownLatch latch=new CountDownLatch(1); AtomicReference<String> result=new AtomicReference<>("null");
-        scenario.onActivity(activity -> {
+        runOnMainSync(() -> {
             WebView web=webView(activity.getWindow().getDecorView());
             if(web==null){latch.countDown();return;}
             web.evaluateJavascript(expression,value->{result.set(value);latch.countDown();});
@@ -75,7 +87,7 @@ public class StoreScreenshotsTest {
     }
     private void capture(String name) throws Exception {
         until("document.fonts.status==='loaded'"); Thread.sleep(700);
-        Bitmap bitmap=InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();
+        Bitmap bitmap=getUiAutomation().takeScreenshot();
         assertNotNull(bitmap);assertEquals(1080,bitmap.getWidth());assertEquals(1920,bitmap.getHeight());
         File file=new File(directory,name);assertFalse("Capture must not overwrite an image",file.exists());
         try(OutputStream output=new FileOutputStream(file)){assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,output));}
@@ -83,15 +95,15 @@ public class StoreScreenshotsTest {
         screenshots.put(new JSONObject().put("fileName",name).put("capturedAtUtc",Instant.now().toString()).put("sha256",fileSha(file)));
     }
 
-    @Test public void captureSignedReleaseListing() throws Exception {
-        Assume.assumeTrue("true".equals(InstrumentationRegistry.getArguments().getString("captureStoreScreenshots")));
-        Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+    private void captureSignedReleaseListing() throws Exception {
+        assertTrue("Capture must be explicitly requested", "true".equals(arguments.getString("captureStoreScreenshots")));
+        Context context=getTargetContext();
         assertEquals("com.reampdf.mobile",context.getPackageName());assertEquals(36,Build.VERSION.SDK_INT);
         assertEquals("Store captures must use the signed, non-debuggable release",0,context.getApplicationInfo().flags&ApplicationInfo.FLAG_DEBUGGABLE);
         directory=new File(context.getExternalFilesDir(null),"store-screenshots");assertTrue(directory.isDirectory()||directory.mkdirs());
         File export=new File(context.getCacheDir(),"ream-exports");assertTrue(export.isDirectory()||export.mkdirs());
         File fixture=new File(export,"Ream sample document.pdf");
-        try(InputStream input=InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("ream-screenshot-fixture.pdf");OutputStream output=new FileOutputStream(fixture)){byte[] b=new byte[8192];int n;while((n=input.read(b))!=-1)output.write(b,0,n);}
+        try(InputStream input=getContext().getAssets().open("ream-screenshot-fixture.pdf");OutputStream output=new FileOutputStream(fixture)){byte[] b=new byte[8192];int n;while((n=input.read(b))!=-1)output.write(b,0,n);}
         File scan=new File(export,"Ream sample scan.png");
         try(ParcelFileDescriptor descriptor=ParcelFileDescriptor.open(fixture,ParcelFileDescriptor.MODE_READ_ONLY);PdfRenderer renderer=new PdfRenderer(descriptor);PdfRenderer.Page sample=renderer.openPage(0)) {
             Bitmap image=Bitmap.createBitmap(1200,Math.round(1200f*sample.getHeight()/sample.getWidth()),Bitmap.Config.ARGB_8888);
@@ -99,17 +111,17 @@ public class StoreScreenshotsTest {
             try(OutputStream output=new FileOutputStream(scan)){assertTrue(image.compress(Bitmap.CompressFormat.PNG,100,output));}finally{image.recycle();}
         }
         Intent launch=context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());assertNotNull(launch);
-        scenario=ActivityScenario.launch(launch);
+        activity=startActivitySync(launch);
         try {
             until("document.querySelector('.ps-home')");
             capture("01-tools-home-1080x1920.png");
-            Uri scanUri=FileProvider.getUriForFile(context,context.getPackageName()+".fileprovider",scan);
+            Uri scanUri=Uri.parse("content://"+context.getPackageName()+".fileprovider/ream_exports/"+Uri.encode(scan.getName()));
             Intent review=new Intent(Intent.ACTION_SEND).setClassName(context,context.getPackageName()+".MainActivity").setType("image/png")
                 .putExtra(Intent.EXTRA_STREAM,scanUri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP);
             context.startActivity(review); clickText("Review images");
             until("document.querySelector('.ps-scan-editor__image img')?.naturalWidth>0");
             capture("02-scan-intake-1080x1920.png");
-            Uri uri=FileProvider.getUriForFile(context,context.getPackageName()+".fileprovider",fixture);
+            Uri uri=Uri.parse("content://"+context.getPackageName()+".fileprovider/ream_exports/"+Uri.encode(fixture.getName()));
             Intent open=new Intent(Intent.ACTION_VIEW).setClassName(context,context.getPackageName()+".MainActivity")
                 .setDataAndType(uri,"application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP);
             context.startActivity(open);
@@ -128,10 +140,10 @@ public class StoreScreenshotsTest {
             JSONObject manifest=new JSONObject().put("schemaVersion",1).put("packageName",context.getPackageName())
                 .put("versionCode",info.getLongVersionCode()).put("versionName",info.versionName).put("androidApiLevel",Build.VERSION.SDK_INT)
                 .put("device",new JSONObject().put("manufacturer",Build.MANUFACTURER).put("model",Build.MODEL).put("name",Build.DEVICE))
-                .put("serial",InstrumentationRegistry.getArguments().getString("deviceSerial")).put("signingCertificateSha256",sha(info.signingInfo.getApkContentsSigners()[0].toByteArray()))
+                .put("serial",arguments.getString("deviceSerial")).put("signingCertificateSha256",sha(info.signingInfo.getApkContentsSigners()[0].toByteArray()))
                 .put("installedApkSha256",fileSha(new File(context.getApplicationInfo().sourceDir)))
                 .put("generatedAtUtc",Instant.now().toString()).put("screenshots",screenshots);
             try(Writer writer=new FileWriter(new File(directory,"capture-provenance.json"))){writer.write(manifest.toString(2));}
-        } finally {scenario.close();}
+        } finally {runOnMainSync(() -> activity.finish());}
     }
 }

@@ -243,9 +243,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated -camera-front none
           script: |
             adb shell cmd uimode night no
-            (cd android && ./gradlew --no-daemon :app:connectedReleaseAndroidTest -PcaptureStoreScreenshots=true -Pandroid.testInstrumentationRunnerArguments.captureStoreScreenshots=true -Pandroid.testInstrumentationRunnerArguments.class=com.reampdf.mobile.StoreScreenshotsTest -Pandroid.testInstrumentationRunnerArguments.deviceSerial=$(adb get-serialno))
-            mkdir -p store-assets/screenshots/release-capture
-            adb pull /sdcard/Android/data/com.reampdf.mobile/files/store-screenshots/. store-assets/screenshots/release-capture/
+            bash store-assets/scripts/capture_release_ci.sh
 
       - name: Verify screenshot pixels and release provenance
         run: python store-assets/scripts/verify_ci_screenshots.py store-assets/screenshots/release-capture android/app/build/outputs/apk/release/app-release.apk
@@ -259,6 +257,7 @@ jobs:
             android/app/build/reports/androidTests/
             android/app/build/outputs/androidTest-results/
             android/app/build/outputs/mapping/releaseAndroidTest/missing_rules.txt
+            store-assets/screenshots/release-capture/
           retention-days: 7
 
       - name: Upload signed release APK and actual screenshots

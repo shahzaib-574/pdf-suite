@@ -83,6 +83,9 @@ def validateProductionRelease = tasks.register('validateProductionRelease') {
 android {
     testBuildType project.hasProperty('captureStoreScreenshots') ? 'release' : 'debug'
     sourceSets { androidTest.assets.srcDir '../../store-assets/fixtures' }
+    if (project.hasProperty('captureStoreScreenshots')) {
+        sourceSets.androidTest.java.setIncludes(['**/StoreScreenshotInstrumentation.java'])
+    }
     namespace = "com.reampdf.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
@@ -91,7 +94,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode rootProject.ext.appVersionCode
         versionName rootProject.ext.appVersionName
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner project.hasProperty('captureStoreScreenshots') ? 'com.reampdf.mobile.StoreScreenshotInstrumentation' : 'androidx.test.runner.AndroidJUnitRunner'
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -113,7 +116,6 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            testProguardFiles 'proguard-android-test.pro'
             if (hasReleaseKeystore && !allowUnsignedRelease) {
                 signingConfig signingConfigs.release
             }
@@ -140,8 +142,10 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
-    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
-    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    if (!project.hasProperty('captureStoreScreenshots')) {
+        androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+        androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    }
     implementation project(':capacitor-cordova-android-plugins')
 }
 
