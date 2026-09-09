@@ -10,9 +10,10 @@ is self-hosted Manrope, distributed with its SIL Open Font License.
 
 ## Hostinger and Git deployment
 
-`.github/workflows/deploy-hostinger.yml` deploys compiled assets on pushes to main
-once `HOSTINGER_DEPLOY_ENABLED=true` is configured as a repository variable.
-It is deliberately inactive until the domain's hosting account is verified.
+`.github/workflows/deploy-hostinger.yml` deploys compiled assets on pushes to main.
+The Hostinger account and domain directory were verified on September 10, 2026,
+and `HOSTINGER_DEPLOY_ENABLED=true` enables the deployment. SSH uses a dedicated
+Ream ED25519 key held in an encrypted GitHub Actions secret.
 
 Required repository variables: `HOSTINGER_SSH_HOST`, `HOSTINGER_SSH_USER`,
 `HOSTINGER_SSH_PORT`, and `HOSTINGER_DEPLOY_ENABLED`.
@@ -28,6 +29,12 @@ the public directory. Do not publish the repository root or private OTA material
 Deployment uses GitHub Actions to build Vite before uploading; Hostinger's raw
 Git checkout feature alone cannot serve the source as a working website.
 The website deploy and production OTA are independent release actions.
+
+The initial Hostinger page was backed up outside the public directory to
+`~/ream-deployment-backups/before-first-deploy-20260910.tar.gz`. Deployment checks
+the homepage, release metadata and both Google seller verification files over
+HTTPS. See [Google ads prerequisites](google-ads-setup.md) for approval and SDK
+requirements; deploying the seller files does not enable ad requests.
 
 The existing GitHub Pages workflow also publishes `dist-web/` on main, including
 the privacy policy at its existing address. Its website URL is

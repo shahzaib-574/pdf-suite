@@ -22,7 +22,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run lint && npm run quality-selfcheck && npm run build:website
+      - run: npm run lint && npm run quality-selfcheck && npm run build:website && npm run verify:monetization -- --build
       - name: Install verified SSH configuration
         env:
           DEPLOY_KEY: ${{ secrets.HOSTINGER_SSH_KEY }}
@@ -54,6 +54,8 @@ jobs:
         run: |
           curl --fail --silent --show-error --retry 4 https://reampdfsuite.com/ | grep -F 'Ream PDF Suite'
           curl --fail --silent --show-error --retry 4 https://reampdfsuite.com/release-metadata.json | grep -F '"mode":"website"'
+          curl --fail --silent --show-error --retry 4 https://reampdfsuite.com/app-ads.txt | grep -Fx 'google.com, pub-9959568404035601, DIRECT, f08c47fec0942fa0'
+          curl --fail --silent --show-error --retry 4 https://reampdfsuite.com/ads.txt | grep -Fx 'google.com, pub-9959568404035601, DIRECT, f08c47fec0942fa0'
       - name: Remove temporary deployment key
         if: always()
         run: rm -f ~/.ssh/ream_deploy

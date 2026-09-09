@@ -41,3 +41,4 @@ android/keystore.properties
 credentials.json
 .ota-private/
 .impeccable/
+.playwright-mcp/
