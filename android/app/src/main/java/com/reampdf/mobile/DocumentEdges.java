@@ -85,8 +85,8 @@ final class DocumentEdges {
                         double support = edgeSupport(points, supportedEdges, mask.cols(), mask.rows());
                         if (support < .55) continue;
                         // Prefer the paper boundary over a slightly larger, weaker shadow.
-                        double score = support * .62 + Math.sqrt(candidate.area) * .23 +
-                            Math.min(1, boundaryContrast(points) / .25) * .15;
+                        double score = support * .62 + Math.sqrt(candidate.area) * .18 +
+                            boundaryContrast(points) * .20;
                         if (best == null || score > best.score) best = new Detection(points, score);
                     } finally { curve.release(); approx.release(); }
                 }
@@ -119,7 +119,7 @@ final class DocumentEdges {
             for (int side = 0; side < 4; side++) {
                 Point a = points[side], b = points[(side + 1) % 4];
                 double length = Math.hypot(b.x - a.x, b.y - a.y);
-                double nx = -(b.y - a.y) * 5 / length, ny = (b.x - a.x) * 5 / length;
+                double nx = -(b.y - a.y) * 3 / length, ny = (b.x - a.x) * 3 / length;
                 for (int sample = 1; sample <= 10; sample++) {
                     double x = a.x + (b.x - a.x) * sample / 11, y = a.y + (b.y - a.y) * sample / 11;
                     int ax = (int) Math.round(x + nx), ay = (int) Math.round(y + ny);
