@@ -22,7 +22,7 @@ jobs:
       - run: npm run lint && npm run android:sync && npm run pdf-selfcheck
       - name: Compile and lint native camera
         working-directory: android
-        run: chmod +x gradlew && ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug assembleDebugAndroidTest
+        run: chmod +x gradlew && ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -34,7 +34,8 @@ jobs:
           api-level: 35
           arch: x86_64
           disable-animations: true
-          script: cd android && ./gradlew --no-daemon connectedDebugAndroidTest
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated -camera-front none
+          script: cd android && ./gradlew --no-daemon :app:connectedDebugAndroidTest
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
