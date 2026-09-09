@@ -13,6 +13,8 @@ import { fileListToPicked, toArrayBuffer } from "../store/files";
 import { pickGalleryImages } from "../store/incoming";
 import { useBackHandler, useOverlayBack } from "./back";
 import { replaceWith } from "./nav";
+import { nativeDocumentCameraAvailable } from '../store/documentCamera';
+import { NativeScanCamera } from './NativeScanCamera';
 
 export type ScanCameraProps = {
   pages: PickedFile[];
@@ -115,7 +117,11 @@ async function captureFrame(
   }
 }
 
-export function ScanCamera({
+export function ScanCamera(props: ScanCameraProps) {
+  return nativeDocumentCameraAvailable() ? <NativeScanCamera {...props} /> : <BrowserScanCamera {...props} />;
+}
+
+function BrowserScanCamera({
   pages,
   maxPages,
   onPages,

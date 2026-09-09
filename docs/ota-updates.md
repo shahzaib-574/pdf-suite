@@ -12,7 +12,7 @@ Both the update manifest and ZIP are signed with RSA/SHA-256. The native plugin 
 - `ota-public.pem` is the public verification key and belongs in source control.
 - `.ota-private/signing.pem` is the private publishing key, excluded from both Git and EAS uploads. Back it up securely. Never upload it to the public repository.
 - Android native versionCode 2 contains the updater. Older APKs need one manual installation of an OTA-enabled APK.
-- EAS preview builds subscribe to `preview-2`; normal production builds use `production-2`.
+- Current versionCode 3 builds include the native document camera and subscribe to `preview-3` (EAS preview) or `production-3`. Previously installed versionCode 2 APKs remain on `preview-2` / `production-2` and need a new APK for the native camera. See [native camera delivery](native-document-camera.md).
 
 ## Push updates
 

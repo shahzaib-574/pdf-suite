@@ -94,7 +94,7 @@ export function ScanEditor({
   onBusyChange: (busy: boolean) => void;
 }) {
   const [index, setIndex] = useState(0),
-    [corners, setCorners] = useState<Point[]>(() => initialEdits[0]?.corners ?? full()),
+    [corners, setCorners] = useState<Point[]>(() => initialEdits[0]?.corners ?? files[0]?.scanCorners ?? full()),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -111,10 +111,13 @@ export function ScanEditor({
   const detectionVersion = useRef(0);
   const [previewRotations, setPreviewRotations] = useState(() => new Map(files.map((file,i) => [file,initialEdits[i]?.rotation ?? 0])));
   const [animateRotation, setAnimateRotation] = useState(false);
-  const [dirty, setDirty] = useState(initialEdits[0]?.dirty ?? false);
+  const [dirty, setDirty] = useState(initialEdits[0]?.dirty ?? Boolean(files[0]?.scanCorners));
   const [drag, setDrag] = useState<number | null>(null);
   const [imageActionsOpen, setImageActionsOpen] = useState(false);
-  const drafts = useRef(new Map<PickedFile, ScanPageDraft>(files.flatMap((file, i) => initialEdits[i] ? [[file, initialEdits[i]!] as const] : [])));
+  const drafts = useRef(new Map<PickedFile, ScanPageDraft>(files.flatMap((file, i) => {
+    const draft = initialEdits[i] ?? (file.scanCorners ? {corners:file.scanCorners, rotation:0, dirty:true, mode:'color' as const} : null);
+    return draft ? [[file, draft] as const] : [];
+  })));
   const touchStart = useRef<number | null>(null);
   const dragged = useRef(false);
   const edgeDrag = useRef<{pointerId:number;edge:number;x:number;y:number;width:number;height:number;points:Point[]} | null>(null);
@@ -159,6 +162,9 @@ export function ScanEditor({
   const draftCallback = useRef(onDrafts);
   useEffect(() => { draftCallback.current = onDrafts; }, [onDrafts]);
   useEffect(() => {
+    for (const item of files) {
+      if (item.scanCorners && !drafts.current.has(item)) drafts.current.set(item, {corners:item.scanCorners, rotation:0, dirty:true, mode:'color'});
+    }
     if (file) drafts.current.set(file, { corners, rotation, dirty, mode });
     draftCallback.current?.(files.map(item => drafts.current.get(item) ?? null));
   }, [files, file, corners, rotation, dirty, mode]);
@@ -181,7 +187,7 @@ export function ScanEditor({
     const version = ++detectionVersion.current;
     setDetecting(true); setError('');
     try {
-      const points = await detectScanCorners(new Blob([toArrayBuffer(file.bytes)], {type:file.mime}));
+      const points = file.scanCorners ?? await detectScanCorners(new Blob([toArrayBuffer(file.bytes)], {type:file.mime}));
       if (version !== detectionVersion.current) return;
       if (points) { setCorners(points); setDirty(true); }
       else setError('Page edges are unclear. Move the four corners to crop manually.');
@@ -217,7 +223,7 @@ export function ScanEditor({
         const draft = drafts.current.get(original)!;
         const edit: ScanEdit = {corners: draft.corners, mode: draft.mode, rotate: ((draft.rotation % 360) + 360) % 360};
         const output = await applyPageEdit(original, edit, (job) => { worker.current = job; });
-        results.push({original, changed: {...original, scanSource: original.scanSource ?? {name:original.name,mime:original.mime,bytes:original.bytes}, mime: "image/png", name: original.name.replace(/\.[^.]+$/, ".png"), bytes: new Uint8Array(output)}});
+        results.push({original, changed: {...original, scanCorners: undefined, scanSource: original.scanSource ?? {name:original.name,mime:original.mime,bytes:original.bytes}, mime: "image/png", name: original.name.replace(/\.[^.]+$/, ".png"), bytes: new Uint8Array(output)}});
       }
       for (const {original, changed} of results) { onChange(original, changed); drafts.current.delete(original); }
       setCorners(full());setRotation(0);setMode('color');setDirty(false);

@@ -6,7 +6,9 @@ import {
   degrees,
   rgb,
   toDegrees,
+  pushGraphicsState, popGraphicsState, concatTransformationMatrix,
 } from "pdf-lib";
+import { jpegOrientation, orientedImageMatrix } from './jpegOrientation';
 import type {
   OrganizeOp,
   PageRange,
@@ -220,24 +222,28 @@ async function imagesToPdf(files: TransferFile[], options?: ImagePdfOptions) {
   }
   const out = await PDFDocument.create();
   for (const item of prepared) {
+    const orientation = item.kind === 'jpg' ? jpegOrientation(item.bytes) : 1;
     const image =
       item.kind === "jpg"
         ? await out.embedJpg(item.bytes)
         : await out.embedPng(item.bytes);
+    const upright = orientation >= 5 ? {width:image.height, height:image.width} : {width:image.width, height:image.height};
     const pageBox = imagePdfPageSize(
       {
         size: options?.size ?? "a4",
         landscape: Boolean(options?.landscape),
         margin: options?.margin ?? IMAGE_MARGIN,
       },
-      { width: image.width, height: image.height },
+      upright,
     );
     const dims = fitImageOnPdfPage(
-      { width: image.width, height: image.height },
+      upright,
       pageBox,
     );
     const page = out.addPage([pageBox.width, pageBox.height]);
-    page.drawImage(image, dims);
+    page.pushOperators(pushGraphicsState(), concatTransformationMatrix(...orientedImageMatrix(orientation, dims.x, dims.y, dims.width, dims.height)));
+    page.drawImage(image, {x:0, y:0, width:1, height:1});
+    page.pushOperators(popGraphicsState());
   }
   return saved(out, "images.pdf");
 }

@@ -39,6 +39,15 @@ async function readIncomingBytes(file: Incoming): Promise<Uint8Array> {
   return bytes;
 }
 
+/** Keep native still-photo bytes intact; no gallery downsampling or re-encoding. */
+export async function readNativeCameraPhoto(file: Incoming): Promise<PickedFile> {
+  try {
+    if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > MAX_INPUT_BYTES)
+      throw new Error('The captured photo exceeds 128 MB or is unavailable.');
+    return { name: file.name, mime: file.mime, bytes: await readIncomingBytes(file) };
+  } finally { await importer.release({ id: file.id }).catch(() => undefined); }
+}
+
 export function androidGalleryPickerAvailable(): boolean {
   return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
 }
