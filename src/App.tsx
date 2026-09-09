@@ -23,7 +23,7 @@ import { ThemeProvider } from "./theme/ThemeProvider";
 import { markUpdateReady } from "./store/updates";
 import { Capacitor } from "@capacitor/core";
 import { isWebsite } from './web/platform';
-import { WebHome, WebHeader, WebFooter } from './web/WebHome';
+import { WebFooter, WebHeader, WebHome, WebNavProvider } from './web/WebHome';
 import './web/website.css';
 
 export default function App() {
@@ -126,6 +126,7 @@ export default function App() {
 
   return (
     <ThemeProvider>
+      <WebNavProvider>
       {isWebsite ? <WebHeader /> : null}
       {Capacitor.isNativePlatform() ||
       window.matchMedia("(hover: none) and (pointer: coarse)").matches ? null : (
@@ -222,6 +223,7 @@ export default function App() {
         )}
       </div>
       {isWebsite ? <WebFooter /> : null}
+      </WebNavProvider>
     </ThemeProvider>
   );
 }

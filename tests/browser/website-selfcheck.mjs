@@ -12,7 +12,8 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(base);
   await page.locator('.web-tool').last().waitFor();
-  assert.equal(await page.locator('.web-tool').count(), 13);
+  assert.equal(await page.locator('.web-tool').count(), 12);
+  assert.equal(await page.locator('.web-tool[href="#/tool/scan"]').count(), 0);
   await page.getByRole('button', { name: 'Convert', exact: true }).click();
   assert.equal(await page.locator('.web-tool').count(), 4);
   await page.getByRole('button', { name: 'All tools', exact: true }).click();
@@ -41,6 +42,9 @@ try {
     await page.locator('.ps-screen').first().waitFor();
     assert.ok(await page.locator('h1').count(), `Heading missing: ${link}`);
   }
+  await page.getByRole('button', { name: 'Convert', exact: true }).click();
+  await page.locator('.web-tool').last().waitFor();
+  assert.equal(await page.locator('.web-tool').count(), 4, 'Header category returns from a tool with the filter applied');
   await page.goto(base + '/#/tool/merge');
   const inputs = [];
   for (let i = 0; i < 2; i++) {
@@ -57,7 +61,7 @@ try {
   const merged = await PDFDocument.load(await readFile(await download.path()));
   assert.equal(merged.getPageCount(), 2);
   assert.deepEqual(errors, []);
-  console.log('PASS website: 13 routes, filters, search, themes, four viewport widths, two-page merge and real download.');
+  console.log('PASS website: 12 routes, header navigation, filters, search, themes, four viewport widths, two-page merge and real download.');
 } finally {
   await browser.close();
 }

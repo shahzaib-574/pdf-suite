@@ -30,8 +30,8 @@ AddType text/javascript .mjs
     transformIndexHtml(html) {
       if (mode !== 'website') return html;
       return html.replace('<title>Ream - PDF Suite</title>', '<title>Ream PDF Suite — Free PDF tools in your browser</title>')
-        .replace('Ream - PDF Suite. On-device PDF tools. Your files stay here.', 'Merge, split, compress, convert and protect PDFs with Ream. 13 free tools that process files in your browser without uploading your documents.')
-        .replace('</head>', '<link rel="canonical" href="https://reampdfsuite.com/" /><meta property="og:title" content="Ream PDF Suite" /><meta property="og:description" content="13 PDF tools. Your files stay on your device." /><meta property="og:type" content="website" /><meta property="og:url" content="https://reampdfsuite.com/" /></head>');
+        .replace('Ream - PDF Suite. On-device PDF tools. Your files stay here.', 'Merge, split, compress, convert and protect PDFs with Ream. 12 free tools that process files in your browser without uploading your documents.')
+        .replace('</head>', '<link rel="canonical" href="https://reampdfsuite.com/" /><meta property="og:title" content="Ream PDF Suite" /><meta property="og:description" content="12 PDF tools. Your files stay on your device." /><meta property="og:type" content="website" /><meta property="og:url" content="https://reampdfsuite.com/" /></head>');
     },
   }],
   worker: { format: 'es' },

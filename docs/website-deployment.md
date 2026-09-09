@@ -4,7 +4,7 @@ The website and Android app share the PDF processing engine and tool workflows.
 `npm run dev:website` serves the website on port 5174. `npm run build:website`
 produces `dist-web/`. Normal builds and OTA publishing retain the Android UI.
 
-The website has all 13 catalog tools, searchable categories, responsive layouts,
+The website directory lists 12 tools (Scan is omitted), searchable categories, responsive layouts,
 light/dark themes, local recent files, and drag-and-drop file selection. The font
 is self-hosted Manrope, distributed with its SIL Open Font License.
 
