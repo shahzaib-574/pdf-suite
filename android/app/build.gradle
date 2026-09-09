@@ -81,6 +81,8 @@ def validateProductionRelease = tasks.register('validateProductionRelease') {
 }
 
 android {
+    testBuildType project.hasProperty('captureStoreScreenshots') ? 'release' : 'debug'
+    sourceSets { androidTest.assets.srcDir '../../store-assets/fixtures' }
     namespace = "com.reampdf.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
