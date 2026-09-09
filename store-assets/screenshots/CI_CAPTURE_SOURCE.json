@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "packageName": "com.reampdf.mobile",
+  "versionCode": 3,
+  "versionName": "1.1.0",
+  "androidApiLevel": 36,
+  "device": {
+    "manufacturer": "unknown",
+    "model": "Android SDK built for x86_64",
+    "name": "emu64x"
+  },
+  "serial": "emulator-5554",
+  "signingCertificateSha256": "47af4be263f6bfb63065ba344d1c14096320308c75c55cc40acaee430c82063a",
+  "installedApkSha256": "de6088d405136d13aeaf32b96d99332e4e27c74620e51de6aa34919071ff0b9d",
+  "generatedAtUtc": "2026-09-09T20:36:21.355965Z",
+  "screenshots": [
+    {
+      "fileName": "01-tools-home-1080x1920.png",
+      "capturedAtUtc": "2026-09-09T20:35:55.593309Z",
+      "sha256": "926f8126d864a3da31fe4e6da66c29be5c5c10494b395cccafed03d996c267bd",
+      "sourceFramebufferPngSha256": "a7a83055e0829f3e63a46b977ac44c6212fcc0b2a889eea6291cc79f5e5bc572"
+    },
+    {
+      "fileName": "02-scan-intake-1080x1920.png",
+      "capturedAtUtc": "2026-09-09T20:35:59.133483Z",
+      "sha256": "65b9bead68cccdf6c04672e485dcaac5bb0341eef27b989e72773be8bbfe4351",
+      "sourceFramebufferPngSha256": "f95f56d5d4720ee7f114555eadb028d1f12eb5948d0ad26a86a497a287c94db8"
+    },
+    {
+      "fileName": "04-pdf-reader-1080x1920.png",
+      "capturedAtUtc": "2026-09-09T20:36:03.917954Z",
+      "sha256": "3ae24d94ec7dd0645be4b726aaa02a736f066ed9e3311e447dc7900bec913b8d",
+      "sourceFramebufferPngSha256": "804431018be52fff8edc2427e2fa8565c8adb1a49f56bf64f1021e6d2ecf7f67"
+    },
+    {
+      "fileName": "05-organize-pages-1080x1920.png",
+      "capturedAtUtc": "2026-09-09T20:36:08.556429Z",
+      "sha256": "1af19475d6a2bd3f701eef3ef31f974a6827053f01d5cab2b93b1f0d609c3871",
+      "sourceFramebufferPngSha256": "c5f08fdf485d9e5d34a3433ab4e7a12eec65a3e537e04c3decb25be756f5ab6d"
+    },
+    {
+      "fileName": "03-pdf-to-word-1080x1920.png",
+      "capturedAtUtc": "2026-09-09T20:36:13.242639Z",
+      "sha256": "f8704be76058436724f471503048d0a2f4175a1de03f9a2d72be1467f75b8334",
+      "sourceFramebufferPngSha256": "5a685461773b474d3ed757aaeb8702db5ef7b80516695fde90e13e33d9f31279"
+    },
+    {
+      "fileName": "06-recents-1080x1920.png",
+      "capturedAtUtc": "2026-09-09T20:36:20.922625Z",
+      "sha256": "5aed1fe15f54ff85713f1e3b2888c14195328840869a5a96b4b8b05b0f54af06",
+      "sourceFramebufferPngSha256": "ec7fbc8e42ba8e0ecca2403ec98834d38955ebccfb54e257caa7e962430da23e"
+    }
+  ]
+}

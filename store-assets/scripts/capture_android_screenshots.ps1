@@ -584,7 +584,13 @@ function Assert-CaptureProvenanceManifest {
     }
 
     try {
-        $manifest = [IO.File]::ReadAllText($Path) | ConvertFrom-Json
+        # PowerShell 7.5 otherwise converts ISO strings into DateTime values,
+        # preventing strict validation of the timestamp text in the evidence.
+        $jsonOptions = @{}
+        if ((Get-Command ConvertFrom-Json).Parameters.ContainsKey('DateKind')) {
+            $jsonOptions['DateKind'] = 'String'
+        }
+        $manifest = [IO.File]::ReadAllText($Path) | ConvertFrom-Json @jsonOptions
     }
     catch {
         throw "Capture provenance manifest is not valid JSON: $($_.Exception.GetBaseException().Message)"

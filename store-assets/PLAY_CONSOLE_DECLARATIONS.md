@@ -1,16 +1,16 @@
 # Play Console declarations — ad-free build
 
-Prepared 5 September 2026. This is a reviewable draft, not a record of submitted Console answers. Confirm the actual uploaded bundle and every version still distributed on other tracks before changing app-wide disclosures.
+Updated 10 September 2026. This is a reviewable draft, not a record of submitted Console answers. The detailed [current compliance review](COMPLIANCE_REVIEW_2026-09-10.md) supersedes the original no-data implication: automatic GitHub updates transmit request information. Confirm the actual uploaded bundle and every version still distributed on other tracks before changing app-wide disclosures.
 
 | Item | Draft for this ad-free build |
 | --- | --- |
 | Contains ads | No. AdMob and its native dependency have been removed, not merely hidden. |
 | Advertising ID | No. Verify the merged artifact has no AD_ID or AdServices permissions. |
-| Data collected by Ream | No off-device document, account, advertising or analytics collection is implemented in this build. |
-| Data shared by Ream | No SDK sharing is implemented. User-initiated external Save/Share sends only the file the user chooses to their chosen destination. Review Google's user-initiated-transfer exception for the final form. |
+| Data collected | Documents, accounts and advertising data are not uploaded. Automatic GitHub update requests expose IP/network identifiers to the update provider; include Device or other IDs in the draft. Do not claim no data collected. |
+| Data shared | Treat update-host network identifiers as shared; do not assume an unverified service-provider or ephemeral-processing exemption. User-initiated external Save/Share sends only the file the user chooses to their chosen destination; review Google's user-initiated-transfer exception. |
 | App access | All tools work without a Ream account or login. |
 | Camera | Optional camera access for scanning; gallery/file picker remains available. No broad storage access. |
-| Target audience / content rating | Publisher must answer truthfully for the intended audience. Removing ads does not automatically establish a child-directed audience or a rating. The former ad-specific adult-only build gate has been removed. |
+| Target audience / content rating | Prepared audience: teen/adult groups 13–15, 16–17, 18+. No under-13 targeting is inferred from a general utility. IARC rating is not yet assigned; use the feature-based answers in the current review. |
 | Account deletion | No account-creation feature. Local files can be deleted individually or cleared in Settings. |
 
 Data safety describes the sum of data practices across currently distributed versions, so do not replace an existing ad-supported disclosure solely because a new internal build is ad-free. Internal-only testing is exempt from Data safety inclusion, but public/closed/open distribution has additional requirements. [Google Data safety guidance](https://support.google.com/googleplay/android-developer/answer/10787469?hl=en).
