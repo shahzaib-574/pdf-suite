@@ -17,6 +17,8 @@ The August quality notification announces future requirements, rather than a cur
 
 ## Ream
 
+Latest delivery: **1.1.1 (4)** is now Active / Available to internal testers, published at 3:31 AM Asia/Karachi on 10 September 2026. See [camera update record](PLAY_UPDATE_1.1.1.md). The 1.1.0 details below are retained as the initial release history.
+
 The publisher confirmed the policy/export declarations after the compliance review. Ream: PDF Tools & Scanner, `com.reampdf.mobile`, English (US), App and Free was created. Version 3 (1.1.0) is now published to the active internal testing track and shown as available to internal testers. See [verified upload record](PLAY_UPLOAD_2026-09-10.md) for the release and tester links.
 
 The listing support email is info@reampdfsuite.com and the privacy URL is https://reampdfsuite.com/privacy.html. Current native release metadata is version code 3 / 1.1.0. The current build is ad-free; public AdMob identifiers and website verification files are only prerequisites for later advertising integration.

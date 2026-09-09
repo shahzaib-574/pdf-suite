@@ -34,4 +34,14 @@ The Android View was rendered through a native Canvas over a synthetic test page
 
 ## Delivery
 
-Signed release run 34411429953 is building the version 4 bundle and checking real camera capture in the non-debuggable release. Publication status and artifact hashes will be recorded after verification. The Pixel 8 user should verify perceived smoothness, camera movement, rotation, shadows and crop accuracy after updating from the existing Play internal track.
+Signed release [run 34411429953](https://github.com/shahzaib-574/pdf-suite/actions/runs/34411429953) passed, including signatures, release lint, artifact/permission checks, 16 KB alignment, actual app flows and native JPEG capture in the non-debuggable release. The emulator produced a 1856×1392 JPEG (61,059 bytes); this is emulator capture evidence, not a Pixel 8 resolution claim. See [capture proof](evidence/live-edges-1.1.1/signed-camera-capture.json).
+
+Version **1.1.1 (4)** was published to the existing internal track on 10 September 2026 at **3:31 AM Asia/Karachi**. Console status: **Active / Available to internal testers**. [Release details](https://play.google.com/console/u/0/developers/5538107213509916329/app/4976255738492630945/tracks/4701026759107514294/releases/2/details). Play reported no supported-device losses and estimated a 1.06 MB update. The existing optional native debug-symbol warning remains; R8 mapping was included.
+
+The downloaded AAB and APK hashes match [the release manifest](../store-assets/RELEASE_1.1.1_MANIFEST.txt):
+
+- AAB: `485afcc8e90fce55615eac11e00441760dfd6416ed2573f87547f35cd87ee76e`
+- APK: `5e07cbbb4108acdb83501a4b97b82f27a34a7f1e1b25ccc1e4af9d2de3dad21e`
+- Build source: `a595961e233b2ff93bbccd51be2f5e1a0ef3d7ae`
+
+Six release screenshots were captured and hash-verified. Three clear, unchanged images were selected for the listing and pass both store validators; version 1.1.0's images are archived separately. The Pixel 8 user should verify perceived smoothness, camera movement, rotation, shadows and crop accuracy after updating from the [existing Play internal track](https://play.google.com/apps/internaltest/4701026759107514294).
