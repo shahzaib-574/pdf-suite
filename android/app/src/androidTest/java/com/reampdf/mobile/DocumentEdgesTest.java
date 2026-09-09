@@ -78,6 +78,19 @@ public class DocumentEdgesTest {
         assertNotNull(tracker.update(null,1726));
         assertNull("Lost page should disappear within 160ms",tracker.update(null,1821));
     }
+    @Test public void steadyPageNoiseIsSmoothedWithoutLosingReadyState() {
+        DocumentEdges.Tracker tracker = new DocumentEdges.Tracker();
+        double rawEnergy = 0, filteredEnergy = 0;
+        for (int frame=0;frame<35;frame++) {
+            double noise = frame%2==0 ? .001 : -.001;
+            Point[] points={new Point(.2+noise,.2),new Point(.8+noise,.2),new Point(.8+noise,.8),new Point(.2+noise,.8)};
+            Point[] result=tracker.update(new DocumentEdges.Detection(points,.9),1000+frame*33);
+            if(frame>=10){rawEnergy+=noise*noise;filteredEnergy+=Math.pow(result[0].x-.2,2);}
+        }
+        assertTrue("Stationary jitter should be materially reduced",filteredEnergy<rawEnergy*.5);
+        assertTrue("Tiny camera noise must not prevent readiness",tracker.stable(2122));
+        tracker.update(null,2155);assertFalse("Missing observation must immediately clear ready state",tracker.stable(2155));
+    }
     @Test public void blankAndCircleAreNotDocuments() {
         Mat image = new Mat(480,640,CvType.CV_8UC1,new Scalar(180));
         try {

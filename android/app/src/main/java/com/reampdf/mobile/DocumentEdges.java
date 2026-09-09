@@ -183,33 +183,34 @@ final class DocumentEdges {
 
     static final class Tracker {
         static final long LOST_AFTER_MS = 160;
-        private Point[] previous, lastRaw, pendingJump;
+        private Point[] previous, steadyAnchor, pendingJump;
         private long lastSeen, steadySince = -1;
         private boolean fresh;
 
-        void reset() { previous = null; lastRaw = null; pendingJump = null; lastSeen = 0; steadySince = -1; fresh = false; }
+        void reset() { previous = null; steadyAnchor = null; pendingJump = null; lastSeen = 0; steadySince = -1; fresh = false; }
 
         Point[] update(Detection detection, long now) {
             if (previous != null && (now < lastSeen || now - lastSeen > LOST_AFTER_MS)) reset();
             fresh = false;
-            if (detection == null) { steadySince = -1; pendingJump = null; return previous; }
+            if (detection == null) { steadySince = -1; steadyAnchor = null; pendingJump = null; return previous; }
             Point[] raw = align(detection.corners, previous);
             double movement = distance(previous, raw);
             // A single far-away contour must not yank the border to another object.
             if (previous != null && movement > .12 && (pendingJump == null || distance(pendingJump, raw) > .025)) {
-                pendingJump = raw; steadySince = -1; return previous;
+                pendingJump = raw; steadySince = -1; steadyAnchor = null; return previous;
             }
             pendingJump = null;
             long dt = previous == null ? 33 : Math.max(1, now - lastSeen);
-            double rawMovement = distance(lastRaw, raw);
-            boolean quiet = lastRaw != null && rawMovement < .008 && rawMovement * 1000 / dt < .065 && detection.score >= .7;
-            if (quiet) { if (steadySince < 0) steadySince = now; } else steadySince = -1;
+            // A time-window anchor tolerates tiny camera noise at high frame rates,
+            // while a page translating steadily cannot become "ready" frame by frame.
+            if (detection.score < .7) { steadySince = -1; steadyAnchor = null; }
+            else if (steadyAnchor == null || distance(steadyAnchor, raw) > .009) { steadyAnchor = raw; steadySince = now; }
             double tau = movement < .004 ? 85 : Math.max(16, 85 / (1 + movement * 180));
             double alpha = previous == null || movement > .12 ? 1 : 1 - Math.exp(-dt / tau);
             Point[] next = new Point[4];
             for (int i = 0; i < 4; i++) next[i] = previous == null ? new Point(raw[i].x, raw[i].y) :
                 new Point(previous[i].x + alpha * (raw[i].x - previous[i].x), previous[i].y + alpha * (raw[i].y - previous[i].y));
-            previous = next; lastRaw = raw; lastSeen = now; fresh = true;
+            previous = next; lastSeen = now; fresh = true;
             return next;
         }
 

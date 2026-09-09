@@ -1,7 +1,6 @@
 package com.reampdf.mobile;
 
 import android.Manifest;
-import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.*;
@@ -39,6 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Dedicated native camera: independent full-resolution stills and bounded live analysis. */
+@androidx.annotation.OptIn(markerClass = androidx.camera.view.TransformExperimental.class)
 public class DocumentCameraActivity extends AppCompatActivity {
     private PreviewView preview;
     private DocumentOutlineView outline;
@@ -53,7 +53,6 @@ public class DocumentCameraActivity extends AppCompatActivity {
     private DocumentEdges.Detector detector;
     private Mat analysisGray;
     private byte[] luminance = new byte[0], luminanceRow = new byte[0];
-    @SuppressLint("UnsafeOptInUsageError")
     private final ImageProxyTransformFactory transformFactory = new ImageProxyTransformFactory();
     private final AtomicReference<LiveResult> pendingResult = new AtomicReference<>();
     private final AtomicBoolean resultScheduled = new AtomicBoolean();
@@ -162,7 +161,6 @@ public class DocumentCameraActivity extends AppCompatActivity {
         }
     }
 
-    @SuppressLint("UnsafeOptInUsageError")
     private void analyze(ImageProxy image) {
         long started = SystemClock.elapsedRealtime();
         int frameGeneration = generation;
@@ -206,12 +204,11 @@ public class DocumentCameraActivity extends AppCompatActivity {
         if (resultScheduled.compareAndSet(false, true)) outline.postOnAnimation(this::showLatestResult);
     }
 
-    @SuppressLint("UnsafeOptInUsageError")
     private void showLatestResult() {
         resultScheduled.set(false);
         LiveResult result = pendingResult.getAndSet(null);
         if (result == null || stopped || busy || isFinishing() || result.generation != generation) return;
-        if (SystemClock.elapsedRealtime() - result.started > 150) { outline.clear(); return; }
+        if (SystemClock.elapsedRealtime() - result.started > 150) { outline.clear(); setDetectionStatus("Hold steady"); return; }
         OutputTransform target = preview.getOutputTransform();
         if (result.points != null && target != null) {
             try {

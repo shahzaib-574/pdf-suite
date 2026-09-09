@@ -1,0 +1,1 @@
+Live document edges now follow page movement more responsively, with less jitter and faster recovery when an edge is lost. Improved handling of shadows and lower-contrast pages. Camera outlines are 20% thinner and use corner brackets. Full-resolution photo capture is unchanged.
