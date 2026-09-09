@@ -35,7 +35,10 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated -camera-front none
-          script: cd android && ./gradlew --no-daemon :app:connectedDebugAndroidTest
+          script: |
+            (cd android && ./gradlew --no-daemon :app:connectedDebugAndroidTest)
+            mkdir -p tmp/edge-checks
+            adb pull /sdcard/Android/data/com.reampdf.mobile/files/edge-checks/. tmp/edge-checks/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
@@ -43,4 +46,6 @@ jobs:
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android/app/build/reports/
+            android/app/build/outputs/androidTest-results/
+            tmp/edge-checks/
           retention-days: 14

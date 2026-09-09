@@ -16,60 +16,131 @@ final class DocumentEdges {
     }
 
     static Detection detect(Mat input) {
-        Mat gray = new Mat(), smooth = new Mat(), edges = new Mat(), binary = new Mat();
-        Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
-        try {
+        try (Detector detector = new Detector()) { return detector.detect(input); }
+    }
+
+    /** One instance per analysis thread; native buffers are reused between frames. */
+    static final class Detector implements AutoCloseable {
+        private final Mat gray = new Mat(), smooth = new Mat(), edges = new Mat();
+        private final Mat edgeBand = new Mat(), binary = new Mat(), hierarchy = new Mat();
+        private final Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
+        private final Mat supportKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(7, 7));
+        private final MatOfDouble mean = new MatOfDouble(), deviation = new MatOfDouble();
+        private byte[] supportedEdges = new byte[0];
+        private byte[] tones = new byte[0];
+
+        Detection detect(Mat input) {
+            if (input.empty()) return null;
             double scale = Math.min(1, 640.0 / Math.max(input.cols(), input.rows()));
-            Imgproc.resize(input, gray, new Size(Math.round(input.cols() * scale), Math.round(input.rows() * scale)));
+            if (scale == 1) input.copyTo(gray);
+            else Imgproc.resize(input, gray, new Size(Math.round(input.cols() * scale), Math.round(input.rows() * scale)), 0, 0, Imgproc.INTER_AREA);
             if (gray.channels() == 4) Imgproc.cvtColor(gray, gray, Imgproc.COLOR_RGBA2GRAY);
             else if (gray.channels() == 3) Imgproc.cvtColor(gray, gray, Imgproc.COLOR_RGB2GRAY);
             Imgproc.GaussianBlur(gray, smooth, new Size(5, 5), 0);
-            // Gradient evidence rejects filled rectangles with weak/nonexistent boundaries.
-            Imgproc.Canny(smooth, edges, 35, 105);
+            Core.meanStdDev(smooth, mean, deviation);
+            double high = Math.max(45, Math.min(105, deviation.toArray()[0] * 2.4));
+            Imgproc.Canny(smooth, edges, high * .34, high);
+            // Same three-pixel boundary tolerance as before, computed once in OpenCV
+            // instead of scanning a 7x7 neighborhood for every candidate/sample in Java.
+            Imgproc.dilate(edges, edgeBand, supportKernel);
+            int pixels = (int) edgeBand.total();
+            if (supportedEdges.length != pixels) { supportedEdges = new byte[pixels]; tones = new byte[pixels]; }
+            edgeBand.get(0, 0, supportedEdges);
+            smooth.get(0, 0, tones);
             Imgproc.morphologyEx(edges, binary, Imgproc.MORPH_CLOSE, kernel);
-            Detection best = contours(binary, edges);
-            // Otsu contributes paper contours even where print breaks up the Canny contour.
+            Detection best = contours(binary);
+            // A large, strongly supported page does not need two more contour passes.
+            if (best != null && best.score >= .86) return refine(best);
             Imgproc.threshold(smooth, binary, 0, 255, Imgproc.THRESH_BINARY | Imgproc.THRESH_OTSU);
             Imgproc.morphologyEx(binary, binary, Imgproc.MORPH_CLOSE, kernel);
-            Detection bright = contours(binary, edges);
+            Detection bright = contours(binary);
             if (bright != null && (best == null || bright.score > best.score)) best = bright;
+            if (best != null && best.score >= .86) return refine(best);
             Core.bitwise_not(binary, binary);
-            Detection dark = contours(binary, edges);
+            Detection dark = contours(binary);
             if (dark != null && (best == null || dark.score > best.score)) best = dark;
-            return best;
-        } finally { gray.release(); smooth.release(); edges.release(); binary.release(); kernel.release(); }
+            return refine(best);
+        }
+
+        private Detection contours(Mat mask) {
+            List<MatOfPoint> found = new ArrayList<>();
+            List<Candidate> candidates = new ArrayList<>();
+            Detection best = null;
+            try {
+                // OpenCV >=3.2 leaves the input intact; cloning every mask is unnecessary.
+                Imgproc.findContours(mask, found, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
+                for (MatOfPoint contour : found) {
+                    double area = Math.abs(Imgproc.contourArea(contour)) / mask.total();
+                    if (area >= .12 && area <= .93) candidates.add(new Candidate(contour, area));
+                }
+                candidates.sort(Comparator.comparingDouble((Candidate c) -> c.area).reversed());
+                for (int n = 0; n < Math.min(16, candidates.size()); n++) {
+                    Candidate candidate = candidates.get(n);
+                    MatOfPoint2f curve = new MatOfPoint2f(candidate.contour.toArray()), approx = new MatOfPoint2f();
+                    try {
+                        Imgproc.approxPolyDP(curve, approx, Imgproc.arcLength(curve, true) * .02, true);
+                        if (approx.total() != 4) continue;
+                        Point[] points = order(approx.toArray());
+                        if (!plausible(points, mask.cols(), mask.rows())) continue;
+                        double support = edgeSupport(points, supportedEdges, mask.cols(), mask.rows());
+                        if (support < .55) continue;
+                        // Prefer the paper boundary over a slightly larger, weaker shadow.
+                        double score = support * .62 + Math.sqrt(candidate.area) * .23 +
+                            Math.min(1, boundaryContrast(points) / .25) * .15;
+                        if (best == null || score > best.score) best = new Detection(points, score);
+                    } finally { curve.release(); approx.release(); }
+                }
+                return best;
+            } finally { for (MatOfPoint contour : found) contour.release(); }
+        }
+
+        private Detection refine(Detection detection) {
+            if (detection == null) return null;
+            Point[] points = detection.corners;
+            MatOfPoint2f refined = new MatOfPoint2f(points);
+            try {
+                Imgproc.cornerSubPix(smooth, refined, new Size(5, 5), new Size(-1, -1),
+                    new TermCriteria(TermCriteria.EPS | TermCriteria.MAX_ITER, 12, .15));
+                Point[] adjusted = refined.toArray();
+                boolean nearby = true;
+                for (int i = 0; i < 4; i++) nearby &= Double.isFinite(adjusted[i].x) && Double.isFinite(adjusted[i].y) &&
+                    Math.hypot(adjusted[i].x - points[i].x, adjusted[i].y - points[i].y) <= 6;
+                if (nearby && plausible(adjusted, gray.cols(), gray.rows()) &&
+                    edgeSupport(adjusted, supportedEdges, gray.cols(), gray.rows()) >= .55) points = adjusted;
+                Point[] normalized = new Point[4];
+                for (int i = 0; i < 4; i++) normalized[i] = new Point(points[i].x / (gray.cols() - 1), points[i].y / (gray.rows() - 1));
+                return new Detection(normalized, detection.score);
+            } finally { refined.release(); }
+        }
+
+        private double boundaryContrast(Point[] points) {
+            double total = 0;
+            int samples = 0, width = gray.cols(), height = gray.rows();
+            for (int side = 0; side < 4; side++) {
+                Point a = points[side], b = points[(side + 1) % 4];
+                double length = Math.hypot(b.x - a.x, b.y - a.y);
+                double nx = -(b.y - a.y) * 5 / length, ny = (b.x - a.x) * 5 / length;
+                for (int sample = 1; sample <= 10; sample++) {
+                    double x = a.x + (b.x - a.x) * sample / 11, y = a.y + (b.y - a.y) * sample / 11;
+                    int ax = (int) Math.round(x + nx), ay = (int) Math.round(y + ny);
+                    int bx = (int) Math.round(x - nx), by = (int) Math.round(y - ny);
+                    if (ax < 0 || ay < 0 || bx < 0 || by < 0 || ax >= width || bx >= width || ay >= height || by >= height) continue;
+                    total += Math.abs((tones[ay * width + ax] & 255) - (tones[by * width + bx] & 255)); samples++;
+                }
+            }
+            return samples == 0 ? 0 : total / samples / 255;
+        }
+
+        @Override public void close() {
+            gray.release(); smooth.release(); edges.release(); edgeBand.release(); binary.release();
+            hierarchy.release(); kernel.release(); supportKernel.release(); mean.release(); deviation.release();
+        }
     }
 
-    private static Detection contours(Mat mask, Mat edges) {
-        List<MatOfPoint> contours = new ArrayList<>();
-        Mat hierarchy = new Mat(), copy = mask.clone();
-        Detection best = null;
-        byte[] gradient = new byte[(int) edges.total()]; edges.get(0, 0, gradient);
-        try {
-            Imgproc.findContours(copy, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
-            // Bound work on cluttered frames; larger shapes are the plausible page candidates.
-            contours.sort(Comparator.comparingDouble((MatOfPoint c) -> Math.abs(Imgproc.contourArea(c))).reversed());
-            for (int n = 0; n < Math.min(40, contours.size()); n++) {
-                MatOfPoint contour = contours.get(n);
-                double area = Math.abs(Imgproc.contourArea(contour)) / (mask.cols() * (double) mask.rows());
-                if (area < .12 || area > .93) continue;
-                MatOfPoint2f curve = new MatOfPoint2f(contour.toArray()), approx = new MatOfPoint2f();
-                try {
-                    Imgproc.approxPolyDP(curve, approx, Imgproc.arcLength(curve, true) * .02, true);
-                    if (approx.total() != 4) continue;
-                    Point[] points = order(approx.toArray());
-                    if (!plausible(points, mask.cols(), mask.rows())) continue;
-                    double support = edgeSupport(points, gradient, edges.cols(), edges.rows());
-                    if (support < .55) continue;
-                    double score = support * .7 + Math.sqrt(area) * .3;
-                    if (best == null || score > best.score) {
-                        Point[] normalized = Arrays.stream(points).map(p -> new Point(p.x / (mask.cols() - 1), p.y / (mask.rows() - 1))).toArray(Point[]::new);
-                        best = new Detection(normalized, score);
-                    }
-                } finally { curve.release(); approx.release(); }
-            }
-            return best;
-        } finally { copy.release(); hierarchy.release(); for (MatOfPoint c : contours) c.release(); }
+    private static final class Candidate {
+        final MatOfPoint contour;
+        final double area;
+        Candidate(MatOfPoint contour, double area) { this.contour = contour; this.area = area; }
     }
 
     static Point[] order(Point[] points) {
@@ -103,12 +174,7 @@ final class DocumentEdges {
             for (int sample = 1; sample <= 40; sample++) {
                 int x = (int) Math.round(a.x + (b.x - a.x) * sample / 41.0);
                 int y = (int) Math.round(a.y + (b.y - a.y) * sample / 41.0);
-                boolean found = false;
-                for (int dy = -3; dy <= 3 && !found; dy++) for (int dx = -3; dx <= 3; dx++) {
-                    int xx = x + dx, yy = y + dy;
-                    if (xx >= 0 && yy >= 0 && xx < width && yy < height && pixels[yy * width + xx] != 0) { found = true; break; }
-                }
-                if (found) hits++;
+                if (x >= 0 && y >= 0 && x < width && y < height && pixels[y * width + x] != 0) hits++;
             }
             minimum = Math.min(minimum, hits / 40.0);
         }
@@ -116,22 +182,59 @@ final class DocumentEdges {
     }
 
     static final class Tracker {
-        private Point[] previous;
-        private int steady;
-        private long lastSeen;
+        static final long LOST_AFTER_MS = 160;
+        private Point[] previous, lastRaw, pendingJump;
+        private long lastSeen, steadySince = -1;
+        private boolean fresh;
+
+        void reset() { previous = null; lastRaw = null; pendingJump = null; lastSeen = 0; steadySince = -1; fresh = false; }
+
         Point[] update(Detection detection, long now) {
-            if (now - lastSeen > 450) { previous = null; steady = 0; }
-            if (detection == null) {
-                if (now - lastSeen > 450) { previous = null; steady = 0; }
-                return previous;
+            if (previous != null && (now < lastSeen || now - lastSeen > LOST_AFTER_MS)) reset();
+            fresh = false;
+            if (detection == null) { steadySince = -1; pendingJump = null; return previous; }
+            Point[] raw = align(detection.corners, previous);
+            double movement = distance(previous, raw);
+            // A single far-away contour must not yank the border to another object.
+            if (previous != null && movement > .12 && (pendingJump == null || distance(pendingJump, raw) > .025)) {
+                pendingJump = raw; steadySince = -1; return previous;
             }
-            double movement = 1;
-            if (previous != null) { movement = 0; for (int i = 0; i < 4; i++) movement = Math.max(movement, Math.hypot(previous[i].x - detection.corners[i].x, previous[i].y - detection.corners[i].y)); }
-            steady = movement < .018 ? steady + 1 : 0;
+            pendingJump = null;
+            long dt = previous == null ? 33 : Math.max(1, now - lastSeen);
+            double rawMovement = distance(lastRaw, raw);
+            boolean quiet = lastRaw != null && rawMovement < .008 && rawMovement * 1000 / dt < .065 && detection.score >= .7;
+            if (quiet) { if (steadySince < 0) steadySince = now; } else steadySince = -1;
+            double tau = movement < .004 ? 85 : Math.max(16, 85 / (1 + movement * 180));
+            double alpha = previous == null || movement > .12 ? 1 : 1 - Math.exp(-dt / tau);
             Point[] next = new Point[4];
-            for (int i = 0; i < 4; i++) next[i] = previous != null && movement < .08 ? new Point(previous[i].x * .55 + detection.corners[i].x * .45, previous[i].y * .55 + detection.corners[i].y * .45) : detection.corners[i];
-            previous = next; lastSeen = now; return next;
+            for (int i = 0; i < 4; i++) next[i] = previous == null ? new Point(raw[i].x, raw[i].y) :
+                new Point(previous[i].x + alpha * (raw[i].x - previous[i].x), previous[i].y + alpha * (raw[i].y - previous[i].y));
+            previous = next; lastRaw = raw; lastSeen = now; fresh = true;
+            return next;
         }
-        boolean stable(long now) { return previous != null && steady >= 3 && now - lastSeen < 250; }
+
+        boolean stable(long now) { return fresh && previous != null && steadySince >= 0 && now - steadySince >= 220 && now - lastSeen < 100; }
+
+        private static double distance(Point[] a, Point[] b) {
+            if (a == null || b == null) return 1;
+            double maximum = 0;
+            for (int i = 0; i < 4; i++) maximum = Math.max(maximum, Math.hypot(a[i].x - b[i].x, a[i].y - b[i].y));
+            return maximum;
+        }
+
+        private static Point[] align(Point[] points, Point[] reference) {
+            int bestShift = 0; double best = Double.POSITIVE_INFINITY;
+            if (reference != null) for (int shift = 0; shift < 4; shift++) {
+                double sum = 0;
+                for (int i = 0; i < 4; i++) {
+                    Point p = points[(i + shift) % 4];
+                    sum += Math.pow(reference[i].x - p.x, 2) + Math.pow(reference[i].y - p.y, 2);
+                }
+                if (sum < best) { best = sum; bestShift = shift; }
+            }
+            Point[] result = new Point[4];
+            for (int i = 0; i < 4; i++) { Point p = points[(i + bestShift) % 4]; result[i] = new Point(p.x, p.y); }
+            return result;
+        }
     }
 }
