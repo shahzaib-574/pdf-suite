@@ -250,6 +250,17 @@ jobs:
       - name: Verify screenshot pixels and release provenance
         run: python store-assets/scripts/verify_ci_screenshots.py store-assets/screenshots/release-capture android/app/build/outputs/apk/release/app-release.apk
 
+      - name: Upload screenshot test diagnostics on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ream-screenshot-test-diagnostics-${{ github.run_number }}
+          path: |
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
+            android/app/build/outputs/mapping/releaseAndroidTest/missing_rules.txt
+          retention-days: 7
+
       - name: Upload signed release APK and actual screenshots
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
