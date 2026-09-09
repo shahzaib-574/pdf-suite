@@ -26,10 +26,15 @@ In AdMob, link the published Play listing, open app verification, and request a
 check after the root file is publicly reachable. Google controls verification
 and app-readiness approval; creating an ad unit does not approve the app.
 
-In AdSense, reactivation was requested and `reampdfsuite.com` was added to site
-onboarding. Verify site ownership using the account meta tag or ads.txt and
-request review once the site is deployed. Website approval is separate from
-AdMob account approval.
+In AdSense, the inactive account was reactivated and `reampdfsuite.com` was added.
+Google verified ownership using the published account meta tag. Review was
+requested on September 10, 2026 (Asia/Karachi); the site now shows **Getting ready**
+and **Review requested**. Website approval is separate from AdMob account approval.
+
+The first GitHub-to-Hostinger deployment passed its HTTPS homepage, metadata,
+`ads.txt` and `app-ads.txt` checks. All 12 website routes, category navigation,
+search, themes, four viewport widths and a real PDF merge/download passed against
+the live domain. These checks do not mean that Google has approved ad serving.
 
 ## Before displaying Android ads
 
