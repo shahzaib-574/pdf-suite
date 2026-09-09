@@ -1,0 +1,5 @@
+--------- beginning of main
+09-09 22:21:04.364  2338  2351 I System.out: EDGE_TRACKING baselineMeanLagPx=16.175 updatedMeanLagPx=3.062 at640px samples=901
+09-09 22:21:04.815  2338  2351 I System.out: EDGE_BENCH detector640x480 baselineP50Ms=6.306 updatedP50Ms=1.861 baselineP95Ms=9.664 updatedP95Ms=2.811
+09-09 22:21:05.322  2338  2351 I System.out: EDGE_BENCH clutter640x480 baselineP50Ms=10.274 updatedP50Ms=5.781 baselineP95Ms=13.951 updatedP95Ms=7.940
+09-09 22:21:05.746  2338  2351 I System.out: EDGE_BENCH lumaCopy baselineP50Ms=4.147 updatedP50Ms=0.180 baselineP95Ms=4.254 updatedP95Ms=0.221
