@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
@@ -16,6 +17,7 @@ import android.os.ParcelFileDescriptor;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
+import android.widget.Button;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.*;
@@ -95,6 +97,45 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
         screenshots.put(new JSONObject().put("fileName",name).put("capturedAtUtc",Instant.now().toString()).put("sha256",fileSha(file)));
     }
 
+    private Button shutter(View node) {
+        if (node instanceof Button && "Take photo".contentEquals(node.getContentDescription() == null ? "" : node.getContentDescription())) return (Button) node;
+        if (node instanceof ViewGroup) for (int i=0;i<((ViewGroup)node).getChildCount();i++) {
+            Button found=shutter(((ViewGroup)node).getChildAt(i));if(found!=null)return found;
+        }
+        return null;
+    }
+
+    private void verifyReleaseCamera(Context context) throws Exception {
+        getUiAutomation().grantRuntimePermission(context.getPackageName(),android.Manifest.permission.CAMERA);
+        File imports=new File(context.getCacheDir(),"ream-incoming");
+        java.util.Set<String> before=new java.util.HashSet<>();
+        String[] names=imports.list();if(names!=null)java.util.Collections.addAll(before,names);
+        Activity camera=startActivitySync(new Intent().setClassName(context,context.getPackageName()+".DocumentCameraActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        try {
+            java.util.concurrent.atomic.AtomicBoolean ready=new java.util.concurrent.atomic.AtomicBoolean();
+            long deadline=System.currentTimeMillis()+25000;
+            while(!ready.get()&&System.currentTimeMillis()<deadline){
+                runOnMainSync(()->{Button button=shutter(camera.getWindow().getDecorView());ready.set(button!=null&&button.isEnabled());});
+                if(!ready.get())Thread.sleep(100);
+            }
+            assertTrue("Signed release camera did not bind",ready.get());
+            runOnMainSync(()->shutter(camera.getWindow().getDecorView()).performClick());
+            deadline=System.currentTimeMillis()+25000;
+            while(!camera.isFinishing()&&System.currentTimeMillis()<deadline)Thread.sleep(100);
+            assertTrue("Signed release camera did not finish capture",camera.isFinishing());
+            File[] created=imports.listFiles(file->!before.contains(file.getName()));
+            assertNotNull(created);assertEquals(1,created.length);
+            BitmapFactory.Options options=new BitmapFactory.Options();options.inJustDecodeBounds=true;
+            BitmapFactory.decodeFile(created[0].getPath(),options);
+            assertEquals("image/jpeg",options.outMimeType);
+            assertTrue(options.outWidth>=480&&options.outHeight>=480&&created[0].length()>1000);
+            JSONObject proof=new JSONObject().put("packageName",context.getPackageName()).put("captureBytes",created[0].length())
+                .put("jpegWidth",options.outWidth).put("jpegHeight",options.outHeight).put("nonDebuggable",true);
+            try(Writer writer=new FileWriter(new File(directory,"native-camera-smoke.json"))){writer.write(proof.toString(2));}
+            created[0].delete();
+        } finally {runOnMainSync(camera::finish);}
+    }
+
     private void captureSignedReleaseListing() throws Exception {
         assertTrue("Capture must be explicitly requested", "true".equals(arguments.getString("captureStoreScreenshots")));
         Context context=getTargetContext();
@@ -136,6 +177,7 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
             until("document.body.innerText.includes('Local copy kept in Recents')");
             js("location.hash='#/recents'");until("document.querySelectorAll('.ps-library-item').length>=2");
             capture("06-recents-1080x1920.png");
+            verifyReleaseCamera(context);
             PackageInfo info=context.getPackageManager().getPackageInfo(context.getPackageName(),android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES);
             JSONObject manifest=new JSONObject().put("schemaVersion",1).put("packageName",context.getPackageName())
                 .put("versionCode",info.getLongVersionCode()).put("versionName",info.versionName).put("androidApiLevel",Build.VERSION.SDK_INT)
