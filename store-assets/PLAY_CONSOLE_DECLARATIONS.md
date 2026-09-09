@@ -17,6 +17,6 @@ Data safety describes the sum of data practices across currently distributed ver
 
 Declare ads based on the distributed product. [Google app-content review guidance](https://support.google.com/googleplay/android-developer/answer/9859455?hl=en).
 
-The bundled privacy policy is `public/privacy.html`. Publish the matching policy to the listing's public policy URL before broader distribution; this local edit has not updated the hosted page. The legacy `app-ads.txt` is not required for this build and is not packaged in the application.
+The bundled privacy policy is `public/privacy.html`, published at https://reampdfsuite.com/privacy.html through the main-branch Hostinger deployment. The public support address is info@reampdfsuite.com. Hostinger showed the mailbox Active on 10 September 2026; MX, SPF, DKIM and DMARC records also resolved publicly. The website's `app-ads.txt` is an AdMob prerequisite for a future ad-supported release; it does not mean this Android build serves ads.
 
 Before upload: verify signed artifact permissions and absence of ad components; review all active tracks; complete device QA; confirm version code exceeds previous uploads; publish the matching policy; review the Console's final saved summaries. Do not mark these steps complete from a web build alone.
