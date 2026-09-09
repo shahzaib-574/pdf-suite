@@ -1,8 +1,10 @@
 // Canvas rendering must run on the main thread (DOM canvas and toBlob).
 import { PDFDocument } from "pdf-lib";
-import * as pdfjs from "pdfjs-dist";
+// Android WebViews can lag behind Chrome; the legacy entry includes PDF.js's
+// supported compatibility shims (including Uint8Array.toHex) in both contexts.
+import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
-import pdfjsWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import pdfjsWorkerSrc from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import jbig2FallbackUrl from "pdfjs-dist/wasm/jbig2_nowasm_fallback.js?url";
 import jbig2WasmUrl from "pdfjs-dist/wasm/jbig2.wasm?url";
 import openjpegFallbackUrl from "pdfjs-dist/wasm/openjpeg_nowasm_fallback.js?url";
