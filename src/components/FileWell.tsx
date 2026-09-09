@@ -112,6 +112,17 @@ export function FileWell({
       />
       <label
         ref={ref}
+        onDragOver={(event) => { event.preventDefault(); }}
+        onDrop={(event) => {
+          event.preventDefault();
+          if (disabled || !event.dataTransfer.files.length) return;
+          if (!multiple && event.dataTransfer.files.length > 1) {
+            setPickerError('Choose one file for this tool.');
+            return;
+          }
+          setPickerError(null);
+          onPick(event.dataTransfer.files);
+        }}
         className="well__hit"
         htmlFor={useNativeGallery ? undefined : id}
         role={useNativeGallery ? "button" : undefined}

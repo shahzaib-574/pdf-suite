@@ -2,12 +2,11 @@ import { useEffect, useState } from "react";
 import {
   Clock3,
   Download,
-  FileText,
   FolderOpen,
   Pencil,
   Trash2,
 } from "lucide-react";
-import { AnimatedButton, AppShell } from "../components";
+import { AnimatedButton, AppShell, FileThumb } from "../components";
 import type { RecentItem } from "../lib/types";
 import { formatBytes, saveBytes } from "../store/files";
 import { listRecents, renameRecent, deleteRecent } from "../store/recents";
@@ -40,18 +39,23 @@ export function Recents() {
 
   useEffect(() => {
     let cancelled = false;
-    void listRecents()
-      .then((recentItems) => {
-        if (!cancelled) setItems(recentItems);
-      })
-      .catch(() => {
-        if (!cancelled)
-          setExportError(
-            "Your library could not be loaded. Try reopening Recents.",
-          );
-      });
+    function load() {
+      void listRecents()
+        .then((recentItems) => {
+          if (!cancelled) setItems(recentItems);
+        })
+        .catch(() => {
+          if (!cancelled)
+            setExportError(
+              "Your library could not be loaded. Try reopening Recents.",
+            );
+        });
+    }
+    load();
+    window.addEventListener("ream-library-changed", load);
     return () => {
       cancelled = true;
+      window.removeEventListener("ream-library-changed", load);
     };
   }, []);
 
@@ -121,9 +125,12 @@ export function Recents() {
                   const saving = savingId === item.id;
                   return (
                     <li key={item.id} className="ps-library-item">
-                      <span className="ps-file-icon" aria-hidden="true">
-                        <FileText size={20} />
-                      </span>
+                      <FileThumb
+                        id={item.id}
+                        name={item.name}
+                        mime={item.mime}
+                        stored={canOpen}
+                      />
                       <button
                         type="button"
                         className="ps-library-item__main"

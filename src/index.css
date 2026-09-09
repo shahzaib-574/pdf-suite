@@ -492,9 +492,10 @@ ol {
 }
 
 html.is-scan-camera .shell__nav,
-html.is-scan-camera .skip-to-nav {
-  visibility: hidden;
-  pointer-events: none;
+html.is-scan-camera .skip-to-nav,
+.app-frame--scan .shell__nav,
+.app-frame:has(.ps-screen--viewer) .shell__nav {
+  display: none;
 }
 
 .page-header {

@@ -1,0 +1,59 @@
+name: Deploy Ream website to Hostinger
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ream-hostinger-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: vars.HOSTINGER_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: website-production
+      url: https://reampdfsuite.com
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint && npm run quality-selfcheck && npm run build:website
+      - name: Install verified SSH configuration
+        env:
+          DEPLOY_KEY: ${{ secrets.HOSTINGER_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.HOSTINGER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_KEY"
+          test -n "$KNOWN_HOSTS"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/ream_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/ream_deploy ~/.ssh/known_hosts
+      - name: Upload compiled website, then activate index
+        env:
+          SSH_HOST: ${{ vars.HOSTINGER_SSH_HOST }}
+          SSH_USER: ${{ vars.HOSTINGER_SSH_USER }}
+          SSH_PORT: ${{ vars.HOSTINGER_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          [[ "$SSH_HOST" =~ ^[a-zA-Z0-9.-]+$ ]]
+          [[ "$SSH_USER" =~ ^[a-zA-Z0-9_-]+$ ]]
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          export RSYNC_RSH="ssh -i $HOME/.ssh/ream_deploy -p $SSH_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes"
+          destination="$SSH_USER@$SSH_HOST:domains/reampdfsuite.com/public_html/"
+          ssh -i ~/.ssh/ream_deploy -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 'test -d domains/reampdfsuite.com/public_html'
+          rsync -az --delay-updates --exclude=index.html dist-web/ "$destination"
+          rsync -az --delay-updates dist-web/index.html "$destination"
+      - name: Verify published website
+        run: |
+          curl --fail --silent --show-error --retry 4 https://reampdfsuite.com/ | grep -F 'Ream PDF Suite'
+          curl --fail --silent --show-error --retry 4 https://reampdfsuite.com/release-metadata.json | grep -F '"mode":"website"'
+      - name: Remove temporary deployment key
+        if: always()
+        run: rm -f ~/.ssh/ream_deploy

@@ -50,14 +50,45 @@ function statusCopy(status: CameraStatus): { title: string; body: string } {
   };
 }
 
-async function captureFrame(video: HTMLVideoElement): Promise<PickedFile> {
+function viewfinderSource(
+  video: HTMLVideoElement,
+  frame: HTMLElement | null,
+): { sx: number; sy: number; sw: number; sh: number } {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!frame || vw < 2 || vh < 2) return { sx: 0, sy: 0, sw: vw, sh: vh };
+  const videoBox = video.getBoundingClientRect();
+  const frameBox = frame.getBoundingClientRect();
+  if (videoBox.width < 2 || frameBox.width < 2) return { sx: 0, sy: 0, sw: vw, sh: vh };
+  const scale = Math.max(videoBox.width / vw, videoBox.height / vh);
+  const originX = videoBox.left - (vw * scale - videoBox.width) / 2;
+  const originY = videoBox.top - (vh * scale - videoBox.height) / 2;
+  const x0 = Math.max(0, (frameBox.left - originX) / scale);
+  const y0 = Math.max(0, (frameBox.top - originY) / scale);
+  const x1 = Math.min(vw, (frameBox.right - originX) / scale);
+  const y1 = Math.min(vh, (frameBox.bottom - originY) / scale);
+  const sx = Math.floor(x0);
+  const sy = Math.floor(y0);
+  const sw = Math.max(1, Math.min(vw - sx, Math.ceil(x1) - sx));
+  const sh = Math.max(1, Math.min(vh - sy, Math.ceil(y1) - sy));
+  return { sx, sy, sw, sh };
+}
+
+async function captureFrame(
+  video: HTMLVideoElement,
+  frame: HTMLElement | null,
+): Promise<PickedFile> {
   if (video.videoWidth < 2 || video.videoHeight < 2) {
     throw new Error("Camera is not ready yet.");
   }
+  const source = viewfinderSource(
+    video,
+    frame ?? video.closest(".scan-cam")?.querySelector<HTMLElement>(".scan-cam__frame") ?? null,
+  );
   // Match the image importer limit before encoding, avoiding a second decode/encode.
-  const scale = Math.min(1, 3200 / Math.max(video.videoWidth, video.videoHeight));
-  const width = Math.round(video.videoWidth * scale);
-  const height = Math.round(video.videoHeight * scale);
+  const scale = Math.min(1, 3200 / Math.max(source.sw, source.sh));
+  const width = Math.max(1, Math.round(source.sw * scale));
+  const height = Math.max(1, Math.round(source.sh * scale));
   const canvas = typeof OffscreenCanvas !== "undefined"
     ? new OffscreenCanvas(width, height)
     : document.createElement("canvas");
@@ -65,7 +96,7 @@ async function captureFrame(video: HTMLVideoElement): Promise<PickedFile> {
   canvas.height = height;
   const context = canvas.getContext("2d", { alpha: false });
   if (!context) throw new Error("Could not capture this page.");
-  context.drawImage(video, 0, 0, width, height);
+  context.drawImage(video, source.sx, source.sy, source.sw, source.sh, 0, 0, width, height);
   try {
     const blob = "convertToBlob" in canvas
       ? await canvas.convertToBlob({ type: "image/jpeg", quality: 0.92 })
@@ -93,6 +124,7 @@ export function ScanCamera({
 }: ScanCameraProps) {
   const galleryId = useId();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -275,7 +307,7 @@ export function ScanCamera({
     setFlash(true);
     window.setTimeout(() => setFlash(false), 120);
     try {
-      const page = await captureFrame(video);
+      const page = await captureFrame(video, frameRef.current);
       if (!mounted.current) return;
       const next = [...pagesRef.current, page].slice(0, maxPages);
       pagesRef.current = next;
@@ -336,7 +368,7 @@ export function ScanCamera({
         aria-hidden={status !== "live"}
       />
       <div className="scan-cam__scrim" aria-hidden="true" />
-      <div className="scan-cam__frame" aria-hidden="true">
+      <div ref={frameRef} className="scan-cam__frame" aria-hidden="true">
         <span className="scan-cam__corner scan-cam__corner--tr" />
         <span className="scan-cam__corner scan-cam__corner--bl" />
       </div>

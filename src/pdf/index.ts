@@ -3,6 +3,7 @@
  * Implementation lives in this folder. Screens import only from here.
  */
 import type { OcrLanguage } from '../lib/ocrLanguages';
+export { unprotectPdf } from "./protectPdf";
 import type {
   CompressLevel,
   JobOk,

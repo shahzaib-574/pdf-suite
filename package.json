@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:website": "tsc -b && vite build --mode website --outDir dist-web",
+    "dev:website": "vite --mode website --port 5174",
     "lint": "oxlint src scripts",
     "preview": "vite preview",
     "docx-selfcheck": "tsx scripts/docx-selfcheck.ts && tsx scripts/pdf-word-fidelity-selfcheck.ts",

@@ -18,9 +18,13 @@ import { Viewer } from "./screens/Viewer";
 import { parseHash } from "./screens/nav";
 import "./screens/screens.css";
 import { pruneStagedNativeExports, MAX_INPUT_BYTES } from "./store/files";
+import { retainIncoming } from "./store/recents";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { markUpdateReady } from "./store/updates";
 import { Capacitor } from "@capacitor/core";
+import { isWebsite } from './web/platform';
+import { WebHome, WebHeader, WebFooter } from './web/WebHome';
+import './web/website.css';
 
 export default function App() {
   useEffect(() => { document.getElementById('app-boot')?.remove(); }, []);
@@ -46,6 +50,7 @@ export default function App() {
           else setImportError(message);
           return;
         }
+        void retainIncoming(combined);
         const file = combined[0];
         if (
           combined.length === 1 && file &&
@@ -110,7 +115,7 @@ export default function App() {
 
 
   useEffect(() => {
-    document.title = `${routeTitle(route)} · Ream`;
+    document.title = isWebsite && route.name === 'home' ? 'Ream PDF Suite — Free PDF tools in your browser' : `${routeTitle(route)} · Ream`;
     window.scrollTo(0, 0);
     const heading = document.querySelector<HTMLElement>(".route-stage h1");
     if (heading && !(document.activeElement instanceof HTMLInputElement)) {
@@ -121,11 +126,15 @@ export default function App() {
 
   return (
     <ThemeProvider>
+      {isWebsite ? <WebHeader /> : null}
       {Capacitor.isNativePlatform() ||
       window.matchMedia("(hover: none) and (pointer: coarse)").matches ? null : (
         <button
           type="button"
-          hidden={route.name === "tool" && route.id === "scan"}
+          hidden={
+            (route.name === "tool" && route.id === "scan") ||
+            route.name === "viewer"
+          }
           className="skip-to-nav"
           onClick={() => {
             document
@@ -138,7 +147,7 @@ export default function App() {
           Skip to primary navigation
         </button>
       )}
-      <div className={`app-frame${route.name === "tool" && route.id === "scan" ? " app-frame--scan" : ""}`}>
+      <div className={`app-frame${(route.name === "tool" && route.id === "scan") || route.name === "viewer" ? " app-frame--scan" : ""}`}>
         {importError ? (
           <p className="ps-banner" role="alert">
             {importError}
@@ -208,8 +217,11 @@ export default function App() {
         <div className="route-stage" key={routeKey(route)}>
           <RouteView key={inputRevision} route={route} />
         </div>
-        {route.name === "tool" && route.id === "scan" ? null : <BottomNav activeTab={activeNavTab(route)} />}
+        {isWebsite || (route.name === "tool" && route.id === "scan") || route.name === "viewer" ? null : (
+          <BottomNav activeTab={activeNavTab(route)} />
+        )}
       </div>
+      {isWebsite ? <WebFooter /> : null}
     </ThemeProvider>
   );
 }
@@ -217,7 +229,7 @@ export default function App() {
 function RouteView({ route }: { route: Route }) {
   switch (route.name) {
     case "home":
-      return <Home />;
+      return isWebsite ? <WebHome /> : <Home />;
     case "recents":
       return <Recents />;
     case "tool":

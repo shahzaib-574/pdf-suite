@@ -12,19 +12,27 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  Combine,
+  FilePenLine,
+  FilePlus,
   FileText,
   FolderOpen,
   List,
+  ListOrdered,
+  Lock,
+  Minimize2,
   Minus,
+  MoreVertical,
   PanelLeft,
   Plus,
   Search,
   Share2,
+  Unlock,
   X,
 } from "lucide-react";
 import { AnimatedButton, PageHeader } from "../components";
-import type { PickedFile } from "../lib/types";
-import { engine } from "../pdf";
+import type { PickedFile, ToolId } from "../lib/types";
+import { engine, unprotectPdf } from "../pdf";
 import type {
   PdfViewerPage,
   PdfViewerPageRegion,
@@ -39,7 +47,8 @@ import {
   setCurrentViewer,
   lastJob,
 } from "../store/lastJob";
-import { getRecent } from "../store/recents";
+import { getRecent, saveRecent } from "../store/recents";
+import { queueToolFiles } from "../store/toolInput";
 import { useTheme } from "../theme/context";
 import { navigate } from "./nav";
 
@@ -234,6 +243,10 @@ export function Viewer({ recentId }: ViewerProps) {
     submit: (password: string) => void;
   } | null>(null);
   const [password, setPassword] = useState("");
+  const [locked, setLocked] = useState(false);
+  const [unlockPassword, setUnlockPassword] = useState("");
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
@@ -303,6 +316,9 @@ export function Viewer({ recentId }: ViewerProps) {
 
   useEffect(() => {
     if (!bytes) return;
+    setLocked(false);
+    setUnlockPassword("");
+    setMoreOpen(false);
     let cancelled = false;
     let opened: PdfViewerSession | null = null;
     const controller = new AbortController();
@@ -329,10 +345,12 @@ export function Viewer({ recentId }: ViewerProps) {
           onPassword: (incorrect) =>
             new Promise<string>((resolve) => {
               if (!cancelled) {
+                setLocked(true);
                 setPassword("");
                 setPasswordPrompt({
                   incorrect,
                   submit: (value) => {
+                    setUnlockPassword(value);
                     setPasswordPrompt(null);
                     resolve(value);
                   },
@@ -521,6 +539,67 @@ export function Viewer({ recentId }: ViewerProps) {
     setSearchCursor(next);
     goToPage(searchResults[next]!.pageIndex);
   }
+
+  function currentPdf(): PickedFile | null {
+    if (!bytes) return null;
+    return {
+      name,
+      mime: "application/pdf",
+      bytes,
+      password: unlockPassword || undefined,
+    };
+  }
+
+  function openTool(tool: ToolId): void {
+    const file = currentPdf();
+    if (!file) return;
+    setMoreOpen(false);
+    queueToolFiles(tool, [file]);
+    navigate(`#/tool/${tool}`);
+  }
+
+  async function removePassword(): Promise<void> {
+    if (!bytes || !unlockPassword) return;
+    setMoreOpen(false);
+    setMessage(null);
+    try {
+      const plain = await unprotectPdf(bytes, unlockPassword);
+      const filename = name.replace(/\.pdf$/i, "") + "-unlocked.pdf";
+      await saveRecent({
+        name: filename,
+        mime: "application/pdf",
+        tool: "protect",
+        bytes: plain,
+      }).catch(() => undefined);
+      setCurrentViewer(plain, filename);
+      setName(filename);
+      setBytes(plain);
+      setLocked(false);
+      setUnlockPassword("");
+    } catch (err) {
+      setMessage(
+        err instanceof Error ? err.message : "Could not remove the password.",
+      );
+    }
+  }
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    function onKey(event: KeyboardEvent): void {
+      if (event.key === "Escape") setMoreOpen(false);
+    }
+    function onPointer(event: Event): void {
+      const node = event.target;
+      if (node instanceof Node && moreRef.current?.contains(node)) return;
+      setMoreOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onPointer);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onPointer);
+    };
+  }, [moreOpen]);
 
   async function onShare(): Promise<void> {
     if (!bytes) return;
@@ -1029,6 +1108,68 @@ export function Viewer({ recentId }: ViewerProps) {
               </div>
             </div>
           </div>
+          <nav className="ps-reader-dock" aria-label="PDF tools">
+            <button type="button" onClick={() => openTool("merge")}>
+              <FilePlus size={22} strokeWidth={2.1} aria-hidden="true" />
+              Add
+            </button>
+            <button type="button" onClick={() => openTool("organize")}>
+              <ListOrdered size={22} strokeWidth={2.1} aria-hidden="true" />
+              Organize
+            </button>
+            <button type="button" onClick={() => openTool("compress")}>
+              <Minimize2 size={22} strokeWidth={2.1} aria-hidden="true" />
+              Compress
+            </button>
+            <button type="button" onClick={() => openTool("pdf-docx")}>
+              <FilePenLine size={22} strokeWidth={2.1} aria-hidden="true" />
+              Word
+            </button>
+            <div ref={moreRef} className="ps-reader-more">
+              <button
+                type="button"
+                aria-label="More tools"
+                aria-haspopup="menu"
+                aria-expanded={moreOpen}
+                onClick={() => setMoreOpen((open) => !open)}
+              >
+                <MoreVertical size={22} strokeWidth={2.1} aria-hidden="true" />
+                More
+              </button>
+              {moreOpen ? (
+                <div className="ps-reader-more__menu" role="menu">
+                  {locked ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={!unlockPassword}
+                      onClick={() => void removePassword()}
+                    >
+                      <Unlock size={16} strokeWidth={2.1} aria-hidden="true" />
+                      Remove password
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => openTool("protect")}
+                    >
+                      <Lock size={16} strokeWidth={2.1} aria-hidden="true" />
+                      Protect PDF
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openTool("merge")}
+                  >
+                    <Combine size={16} strokeWidth={2.1} aria-hidden="true" />
+                    Merge PDFs
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </nav>
         </div>
       )}
     </div>

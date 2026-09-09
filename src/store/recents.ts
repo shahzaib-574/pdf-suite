@@ -1,6 +1,6 @@
 import { get, set, setMany, delMany } from "idb-keyval";
 import { toolById } from "../lib/catalog";
-import type { RecentItem, ToolId } from "../lib/types";
+import type { PickedFile, RecentItem, ToolId } from "../lib/types";
 
 const LEGACY_KEY = "pdf.recents";
 const KEY = "pdf.library.v2";
@@ -57,6 +57,39 @@ export async function listRecents(): Promise<RecentItem[]> {
     .map((row) => ({ ...row, bytes: new Uint8Array() }));
 }
 
+function toolForIncoming(file: PickedFile): ToolId {
+  const name = file.name.toLowerCase();
+  if (file.mime.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(name))
+    return "scan";
+  if (
+    file.mime.includes("wordprocessingml") ||
+    name.endsWith(".docx")
+  )
+    return "docx-pdf";
+  return "view";
+}
+
+function mimeForIncoming(file: PickedFile): string {
+  if (file.mime) return file.mime;
+  if (file.name.toLowerCase().endsWith(".docx"))
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (/\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name)) return "image/jpeg";
+  return "application/pdf";
+}
+
+/** Keep files shared or opened from another app in Recents. */
+export async function retainIncoming(files: PickedFile[]): Promise<void> {
+  for (const file of files) {
+    if (!file.bytes.length) continue;
+    await saveRecent({
+      name: file.name,
+      mime: mimeForIncoming(file),
+      tool: toolForIncoming(file),
+      bytes: file.bytes,
+    }).catch(() => undefined);
+  }
+}
+
 export async function saveRecent(input: {
   name: string;
   mime?: string;
@@ -91,6 +124,8 @@ export async function saveRecent(input: {
       [byteKey(meta.id), input.bytes],
       [KEY, [meta, ...rows]],
     ]);
+    if (typeof window !== "undefined")
+      window.dispatchEvent(new Event("ream-library-changed"));
     return { ...meta, bytes: input.bytes };
   });
 }

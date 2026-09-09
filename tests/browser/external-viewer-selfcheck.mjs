@@ -17,6 +17,7 @@ try {
  assert.equal(await page.locator('.ps-reader-page').count(),0,'Viewer must open before bytes arrive');
  await page.evaluate(bytes=>window.externalTest.files([{name:'External.pdf',mime:'application/pdf',bytes:new Uint8Array(bytes)}]),bytes);
  await page.waitForFunction(()=>document.querySelector('.ps-reader-page__surface img')?.naturalWidth>0);
+ await page.waitForFunction(async()=>{const {listRecents}=await import('/src/store/recents.ts');return (await listRecents()).some(item=>item.name==='External.pdf'&&item.stored);});
  await page.evaluate(()=>window.externalTest.start());await page.getByText('Loading shared PDF…',{exact:true}).waitFor();
  await page.evaluate(()=>window.externalTest.error('Shared file is unavailable.'));
  await page.getByText('Shared file is unavailable.',{exact:true}).waitFor();assert.equal(new URL(page.url()).hash,'#/viewer');
@@ -24,5 +25,6 @@ try {
  await page.evaluate(()=>{location.hash='/';});await page.waitForFunction(()=>location.hash==='#/');
  await page.evaluate(bytes=>window.externalTest.files([{name:'Later.pdf',mime:'application/pdf',bytes:new Uint8Array(bytes)}]),bytes);
  assert.equal(new URL(page.url()).hash,'#/','Completing an import must not pull the user back into the reader');
+ await page.waitForFunction(async()=>{const {listRecents}=await import('/src/store/recents.ts');const names=(await listRecents()).map(item=>item.name);return names.includes('External.pdf')&&names.includes('Later.pdf');});
  console.log('PASS early viewer, delayed bytes, replacement PDF, reader error, and navigation away during import');
 }finally{await browser.close();}

@@ -5,9 +5,8 @@ import {
   Clock3,
   FilePenLine,
   Search,
-  ShieldCheck,
 } from "lucide-react";
-import { AppShell, StaggerGrid, ToolTile } from "../components";
+import { AppShell, FileThumb, StaggerGrid, ToolTile } from "../components";
 import { TOOLS, toolMatchesQuery } from "../lib/catalog";
 import type { RecentItem, ToolId } from "../lib/types";
 import { formatBytes, saveBytes } from "../store/files";
@@ -53,18 +52,23 @@ export function Home() {
 
   useEffect(() => {
     let cancelled = false;
-    void listRecents()
-      .then((items) => {
-        if (!cancelled) setRecents(items.slice(0, 3));
-      })
-      .catch(() => {
-        if (!cancelled)
-          setExportError(
-            "Recent files could not be loaded. You can still choose a file to use a tool.",
-          );
-      });
+    function load() {
+      void listRecents()
+        .then((items) => {
+          if (!cancelled) setRecents(items.slice(0, 3));
+        })
+        .catch(() => {
+          if (!cancelled)
+            setExportError(
+              "Recent files could not be loaded. You can still choose a file to use a tool.",
+            );
+        });
+    }
+    load();
+    window.addEventListener("ream-library-changed", load);
     return () => {
       cancelled = true;
+      window.removeEventListener("ream-library-changed", load);
     };
   }, []);
 
@@ -202,15 +206,24 @@ export function Home() {
                           else void saveRecentFile(item);
                         }}
                       >
-                        <span className="ps-recent__name" dir="auto">
-                          {item.name}
-                        </span>
-                        <span className="ps-recent__action tabular">
-                          {!canView
-                            ? "Original needed"
-                            : savingRecentId === item.id
-                              ? "Saving…"
-                              : formatBytes(item.size)}
+                        <FileThumb
+                          id={item.id}
+                          name={item.name}
+                          mime={item.mime}
+                          stored={canView}
+                          size="sm"
+                        />
+                        <span className="ps-recent__copy">
+                          <span className="ps-recent__name" dir="auto">
+                            {item.name}
+                          </span>
+                          <span className="ps-recent__action tabular">
+                            {!canView
+                              ? "Original needed"
+                              : savingRecentId === item.id
+                                ? "Saving…"
+                                : formatBytes(item.size)}
+                          </span>
                         </span>
                       </button>
                     </li>
@@ -223,12 +236,7 @@ export function Home() {
 
         <section className="ps-tools-section" aria-labelledby="tools-title">
           <div className="ps-section-heading">
-            <div>
-              <h2 id="tools-title">All tools</h2>
-            </div>
-            <span className="ps-privacy-pill">
-              <ShieldCheck size={14} aria-hidden="true" /> On-device
-            </span>
+            <h2 id="tools-title">All tools</h2>
           </div>
 
           <div className="ps-filter-rail" aria-label="Filter tools by category">

@@ -10,6 +10,7 @@ import {
   listRecents,
   getRecent,
   saveRecent,
+  retainIncoming,
   renameRecent,
   deleteRecent,
   clearRecents,
@@ -83,6 +84,23 @@ assert.equal((await getRecent(large.id))!.name, "renamed.pdf");
 await deleteRecent(large.id);
 assert.equal(await getRecent(large.id), undefined);
 assert.equal(await get(`pdf.file.${large.id}`), undefined);
+await clearRecents();
+assert.equal((await listRecents()).length, 0);
+await retainIncoming([
+  { name: "Shared.pdf", mime: "application/pdf", bytes: new Uint8Array([1, 2, 3]) },
+  { name: "photo.jpg", mime: "image/jpeg", bytes: new Uint8Array([4, 5]) },
+  { name: "notes.docx", mime: "", bytes: new Uint8Array([6]) },
+]);
+const incoming = await listRecents();
+assert.deepEqual(
+  incoming.map((row) => [row.name, row.tool, row.mime]),
+  [
+    ["notes.docx", "docx-pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    ["photo.jpg", "scan", "image/jpeg"],
+    ["Shared.pdf", "view", "application/pdf"],
+  ],
+);
+assert.deepEqual((await getRecent(incoming[2]!.id))!.bytes, new Uint8Array([1, 2, 3]));
 await clearRecents();
 assert.equal((await listRecents()).length, 0);
 const archive = await packageImages(
