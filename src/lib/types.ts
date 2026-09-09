@@ -21,6 +21,8 @@ export type PickedFile = {
   bytes: Uint8Array;
   password?: string;
   scanSource?: { name: string; mime: string; bytes: Uint8Array };
+  /** Suggested crop in the orientation displayed by createImageBitmap, never applied silently. */
+  scanCorners?: { x: number; y: number }[];
 };
 
 export type PageRange = {

@@ -17,6 +17,11 @@ export async function applyScanEdit(
       "Place the four corners around the page without crossing the edges.",
     );
   const bitmap = await createImageBitmap(new Blob([bytes], { type: mime }));
+  // Fail explicitly instead of silently throwing away native-camera detail.
+  if (bitmap.width * bitmap.height > 32_000_000) {
+    bitmap.close();
+    throw new Error('This photo is too large to edit safely (32 megapixel limit). Keep the original or choose a smaller photo.');
+  }
   const angle = edit.rotate === true ? 90 : Number(edit.rotate);
   const turn = ((angle % 360) + 360) % 360;
   if (![0, 90, 180, 270].includes(turn)) { bitmap.close(); throw new Error("Invalid page rotation."); }
@@ -32,7 +37,7 @@ export async function applyScanEdit(
     bitmap.close();
     return (await target.convertToBlob({ type: "image/png" })).arrayBuffer();
   }
-  const scale = Math.min(1, 3200 / Math.max(bitmap.width, bitmap.height));
+  const scale = 1;
   const w = Math.max(1, Math.round(bitmap.width * scale)),
     h = Math.max(1, Math.round(bitmap.height * scale));
   const source = new OffscreenCanvas(w, h);
