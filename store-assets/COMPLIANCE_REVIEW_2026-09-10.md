@@ -2,6 +2,8 @@
 
 Scope: current ad-free Android app `com.reampdf.mobile`, version 1.1.0 (3). The website and future ad-supported Android build need separate/updated declarations. This records what was checked and prepared; it is not a record of submitted Play forms or Google approval.
 
+Subsequent delivery: the publisher approved creation and the reviewed AAB was published to internal testing. See [upload record](PLAY_UPLOAD_2026-09-10.md). Statements below about the uncreated app and unsubmitted creation checkboxes describe the review checkpoint before that approval; app-content/IARC forms remain prepared rather than submitted.
+
 ## Release and functionality
 
 - Production bundle signing, release lint, unit tests, ad-free artifact and 16 KB alignment checks passed in final workflow 34401419040. Downloaded AAB/APK hashes match the signed-release manifest.
