@@ -66,4 +66,15 @@ try {
   await native.getByRole('button',{name:'Next',exact:true}).click();
   await native.getByRole('textbox',{name:'PDF name'}).waitFor();
   console.log('PASS native-camera bridge result enters crop review with detected corners and completes to PDF preview.');
+  const denied = await browser.newPage();
+  await denied.route('**/src/store/documentCamera.ts*', route => route.fulfill({contentType:'text/javascript',body:`
+    export function nativeDocumentCameraAvailable(){return true;}
+    export async function captureNativeDocument(){throw new Error('Camera permission was denied.');}
+  `}));
+  await denied.goto(base + '/#/tool/scan');
+  await denied.getByRole('alert').filter({hasText:'Camera permission was denied.'}).waitFor();
+  assert.ok(await denied.getByRole('button',{name:'Choose from gallery',exact:true}).isEnabled());
+  await denied.getByRole('button',{name:'Back to scan',exact:true}).click();
+  await denied.waitForURL('**/#/');
+  console.log('PASS permission denial leaves gallery/retry available and returns safely to home.');
 } finally {await browser.close();}
