@@ -6,13 +6,14 @@ build:
         name: Install locked JavaScript dependencies
         command: npm ci
     - run:
-        name: Check and bundle the ad-free app
+        name: Check and bundle the test-ad app
         command: |
           export REAM_OTA_CHANNEL_PREFIX=preview
           npm run lint
           npm run quality-selfcheck
-          npm run android:sync
-          npm run verify:ad-free
+          npm run ads-selfcheck
+          npm run android:sync:debug
+          npm run verify:ads -- --debug
     - run:
         name: Install Java 21 for Capacitor 8
         command: |

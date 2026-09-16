@@ -1,4 +1,4 @@
-name: Build ad-free internal test APK
+name: Build ad-supported internal test APK
 on:
   workflow_dispatch:
 permissions:
@@ -20,14 +20,15 @@ jobs:
       - uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
       - run: npm ci
-      - name: Verify and synchronize ad-free app
+      - name: Verify and synchronize test-ad app
         run: |
           npm run lint
           npm run pdf-selfcheck
           npm run docx-selfcheck
           npm run quality-selfcheck
-          npm run android:sync
-          npm run verify:ad-free
+          npm run ads-selfcheck
+          npm run android:sync:debug
+          npm run verify:ads -- --debug
       - name: Build and check Android
         working-directory: android
         run: |
@@ -36,7 +37,7 @@ jobs:
       - name: Upload sideload-only test APK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: ream-ad-free-test-apk-${{ github.run_number }}
+          name: ream-test-ads-apk-${{ github.run_number }}
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14

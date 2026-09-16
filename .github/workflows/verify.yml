@@ -54,6 +54,8 @@ jobs:
         run: |
           npm run lint
           npm run build
+          npm run build:website
+          npm run ads-selfcheck
           npm run docx-selfcheck
           npm run quality-selfcheck
           npm run pdf-selfcheck
@@ -62,11 +64,18 @@ jobs:
       - name: Sync Capacitor Android project
         run: npx cap sync android
 
-      - name: Verify ad-free assets and dependencies
-        run: npm run verify:ad-free
+      - name: Verify production AdMob assets and dependencies
+        run: |
+          npm run verify:ads
+          npm run verify:monetization -- --build
 
       - name: Verify generated Android plugin files are current
         run: git diff --exit-code -- android/app/capacitor.build.gradle android/capacitor.settings.gradle
+
+      - name: Synchronize safe Android debug ads
+        run: |
+          npm run android:sync:debug
+          npm run verify:ads -- --debug
 
       - name: Verify Android debug build
         working-directory: android
@@ -112,6 +121,7 @@ jobs:
           NODE
 
           npm run android:sync
+          npm run verify:ads
 
       - name: Verify optimized signed production path
         working-directory: android

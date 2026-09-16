@@ -1,0 +1,1 @@
+Ream 1.2.0 adds carefully placed banner ads on Tools and Recents to support continued development. Ads stay out of document tools, scanning, reading, results, incoming-file choices, and save/download controls. This update also adds Google privacy choices where required. Your document contents continue to be processed on your device and are not sent to the advertising service.

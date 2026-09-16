@@ -2,11 +2,11 @@
 
 ## App icon
 
-The purple-to-blue Ream lightning mark centered on a softly raised pale-gray square.
+A purple Ream tile with a white PDF document framed by four scan corners, centered on a raised pale-gray square.
 
 ## Feature graphic
 
-Ream’s mark beside “PDF work, kept on your device” and a raised panel showing scan, export, and tool controls.
+Ream’s purple PDF document-and-scan mark beside “PDF work, kept on your device” and a panel with scan and export controls.
 
 ## Screenshots
 

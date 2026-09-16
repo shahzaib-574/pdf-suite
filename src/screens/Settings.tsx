@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Check,
   ExternalLink,
@@ -11,11 +11,19 @@ import {
 import { AnimatedButton, AppShell } from '../components';
 import { clearRecents } from '../store/recents';
 import { useTheme } from '../theme/context';
+import {
+  showAdPrivacyOptions,
+  subscribeAdPrivacyState,
+} from '../ads/admob';
 
 export function Settings() {
   const { theme, setTheme, reducedMotion, setReducedMotion } = useTheme();
   const [cleared, setCleared] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [adPrivacyRequired, setAdPrivacyRequired] = useState(false);
+  const [adPrivacyStatus, setAdPrivacyStatus] = useState('');
+
+  useEffect(() => subscribeAdPrivacyState(setAdPrivacyRequired), []);
 
   return (
     <AppShell>
@@ -102,6 +110,28 @@ export function Settings() {
               </span>
               <ExternalLink size={17} aria-hidden="true" />
             </a>
+            {adPrivacyRequired ? (
+              <AnimatedButton
+                variant="ghost"
+                block
+                icon={ShieldCheck}
+                onClick={() => {
+                  setAdPrivacyStatus('Opening privacy choices…');
+                  void showAdPrivacyOptions().then((updated) => {
+                    setAdPrivacyStatus(
+                      updated
+                        ? 'Advertising privacy choices updated.'
+                        : 'Privacy choices could not be refreshed. Try again when online.',
+                    );
+                  });
+                }}
+              >
+                Advertising privacy choices
+              </AnimatedButton>
+            ) : null}
+            {adPrivacyStatus ? (
+              <p className="ps-success-note" role="status">{adPrivacyStatus}</p>
+            ) : null}
             {confirmClear ? (
               <div className="ps-confirm" role="group" aria-label="Confirm clear recent files">
                 <p>This removes locally stored recent files from this device.</p>
@@ -144,7 +174,7 @@ export function Settings() {
           </div>
         </section>
 
-        <p className="ps-app-version">Ream 1.0.0 · Private PDF tools</p>
+        <p className="ps-app-version">Ream 1.2.0 · On-device PDF tools</p>
       </section>
     </AppShell>
   );

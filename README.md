@@ -13,6 +13,7 @@ Public privacy policy:
 - PDF.js on the main thread (view, compress, PDF→images)
 - Geometry-aware PDF text extraction and native DOCX packaging (styled runs, spacing, tables, columns, and bundled on-device English OCR)
 - Capacitor 8 Android shell targeting Android API 36
+- Google Mobile Ads and UMP through `@capacitor-community/admob` 8.1.0
 - Mobbin-informed mobile navigation, searchable tools, light/dark themes, and reduced-motion support
 
 ## Run
@@ -57,6 +58,9 @@ npm run quality-selfcheck
 npm run pdf-docx-preview
 npm run ocr-preview
 npm run verify:store-assets
+npm run ads-selfcheck
+npm run verify:ads
+npm run verify:monetization
 npm run verify:android-artifact -- --self-test
 npm run build
 ```
@@ -88,13 +92,13 @@ npm run android:debug
 npm run android:bundle
 ```
 
-The debug and release builds are ad-free. No advertising IDs, consent configuration, or AdMob secrets are required. Run `npm run verify:ad-free` after building to check dependencies, synchronized native configuration and web assets.
+Android 1.2.0 is ad-supported. Anchored adaptive banners are limited to native Tools and Recents, use Google UMP consent eligibility, and reserve no gap until an ad reports its real size. Because the selected Play audience includes 13-15 and 16-17 users and there is no neutral age screen, every UMP/ad request is tagged as under the age of consent and capped at Google's General content rating. COPPA child-directed treatment remains unset because under-13 users are not selected. Document contents remain on-device and are not sent to the advertising SDK. Debug builds use Google's test banner; production uses the exact public IDs in `monetization.config.json`. Run `npm run verify:ads` after a production sync, or `npm run verify:ads -- --debug` after `npm run android:sync:debug`.
 
 See [the internal testing guide](docs/internal-testing.md) for build commands, test coverage, and the remaining release gates.
 
 Launcher icons and light/dark splash screens are already generated from `assets/logo.svg`. Use a current Android Studio Image Asset workflow to regenerate them after changing the logo.
 
-For Play Store release, copy `android/keystore.properties.example` to `android/keystore.properties`, point it to an upload keystore stored outside this repository, and replace every example password locally. The release build validates all four signing fields and the keystore path. Signing files and credentials are ignored by Git. Verification CI stages a one-run disposable key, Ream's public AdMob app ID, and a synthetic non-live banner ID to exercise the real signed production path without possessing production secrets; the files are removed after the job.
+For Play Store release, copy `android/keystore.properties.example` to `android/keystore.properties`, point it to an upload keystore stored outside this repository, and replace every example password locally. The release build validates all four signing fields and the keystore path. Signing files and credentials are ignored by Git. Verification CI stages a one-run disposable key and exercises the exact production AdMob configuration without clicking or depending on a live ad; signing files are removed after the job.
 
 After the production AdMob account and upload key are ready, the protected manual
 GitHub workflow can produce the signed AAB without committing configuration or
@@ -109,6 +113,8 @@ CI also inspects the optimized signed test artifact's final manifest and web ass
 verifies its signature, and runs Android build-tools `zipalign -c -P 16` so newly
 introduced dependencies cannot silently expand permissions or regress the Play
 requirement for 16 KB page-size devices.
+
+The currently observed Play selection is 13-15, 16-17, and 18+. Play warns that some users in those groups are children depending on country and requires child-appropriate ads. Before rollout, the publisher must confirm those saved groups, publish/test the matching UMP messages, configure child-appropriate ad serving, publish the matching policy, update Contains ads/Data safety, and complete real-device checks. Global under-age-of-consent treatment plus a General content ceiling is conservative implementation evidence, not proof that account-side forms or every served creative comply. Repository checks do not submit Console forms.
 
 ## Next
 

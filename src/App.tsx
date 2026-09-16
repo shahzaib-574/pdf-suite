@@ -25,9 +25,17 @@ import { Capacitor } from "@capacitor/core";
 import { isWebsite } from './web/platform';
 import { WebFooter, WebHeader, WebHome, WebNavProvider } from './web/WebHome';
 import './web/website.css';
+import { initializeMobileAds, setDiscoveryBannerVisible } from './ads/admob';
+import { shouldShowDiscoveryBanner } from './ads/policy';
 
 export default function App() {
   useEffect(() => { document.getElementById('app-boot')?.remove(); }, []);
+  useEffect(() => {
+    void initializeMobileAds();
+    return () => {
+      void setDiscoveryBannerVisible(false);
+    };
+  }, []);
   useEffect(() => {
     const frame = requestAnimationFrame(() => { void markUpdateReady(); });
     return () => cancelAnimationFrame(frame);
@@ -123,6 +131,12 @@ export default function App() {
       heading.focus({ preventScroll: true });
     }
   }, [route]);
+
+  useEffect(() => {
+    void setDiscoveryBannerVisible(
+      shouldShowDiscoveryBanner(route, incoming.length > 0),
+    );
+  }, [route, incoming.length]);
 
   return (
     <ThemeProvider>

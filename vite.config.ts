@@ -2,14 +2,48 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import monetization from './monetization.config.json' with { type: 'json' }
 
+const googleAndroidTestBannerId = 'ca-app-pub-3940256099942544/9214589741'
+
+function assertMonetizationConfig() {
+  if (!/^pub-\d{16}$/.test(monetization.publisherId)) throw new Error('Invalid publisherId in monetization.config.json')
+  if (!new RegExp(`^ca-app-${monetization.publisherId}~\\d{10}$`).test(monetization.admobAppId)) throw new Error('Invalid AdMob app ID')
+  if (!new RegExp(`^ca-app-${monetization.publisherId}/\\d{10}$`).test(monetization.admobBannerUnitId)) throw new Error('Invalid AdMob banner ID')
+  if (monetization.admobAppId.includes('3940256099942544') || monetization.admobBannerUnitId.includes('3940256099942544')) throw new Error('Google sample IDs are forbidden in production configuration')
+  if (monetization.liveAdsEnabled !== true) throw new Error('Production AdMob release requires liveAdsEnabled=true')
+}
+
+assertMonetizationConfig()
+
 export default defineConfig(({ mode }) => ({
   base: './',
+  define: {
+    __REAM_AD_CONFIG__: JSON.stringify({
+      bannerId: mode === 'android-debug' ? googleAndroidTestBannerId : monetization.admobBannerUnitId,
+      testMode: mode === 'android-debug',
+      liveAdsEnabled: mode !== 'website',
+    }),
+  },
   plugins: [react(), {
     name: 'ream-release-metadata',
     apply: 'build',
     generateBundle() {
+      const nativeAds = mode === 'production' || mode === 'android-debug'
+      const debugAds = mode === 'android-debug'
       this.emitFile({ type: 'asset', fileName: 'release-metadata.json',
-        source: JSON.stringify({ schemaVersion: 3, mode, advertising: false }) + '\n' })
+        source: JSON.stringify({
+          schemaVersion: 4,
+          mode,
+          advertising: nativeAds,
+          ads: nativeAds ? {
+            provider: 'google-admob',
+            appId: monetization.admobAppId,
+            bannerId: debugAds ? googleAndroidTestBannerId : monetization.admobBannerUnitId,
+            isTesting: debugAds,
+            consent: 'google-ump',
+            maxAdContentRating: 'G',
+            tagForUnderAgeOfConsent: true,
+          } : null,
+        }) + '\n' })
       if (mode === 'website') {
         this.emitFile({ type: 'asset', fileName: '.htaccess', source: `Options -Indexes
 DirectoryIndex index.html

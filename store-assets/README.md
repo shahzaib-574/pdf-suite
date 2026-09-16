@@ -6,14 +6,17 @@ Use [`PLAY_CONSOLE_DECLARATIONS.md`](PLAY_CONSOLE_DECLARATIONS.md) as the audite
 
 ## Ready to upload
 
-| Play Console field | File | Requirement check |
+| Listing asset or field | File | Requirement check |
 | --- | --- | --- |
 | App name | `listing/en-US/title.txt` | 30 characters or fewer |
 | Short description | `listing/en-US/short-description.txt` | 80 characters or fewer |
 | Full description | `listing/en-US/full-description.txt` | 4,000 characters or fewer |
 | Release notes (1.0.0) | `listing/en-US/release-notes-1.0.0.txt` | 500 characters or fewer |
+| Release notes (1.2.0) | `listing/en-US/release-notes-1.2.0.txt` | 500 characters or fewer; ad and privacy behavior disclosed |
 | App icon | `graphics/app-icon-512.png` | 512 x 512, 32-bit RGBA PNG, fully opaque, sRGB, 1 MB or smaller |
-| Feature graphic | `graphics/feature-graphic-1024x500.png` | 1024 x 500, 24-bit RGB PNG, no alpha, sRGB |
+| JPEG logo copy | `graphics/app-logo-512.jpg` | 512 x 512, high-quality RGB JPEG for non-icon uses; do not upload as the Play app icon |
+| Feature graphic | `graphics/feature-graphic-1024x500.jpg` | 1024 x 500, high-quality RGB JPEG with embedded sRGB profile |
+| Feature graphic (PNG alternative) | `graphics/feature-graphic-1024x500.png` | 1024 x 500, 24-bit RGB PNG, no alpha, sRGB |
 | Graphic alt text | `listing/en-US/alt-text.md` | Written for meaning rather than visual decoration |
 | Screenshot PDF fixture | `fixtures/ream-screenshot-fixture.pdf` | Deterministic five-page synthetic document with text, table, columns, and mixed orientation |
 
@@ -44,7 +47,12 @@ On Windows, install Python 3 with Pillow and Chrome, then run from the repositor
 python store-assets/scripts/render_assets.py
 ```
 
-The renderer uses a fixed viewport and sRGB color profile, then validates pixel dimensions, channel format, opacity, and file-size limits. Set `CHROME_PATH` if Chrome is not installed in a standard location.
+The renderer uses a fixed viewport and sRGB color profile, writes the PNG and
+JPEG variants with fixed encoding settings, then validates pixel dimensions,
+channel format, opacity, color-profile presence, and applicable file-size
+limits. The JPEG logo is a convenience copy only: Google Play's app-icon field
+must use `graphics/app-icon-512.png`. Set `CHROME_PATH` if Chrome is not
+installed in a standard location.
 
 ## Screenshot gate
 
@@ -74,7 +82,9 @@ a legacy screenshot set without a manifest is reported as unprovenanced.
 - [ ] Paste the en-US listing copy without adding rankings, prices, testimonials, or unverified claims.
 - [x] Enable the Pages workflow on `main`, then verify `https://shahzaib-574.github.io/pdf-suite/privacy.html` without signing in and add it as the privacy-policy URL.
 - [ ] Select the Productivity category and only tags that accurately describe shipped behavior.
-- [ ] Review the ad-free declaration draft against every currently distributed version.
+- [ ] Review the ad-supported declaration draft against every currently distributed version.
+- [x] Select the intended Play groups: 13-15, 16-17, and 18+.
+- [ ] Configure and verify child-appropriate ads/UMP for users Play may treat as children depending on country; confirm global under-age treatment and General content ceiling on a real test device.
 - [ ] Complete Data safety from the release build's actual SDK behavior.
 - [ ] Complete content rating, target audience, app access, and ads declarations.
 - [ ] Verify the developer contact and support website shown to users.

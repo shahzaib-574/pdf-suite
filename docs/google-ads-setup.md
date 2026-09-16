@@ -1,75 +1,34 @@
 # Google monetization setup
 
-Public account identifiers are stored in `monetization.config.json`. They were
-read from the signed-in AdMob/AdSense account on September 10, 2026 (Asia/Karachi).
-Publisher IDs and ad-unit IDs are public configuration, not login credentials.
+Public production identifiers live in `monetization.config.json`: Android package `com.reampdf.mobile`, AdMob app ID `ca-app-pub-9959568404035601~6472905937`, banner unit `ca-app-pub-9959568404035601/6186593767`, and publisher `pub-9959568404035601`. They are public configuration, not credentials.
 
-The Android AdMob app is **Ream - PDF Suite**, package `com.reampdf.mobile`.
-Its app ID is `ca-app-pub-9959568404035601~6472905937`. The newly created
-**Ream Android Banner** unit is `ca-app-pub-9959568404035601/6186593767`.
-The website AdSense client is `ca-pub-9959568404035601`.
+Version 1.2.0 integrates `@capacitor-community/admob` 8.1.0, Google Mobile Ads, and Google UMP. The manifest reads the app ID from `@string/admob_app_id`. Production builds use only the configured production banner, `isTesting: false`, no test devices/debug geography, maximum ad content rating G, and `tagForUnderAgeOfConsent: true` in both UMP and Mobile Ads initialization. COPPA child-directed treatment is deliberately unset because the selected audience excludes under-13 groups.
 
-## Website prerequisites
+Ads are anchored adaptive banners on native Android Tools and Recents only. Settings, reader, scan/camera, all tool and result flows, incoming-file choices, and save/share/download controls are excluded. Layout space remains zero until native Load plus nonzero SizeChanged events report the real logical height.
 
-The build publishes `/app-ads.txt` for AdMob and `/ads.txt` for AdSense at the
-domain root, with the authorized Google seller line. The website HTML contains
-the AdSense account verification meta tag. Robots are allowed to read the site.
-Run `npm run verify:monetization -- --build` after building the website.
+## Release checks
 
-Set the Google Play listing's developer website to `https://reampdfsuite.com`
-and privacy-policy URL to `https://reampdfsuite.com/privacy.html`. AdMob finds
-app-ads.txt from the developer website in the store listing; a project-subfolder
-GitHub Pages URL does not put the file at that host's root. Ream's store details
-were not yet linked in AdMob at the time of inspection.
+```powershell
+npm install
+npm run build
+npx cap sync android
+npm run ads-selfcheck
+npm run verify:ads
+npm run verify:monetization
+```
 
-In AdMob, link the published Play listing, open app verification, and request a
-check after the root file is publicly reachable. Google controls verification
-and app-readiness approval; creating an ad unit does not approve the app.
+The release build and artifact verifier reject missing/mismatched/sample IDs, test settings, stale generated plugin files, missing Mobile Ads/UMP code, incorrect metadata, and permissions outside the exact SDK-derived allowlist.
 
-In AdSense, the inactive account was reactivated and `reampdfsuite.com` was added.
-Google verified ownership using the published account meta tag. Review was
-requested on September 10, 2026 (Asia/Karachi); the site now shows **Getting ready**
-and **Review requested**. Website approval is separate from AdMob account approval.
+## External gates
 
-The first GitHub-to-Hostinger deployment passed its HTTPS homepage, metadata,
-`ads.txt` and `app-ads.txt` checks. All 12 website routes, category navigation,
-search, themes, four viewport widths and a real PDF merge/download passed against
-the live domain. These checks do not mean that Google has approved ad serving.
+Before rollout, the publisher must:
 
-## Before displaying Android ads
+1. Link the published Play listing and verify `app-ads.txt` from `https://reampdfsuite.com` in AdMob.
+2. Publish and test required Privacy & messaging forms for intended countries.
+3. Publish the matching privacy policy and truthfully update Contains ads and Data safety. No repository file proves a Console form was submitted.
+4. Confirm the currently selected Play groups (13-15, 16-17, and 18+). Play warns that users in these groups can be children depending on country. Configure child-appropriate ad serving and matching privacy messages; the global under-age tag and General ceiling do not by themselves prove every creative or account setting complies.
+5. Complete signed AAB, real-device, consent, accessibility, and no-fill/offline acceptance without interacting with live ads.
 
-The current APK remains ad-free. Seller files and account IDs do not install an
-ad SDK. An ad-supported release needs Google Mobile Ads plus UMP integrated into
-the Android/Capacitor app, native app-ID metadata, the banner placement and a
-new native versionCode/APK. The present `verify:ad-free` and release artifact
-guards intentionally reject ad SDKs, ad IDs and advertising permissions; update
-those guards as part of an explicit ad-supported build implementation.
+Website seller files and AdSense verification remain separate from Android ad serving. Website ad scripts require separate approval and consent implementation.
 
-Request UMP consent information each launch, show a required form, and request
-ads only when UMP reports `canRequestAds`. Expose privacy options when required.
-Use Google test ad IDs on development/test devices. Keep ads clear of file,
-camera, crop and download controls; do not gate document access behind ads.
-
-Confirm the intended age audience, configure the matching AdMob Privacy &
-messaging forms and applicable child/under-age treatment, update privacy copy,
-and update Play's Contains ads and Data safety declarations to match the actual
-SDK/data behavior. Validate consent denial, unavailable network and no-fill
-without breaking PDF tools. Never click live ads during testing.
-
-## Before displaying website ads
-
-AdSense approval, privacy disclosures and the required consent-management setup
-come before loading its ad script. In regions where Google requires a certified
-CMP, configure a supported consent solution. Only then add the AdSense script
-and clearly separated ad placements (or deliberately configured Auto ads).
-Verification meta tags and seller text files make no ad requests.
-
-`liveAdsEnabled` is currently false and no ad script or SDK is loaded. This is
-prerequisite configuration, not a claim that either product is serving ads.
-
-Official instructions:
-- [AdMob app verification](https://support.google.com/admob/answer/14538460)
-- [Developer website and app-ads.txt](https://support.google.com/admob/answer/9363762)
-- [Android SDK integration](https://developers.google.com/admob/android/quick-start)
-- [Android consent with UMP](https://developers.google.com/admob/android/privacy)
-- [AdSense ads.txt](https://support.google.com/adsense/answer/12171612)
+Official references: [Mobile Ads quick start](https://developers.google.com/admob/android/quick-start), [UMP](https://developers.google.com/admob/android/privacy), [test ads](https://developers.google.com/admob/android/test-ads), [ad targeting](https://developers.google.com/admob/android/targeting), and [app-ads.txt](https://support.google.com/admob/answer/9363762).

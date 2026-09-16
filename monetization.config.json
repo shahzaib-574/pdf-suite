@@ -5,5 +5,5 @@
   "admobAppId": "ca-app-pub-9959568404035601~6472905937",
   "admobBannerUnitId": "ca-app-pub-9959568404035601/6186593767",
   "adsenseClientId": "ca-pub-9959568404035601",
-  "liveAdsEnabled": false
+  "liveAdsEnabled": true
 }

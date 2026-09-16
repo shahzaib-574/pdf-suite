@@ -10,6 +10,10 @@ import JSZip from 'jszip';
 const DEFAULT_APK = 'android/app/build/outputs/apk/release/app-release.apk';
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RELEASE_IDENTITY_PATH = path.join(REPOSITORY_ROOT, 'android', 'variables.gradle');
+const MONETIZATION = JSON.parse(
+  readFileSync(path.join(REPOSITORY_ROOT, 'monetization.config.json'), 'utf8'),
+);
+const GOOGLE_TEST_BANNER_ID = 'ca-app-pub-3940256099942544/9214589741';
 
 const RELEASE_IDENTITY_FIELDS = Object.freeze({
   versionCode: Object.freeze({ gradleName: 'appVersionCode', type: 'integer' }),
@@ -172,10 +176,18 @@ const EXPECTED = Object.freeze({
   ...RELEASE_IDENTITY,
 });
 
-// Ad-free release permission contract: local document work and optional camera.
+// Exact release permission contract. Network state and the advertising/Privacy
+// Sandbox identifiers below are introduced by the pinned Google Mobile Ads SDK.
 const MERGED_PERMISSION_ALLOWLIST = Object.freeze([
+  'android.permission.ACCESS_ADSERVICES_AD_ID',
+  'android.permission.ACCESS_ADSERVICES_ATTRIBUTION',
+  'android.permission.ACCESS_ADSERVICES_TOPICS',
+  'android.permission.ACCESS_NETWORK_STATE',
   'android.permission.CAMERA',
+  'android.permission.FOREGROUND_SERVICE',
   'android.permission.INTERNET',
+  'android.permission.WAKE_LOCK',
+  'com.google.android.gms.permission.AD_ID',
   'com.reampdf.mobile.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
 ]);
 
@@ -344,8 +356,87 @@ function resolveApkAnalyzer() {
   return executableName;
 }
 
-function runApkAnalyzer(analyzer, command, apkPath) {
-  const result = spawnSync(analyzer, ['manifest', command, apkPath], {
+function windowsBatchInvocation(executable, args, environment = process.env) {
+  const values = [executable, ...args];
+  for (const value of values) {
+    if (/[\0\r\n"]/.test(value)) {
+      throw new Error('Windows SDK tool paths and arguments cannot contain quotes or control characters.');
+    }
+  }
+
+  const env = { ...environment, REAM_SDK_TOOL: executable };
+  const references = ['"%REAM_SDK_TOOL%"'];
+  for (const [index, value] of args.entries()) {
+    const name = `REAM_SDK_ARG_${index}`;
+    env[name] = value;
+    references.push(`"%${name}%"`);
+  }
+
+  // /s requires the outer quote pair when the command itself starts with a
+  // quoted path. Values travel through the environment so cmd metacharacters
+  // in SDK/workspace paths remain data inside their individual quotes.
+  return {
+    executable: process.env.ComSpec || process.env.COMSPEC || 'cmd.exe',
+    args: ['/d', '/s', '/c', `"${references.join(' ')}"`],
+    env,
+    windowsVerbatimArguments: true,
+  };
+}
+
+function windowsShortPathInvocation(executable, environment = process.env) {
+  if (/[\0\r\n"]/.test(executable)) {
+    throw new Error('Windows SDK tool paths cannot contain quotes or control characters.');
+  }
+  return {
+    executable: process.env.ComSpec || process.env.COMSPEC || 'cmd.exe',
+    args: ['/d', '/s', '/c', 'for %I in ("%REAM_SDK_TOOL%") do @echo %~sI'],
+    env: { ...environment, REAM_SDK_TOOL: executable },
+    windowsVerbatimArguments: true,
+  };
+}
+
+function resolveWindowsBatchExecutable(executable, options) {
+  const invocation = windowsShortPathInvocation(executable, options.env);
+  const result = spawnSync(invocation.executable, invocation.args, {
+    encoding: 'utf8',
+    maxBuffer: options.maxBuffer,
+    windowsHide: options.windowsHide,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    env: invocation.env,
+  });
+  if (result.error) {
+    throw new Error(`Unable to resolve Windows SDK tool path (${executable}): ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    const details = [result.stderr, result.stdout].filter(Boolean).join('\n').trim();
+    throw new Error(
+      `Unable to resolve Windows SDK tool path (${executable}); cmd.exe exited with ${result.status}${details ? `:\n${details}` : ''}`,
+    );
+  }
+  const resolved = result.stdout.trim().split(/\r?\n/).at(-1)?.trim();
+  if (!resolved) throw new Error(`Unable to resolve Windows SDK tool path (${executable}): no path returned`);
+  return resolved;
+}
+
+function spawnSdkTool(executable, args, options) {
+  if (process.platform !== 'win32' || !/\.(?:bat|cmd)$/i.test(executable)) {
+    return spawnSync(executable, args, options);
+  }
+
+  // The Android SDK's Windows launcher currently embeds its own directory in
+  // an unquoted JVM option. A DOS short path prevents spaces in the SDK root
+  // from being split inside that batch file; command arguments remain quoted.
+  const batchExecutable = resolveWindowsBatchExecutable(executable, options);
+  const invocation = windowsBatchInvocation(batchExecutable, args, options.env);
+  return spawnSync(invocation.executable, invocation.args, {
+    ...options,
+    env: invocation.env,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+  });
+}
+
+function runApkAnalyzerCommand(analyzer, args, description) {
+  const result = spawnSdkTool(analyzer, args, {
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
     windowsHide: true,
@@ -358,24 +449,54 @@ function runApkAnalyzer(analyzer, command, apkPath) {
   }
   if (result.status !== 0) {
     const details = [result.stderr, result.stdout].filter(Boolean).join('\n').trim();
+    const termination = result.signal
+      ? `signal ${result.signal}`
+      : `exit code ${result.status}`;
     throw new Error(
-      `apkanalyzer manifest ${command} failed with exit code ${result.status}${details ? `:\n${details}` : ''}`,
+      `apkanalyzer ${description} failed with ${termination}${details ? `:\n${details}` : ''}`,
     );
   }
 
   return result.stdout.trim();
 }
 
+function runApkAnalyzer(analyzer, command, apkPath) {
+  return runApkAnalyzerCommand(
+    analyzer,
+    ['manifest', command, apkPath],
+    `manifest ${command}`,
+  );
+}
+
+function readStringResource(analyzer, resourceName, apkPath) {
+  return runApkAnalyzerCommand(
+    analyzer,
+    ['resources', 'value', '--config', 'default', '--type', 'string', '--name', resourceName, apkPath],
+    `resources value --type string --name ${resourceName}`,
+  );
+}
+
 async function checkWebBundle(apkPath, violations) {
   const apk = await JSZip.loadAsync(await readFile(apkPath));
+  let hasMobileAds = false;
+  let hasUmpPackage = false;
+  let hasUmpPlatformApi = false;
+  let hasUmpConsentApi = false;
   for (const entry of Object.values(apk.files).filter(item => /^classes\d*\.dex$/.test(item.name))) {
     const bytes = await entry.async('nodebuffer');
-    if (['Lcom/google/android/gms/ads/', 'Lcom/google/android/ump/'].some(marker => bytes.includes(Buffer.from(marker)))) {
-      violations.push(`Advertising SDK classes remain in ${entry.name}`);
-    }
+    hasMobileAds ||= bytes.includes(Buffer.from('Lcom/google/android/gms/ads/'));
+    hasUmpPackage ||= bytes.includes(Buffer.from('Lcom/google/android/ump/'));
+    hasUmpPlatformApi ||= bytes.includes(Buffer.from('UserMessagingPlatform'));
+    hasUmpConsentApi ||= bytes.includes(Buffer.from('ConsentInformation'));
+  }
+  if (!hasMobileAds) violations.push('Google Mobile Ads SDK classes are missing from DEX');
+  if (!hasUmpPackage && !(hasUmpPlatformApi && hasUmpConsentApi)) {
+    violations.push('Google UMP SDK classes are missing from DEX');
   }
   const pluginEntry = apk.file('assets/capacitor.plugins.json');
-  if (pluginEntry && /admob/i.test(await pluginEntry.async('string'))) violations.push('AdMob plugin remains registered in the APK');
+  if (!pluginEntry || !/AdMobPlugin|admob/i.test(await pluginEntry.async('string'))) {
+    violations.push('AdMob plugin is missing from the APK plugin registry');
+  }
   const webEntries = Object.values(apk.files)
     .filter((entry) => !entry.dir && entry.name.startsWith('assets/public/'))
     .sort((left, right) => left.name.localeCompare(right.name));
@@ -392,47 +513,82 @@ async function checkWebBundle(apkPath, violations) {
   } else {
     try {
       metadata = JSON.parse((await metadataEntry.async('nodebuffer')).toString('utf8'));
-      checkAdFreeMetadata(metadata, violations);
+      checkAdsMetadata(metadata, violations);
     } catch (error) {
       violations.push(`packaged production metadata is invalid JSON: ${error.message}`);
     }
   }
 
+  let productionBannerPresent = false;
   const forbiddenHits = [];
-  const forbiddenBuffers = ['ca-app-pub-', '@capacitor-community/admob', 'com.google.android.gms.ads'].map((publisher) => ({
-    publisher,
-    bytes: Buffer.from(publisher, 'ascii'),
-  }));
-
   for (const entry of webEntries) {
     const contents = await entry.async('nodebuffer');
-    for (const forbidden of forbiddenBuffers) {
-      if (contents.indexOf(forbidden.bytes) !== -1) {
-        forbiddenHits.push(`${forbidden.publisher} in ${entry.name}`);
-      }
-    }
+    productionBannerPresent ||= contents.includes(Buffer.from(MONETIZATION.admobBannerUnitId));
+    if (contents.includes(Buffer.from(GOOGLE_TEST_BANNER_ID))) forbiddenHits.push(entry.name);
   }
-
-  if (forbiddenHits.length > 0) {
-    violations.push(`Advertising components are packaged in the ad-free web bundle: ${forbiddenHits.join('; ')}`);
-  }
+  if (!productionBannerPresent) violations.push('Configured production banner ID is missing from packaged web assets');
+  if (forbiddenHits.length > 0) violations.push(`Google test banner ID is packaged in production assets: ${forbiddenHits.join(', ')}`);
 
   return { entryCount: webEntries.length, metadata };
 }
 
-function checkAdFreeMetadata(metadata, violations) {
-  addMismatch(violations, 'web metadata schema', metadata?.schemaVersion, 3);
+function checkAdsMetadata(metadata, violations) {
+  addMismatch(violations, 'web metadata schema', metadata?.schemaVersion, 4);
   addMismatch(violations, 'web build mode', metadata?.mode, 'production');
-  addMismatch(violations, 'advertising enabled', metadata?.advertising, false);
+  addMismatch(violations, 'advertising enabled', metadata?.advertising, true);
+  addMismatch(violations, 'ad provider', metadata?.ads?.provider, 'google-admob');
+  addMismatch(violations, 'AdMob app ID', metadata?.ads?.appId, MONETIZATION.admobAppId);
+  addMismatch(violations, 'AdMob banner ID', metadata?.ads?.bannerId, MONETIZATION.admobBannerUnitId);
+  addMismatch(violations, 'production ad test mode', metadata?.ads?.isTesting, false);
+  addMismatch(violations, 'consent platform', metadata?.ads?.consent, 'google-ump');
+  addMismatch(violations, 'maximum ad content rating', metadata?.ads?.maxAdContentRating, 'G');
+  addMismatch(violations, 'under-age-of-consent treatment', metadata?.ads?.tagForUnderAgeOfConsent, true);
 }
 
-function checkAdFreeManifest(manifest, violations) {
-  if (/com\.google\.android\.gms\.ads|com\.google\.android\.ump|admob_app_id/i.test(manifest)) {
-    violations.push('Advertising SDK components remain in the merged manifest');
+function checkAdsManifest(manifest, resolvedAppId, violations) {
+  if (!manifest.includes('com.google.android.gms.ads.APPLICATION_ID')) {
+    violations.push('AdMob application metadata is missing from the merged manifest');
+  }
+  if (resolvedAppId !== MONETIZATION.admobAppId) {
+    violations.push('Merged manifest AdMob application ID does not match production configuration');
+  }
+  if (manifest.includes('ca-app-pub-3940256099942544') || resolvedAppId.includes('ca-app-pub-3940256099942544')) {
+    violations.push('Merged production manifest contains a Google sample AdMob ID');
   }
 }
 
 function runSelfTest() {
+  const windowsInvocation = windowsBatchInvocation(
+    'C:\\Android SDK\\cmdline-tools\\latest\\bin\\apkanalyzer.bat',
+    ['manifest', 'version-code', 'C:\\Build & QA\\release candidate.apk'],
+    { EXISTING_VALUE: 'preserved' },
+  );
+  assert.deepEqual(windowsInvocation.args, [
+    '/d',
+    '/s',
+    '/c',
+    '""%REAM_SDK_TOOL%" "%REAM_SDK_ARG_0%" "%REAM_SDK_ARG_1%" "%REAM_SDK_ARG_2%""',
+  ]);
+  assert.equal(windowsInvocation.env.EXISTING_VALUE, 'preserved');
+  assert.equal(windowsInvocation.env.REAM_SDK_ARG_2, 'C:\\Build & QA\\release candidate.apk');
+  assert.equal(windowsInvocation.windowsVerbatimArguments, true);
+  const shortPathInvocation = windowsShortPathInvocation(
+    'C:\\Android SDK\\cmdline-tools\\latest\\bin\\apkanalyzer.bat',
+    { EXISTING_VALUE: 'preserved' },
+  );
+  assert.deepEqual(shortPathInvocation.args, [
+    '/d',
+    '/s',
+    '/c',
+    'for %I in ("%REAM_SDK_TOOL%") do @echo %~sI',
+  ]);
+  assert.equal(shortPathInvocation.env.EXISTING_VALUE, 'preserved');
+  assert.equal(shortPathInvocation.windowsVerbatimArguments, true);
+  assert.throws(
+    () => windowsBatchInvocation('apkanalyzer.bat', ['bad"argument']),
+    /cannot contain quotes or control characters/,
+  );
+
   const identityFixture = `ext {
     /* Retired identity:
     appVersionCode = 41
@@ -498,15 +654,18 @@ function runSelfTest() {
   assert.match(expandedViolations[1], /outside the merged allowlist/);
 
   const clean = [];
-  checkAdFreeMetadata({schemaVersion: 3, mode: 'production', advertising: false}, clean);
+  checkAdsMetadata({schemaVersion: 4, mode: 'production', advertising: true, ads: {
+    provider: 'google-admob', appId: MONETIZATION.admobAppId,
+    bannerId: MONETIZATION.admobBannerUnitId, isTesting: false,
+    consent: 'google-ump', maxAdContentRating: 'G', tagForUnderAgeOfConsent: true,
+  }}, clean);
   assert.deepEqual(clean, []);
   const legacy = [];
-  checkAdFreeMetadata({schemaVersion: 2, mode: 'production', admob: {}}, legacy);
+  checkAdsMetadata({schemaVersion: 3, mode: 'production', advertising: false}, legacy);
   assert(legacy.length > 0);
-  const withAds = [];
-  checkAdFreeManifest(xml, withAds);
-  checkPermissions([...MERGED_PERMISSION_ALLOWLIST, 'com.google.android.gms.permission.AD_ID'], withAds);
-  assert.equal(withAds.length, 2);
+  const manifestViolations = [];
+  checkAdsManifest(xml, MONETIZATION.admobAppId, manifestViolations);
+  assert.deepEqual(manifestViolations, []);
 
   console.log('Android artifact verifier self-test passed.');
 }
@@ -587,6 +746,7 @@ async function main() {
   );
 
   const manifestXml = runApkAnalyzer(analyzer, 'print', apkPath);
+  const resolvedAdmobAppId = readStringResource(analyzer, 'admob_app_id', apkPath);
   addMismatch(
     violations,
     'android:allowBackup',
@@ -605,7 +765,7 @@ async function main() {
   );
   checkPermissions(permissions, violations);
   const webBundle = await checkWebBundle(apkPath, violations);
-  checkAdFreeManifest(manifestXml, violations);
+  checkAdsManifest(manifestXml, resolvedAdmobAppId, violations);
 
   if (violations.length > 0) {
     throw new Error(`Android release artifact is not compliant:\n- ${violations.join('\n- ')}`);
@@ -618,7 +778,7 @@ async function main() {
   console.log('  non-debuggable; backup disabled; cleartext traffic disabled');
   console.log(`  exact merged permissions (${permissions.length}): ${permissions.join(', ')}`);
   console.log(
-    `  production web bundle (${webBundle.entryCount} files): ad-free metadata and no advertising components`,
+    `  production web bundle (${webBundle.entryCount} files): AdMob/UMP metadata and production IDs`,
   );
 }
 

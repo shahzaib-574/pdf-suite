@@ -4,7 +4,7 @@ Ream brings practical PDF tools into one focused app. Scan pages with your camer
 
 YOUR DOCUMENTS STAY ON YOUR DEVICE
 
-Ream processes document contents on your device. There is no Ream account, and your files are not sent to a Ream document-processing server. This build contains no ads or advertising SDK.
+Ream processes document contents on your device. There is no Ream account, and your files are not sent to a Ream document-processing server. The Android app is supported by banner ads on the Tools and Recents discovery screens. Ads do not appear while you scan, read, edit, convert, review results, choose incoming files, save, share, or download.
 
 SCAN AND CREATE
 
@@ -39,3 +39,5 @@ DESIGNED FOR QUICK WORK
 Ream uses a focused five-destination navigation, clear actions, light and dark themes, and reduced-motion support. Finished files remain available in your on-device recents until you clear them.
 
 PDF and Word formats can contain complex fonts, forms, scripts, encryption, and layouts. Conversion results can vary, so review an exported document before relying on it.
+
+Google AdMob and its consent platform may process advertising identifiers, device/app information, IP address, consent choices, diagnostics, and ad interactions. Your document contents, filenames, extracted text, passwords, and recent-file history are not provided to the ad SDK. Privacy choices are available in Settings when required.

@@ -1,0 +1,1 @@
+Updated document camera controls make the back, flash, gallery, and capture actions clearer. Improved high-zoom PDF viewing so large pages stay sharp and visible while zooming and scrolling.

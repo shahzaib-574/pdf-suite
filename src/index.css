@@ -61,6 +61,7 @@ html {
   --radius-md: 18px;
   --radius-lg: 22px;
   --nav-height: 84px;
+  --native-ad-height: 0px;
   --font: "Ream Urdu", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     Roboto, Helvetica, Arial, sans-serif;
   color-scheme: dark;
@@ -340,7 +341,8 @@ ol {
   padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
   padding-bottom: calc(
     var(--nav-height) +
-      var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
+      var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) +
+      var(--native-ad-height)
   );
   padding-left: max(16px, var(--safe-area-inset-left, env(safe-area-inset-left, 0px)));
   padding-right: max(16px, var(--safe-area-inset-right, env(safe-area-inset-right, 0px)));
@@ -409,7 +411,7 @@ ol {
 .shell__nav {
   position: fixed;
   left: 50%;
-  bottom: 0;
+  bottom: var(--native-ad-height);
   z-index: 40;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -863,8 +865,13 @@ html.is-scan-camera .skip-to-nav,
   html.has-native-ad .shell {
     padding-bottom: calc(
       var(--nav-height) +
-        var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
+        var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) +
+        var(--native-ad-height)
     );
+  }
+
+  html.has-native-ad .route-stage {
+    padding-bottom: var(--native-ad-height);
   }
 
   .shell__nav {

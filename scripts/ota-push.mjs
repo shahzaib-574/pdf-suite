@@ -20,7 +20,11 @@ function run(command, args) {
 if (!process.env.npm_execpath) throw new Error('Run through npm run ota:push:preview or ota:push:production.');
 for (const script of ['lint', 'quality-selfcheck', 'build']) run(process.execPath, [process.env.npm_execpath, 'run', script]);
 const metadata = JSON.parse(readFileSync('dist/release-metadata.json', 'utf8'));
-if (metadata.mode !== 'production' || metadata.advertising !== false) throw new Error('Expected ad-free production assets.');
+if (metadata.schemaVersion !== 4 || metadata.mode !== 'production' || metadata.advertising !== true ||
+    metadata.ads?.provider !== 'google-admob' || metadata.ads?.isTesting !== false ||
+    metadata.ads?.consent !== 'google-ump' || metadata.ads?.maxAdContentRating !== 'G') {
+  throw new Error('Expected validated production AdMob/UMP assets.');
+}
 const zip = new JSZip();
 function add(dir, relative = '') {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

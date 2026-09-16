@@ -1,18 +1,14 @@
-# Signed ad-free AAB
+# Signed ad-supported production AAB
 
-The protected `production-aab.yml` workflow builds signed APK/AAB artifacts. It does not publish to Google Play. No AdMob secrets, audience confirmation input, ad IDs or consent configuration are required.
+The protected `production-aab.yml` workflow builds signed APK/AAB artifacts; it does not publish to Google Play or change AdMob/Play Console. Required GitHub `production` environment secrets are:
 
-Required GitHub `production` environment secrets:
+- `ANDROID_UPLOAD_KEYSTORE_BASE64`
+- `ANDROID_UPLOAD_STORE_PASSWORD`
+- `ANDROID_UPLOAD_KEY_ALIAS`
+- `ANDROID_UPLOAD_KEY_PASSWORD`
 
-- ANDROID_UPLOAD_KEYSTORE_BASE64
-- ANDROID_UPLOAD_STORE_PASSWORD
-- ANDROID_UPLOAD_KEY_ALIAS
-- ANDROID_UPLOAD_KEY_PASSWORD
+After reviewed changes reach `main`, run **Build signed production AAB** and confirm the manual input. The workflow installs exact dependencies, builds and syncs production assets, runs `verify:ads`, validates production IDs/UMP/rating, builds release lint/tests/APK/AAB, verifies signing and 16 KB alignment, and checks the final manifest, permissions, DEX SDK components, plugin registry, and packaged metadata. It uploads artifacts only.
 
-Keep the existing upload key for an existing Play app. Do not replace it with the disposable CI key or a debug key. Environment protection and main-branch restrictions remain in place.
+For local verification, configure JDK 21 and Android SDK 36. Use ignored `android/keystore.properties` for a signed candidate, or only in CI use `-PallowUnsignedRelease=true` for compilation. Run `npm run android:sync` and `npm run verify:ads` first. Version identity must be 1.2.0 (6).
 
-After changes are reviewed and pushed to main, run **Build signed production AAB**, confirm the bundle build, and download the AAB and its R8 mapping from workflow artifacts. The workflow verifies signatures, release manifest, ad-free assets and 16 KB alignment. Increment the version code above previous Play uploads before another upload.
-
-For local builds, configure JDK 21 and Android SDK 36, supply ignored `android/keystore.properties` using its example, then run `npm run android:bundle`. Ad-free production metadata is mandatory; do not bypass signing to create a Play upload.
-
-Start with the Play internal-testing track. Uploading the AAB, choosing testers, publishing the hosted privacy policy and changing Console declarations remain publisher actions; this workflow does none of those automatically. See [internal testing](internal-testing.md).
+Before Play rollout, confirm the saved Play audience of 13-15, 16-17, and 18+, configure child-appropriate ads for users Play may treat as children depending on country, publish/test required UMP messages, publish the matching privacy policy, and update Contains ads and Data safety. The app conservatively tags every request as under the age of consent and caps content at General, but account-side configuration and served-creative review remain external. Complete real-device placement, denial, offline/no-fill, document, camera, and accessibility acceptance. None of these external gates is completed by a green workflow.

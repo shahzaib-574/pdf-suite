@@ -8,12 +8,25 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from PIL import Image, PngImagePlugin
+from PIL import Image, ImageCms, PngImagePlugin
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "store-assets" / "graphics" / "source"
 OUTPUT = ROOT / "store-assets" / "graphics"
+JPEG_QUALITY = 95
+
+
+def deterministic_srgb_profile() -> bytes:
+    profile = bytearray(ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes())
+    # Little CMS stamps generated profiles with the current time. Normalize the
+    # ICC header's creation date so otherwise identical renders are byte-stable.
+    for offset, value in zip(range(24, 36, 2), (2000, 1, 1, 0, 0, 0), strict=True):
+        profile[offset : offset + 2] = value.to_bytes(2, "big")
+    return bytes(profile)
+
+
+SRGB_PROFILE = deterministic_srgb_profile()
 
 
 def find_chrome() -> Path:
@@ -32,7 +45,43 @@ def find_chrome() -> Path:
     raise RuntimeError("Chrome was not found. Set CHROME_PATH to its executable.")
 
 
-def render(source: str, output: str, size: tuple[int, int], mode: str) -> None:
+def save_jpeg(image: Image.Image, output: str, size: tuple[int, int]) -> None:
+    output_path = OUTPUT / output
+    image.convert("RGB").save(
+        output_path,
+        "JPEG",
+        quality=JPEG_QUALITY,
+        subsampling=0,
+        optimize=False,
+        progressive=False,
+        icc_profile=SRGB_PROFILE,
+    )
+
+    with Image.open(output_path) as saved:
+        if saved.format != "JPEG" or saved.size != size or saved.mode != "RGB":
+            raise RuntimeError(
+                f"{output} saved as {saved.format} {saved.size} {saved.mode}, "
+                f"expected JPEG {size} RGB"
+            )
+        if not saved.info.get("icc_profile"):
+            raise RuntimeError(f"{output} is missing its embedded sRGB profile")
+
+    size_bytes = output_path.stat().st_size
+    if output == "feature-graphic-1024x500.jpg" and size_bytes > 15 * 1024 * 1024:
+        raise RuntimeError(f"{output} exceeds Google Play's 15 MB limit")
+    print(
+        f"{output}: {size[0]}x{size[1]} RGB JPEG, quality {JPEG_QUALITY}, "
+        f"{size_bytes:,} bytes, embedded sRGB"
+    )
+
+
+def render(
+    source: str,
+    output: str,
+    size: tuple[int, int],
+    mode: str,
+    jpeg_output: str | None = None,
+) -> None:
     chrome = find_chrome()
     source_path = SOURCE / source
     output_path = OUTPUT / output
@@ -86,14 +135,24 @@ def render(source: str, output: str, size: tuple[int, int], mode: str) -> None:
         raise RuntimeError(f"{output} exceeds Google Play's 1 MB limit")
     print(f"{output}: {size[0]}x{size[1]} {mode}, {size_bytes:,} bytes, opaque sRGB")
 
+    if jpeg_output:
+        save_jpeg(normalized, jpeg_output, size)
+
 
 def main() -> None:
-    render("app-icon.svg", "app-icon-512.png", (512, 512), "RGBA")
+    render(
+        "app-icon.svg",
+        "app-icon-512.png",
+        (512, 512),
+        "RGBA",
+        jpeg_output="app-logo-512.jpg",
+    )
     render(
         "feature-graphic.svg",
         "feature-graphic-1024x500.png",
         (1024, 500),
         "RGB",
+        jpeg_output="feature-graphic-1024x500.jpg",
     )
 
 

@@ -24,7 +24,8 @@
     "verify:store-assets": "node scripts/verify-store-assets.mjs",
     "quality-selfcheck": "tsx scripts/quality-selfcheck.ts",
     "product-quality-selfcheck": "node tests/browser/product-quality-selfcheck.mjs && node tests/browser/conversion-quality-selfcheck.mjs && node tests/browser/scan-preview-selfcheck.mjs && node tests/browser/scan-edge-selfcheck.mjs && node tests/browser/pdf-word-fidelity-selfcheck.mjs",
-    "verify:ad-free": "node scripts/verify-ad-free.mjs",
+    "verify:ads": "node scripts/verify-ads.mjs",
+    "ads-selfcheck": "tsx scripts/ads-selfcheck.ts",
     "verify:monetization": "node scripts/verify-monetization.mjs",
     "browser-selfcheck": "tsx tests/browser/ui-selfcheck.ts && node tests/browser/edge-selfcheck.mjs && node tests/browser/engine-selfcheck.mjs",
     "ota:setup": "node scripts/ota-setup.mjs",
@@ -32,6 +33,7 @@
     "ota:push:production": "node scripts/ota-push.mjs production"
   },
   "dependencies": {
+    "@capacitor-community/admob": "8.1.0",
     "@capacitor/android": "^8.5.0",
     "@capacitor/core": "^8.5.0",
     "@capacitor/filesystem": "8.1.3",

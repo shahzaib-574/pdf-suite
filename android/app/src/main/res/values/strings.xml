@@ -4,4 +4,5 @@
     <string name="title_activity_main">Ream</string>
     <string name="package_name">com.reampdf.mobile</string>
     <string name="custom_url_scheme">com.reampdf.mobile</string>
+    <string name="admob_app_id">ca-app-pub-9959568404035601~6472905937</string>
 </resources>

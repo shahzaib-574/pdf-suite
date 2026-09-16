@@ -1,7 +1,7 @@
 ext {
     // App release identity lives here so Play versioning has one source of truth.
-    appVersionCode = 4
-    appVersionName = '1.1.1'
+    appVersionCode = 6
+    appVersionName = '1.2.0'
     minSdkVersion = 24
     compileSdkVersion = 36
     targetSdkVersion = 36
@@ -18,4 +18,7 @@ ext {
     androidxJunitVersion = '1.3.0'
     androidxEspressoCoreVersion = '3.7.0'
     cordovaAndroidVersion = '14.0.1'
+    // Pin the native advertising stack used by @capacitor-community/admob 8.1.0.
+    playServicesAdsVersion = '25.4.0'
+    userMessagingPlatformVersion = '4.0.0'
 }

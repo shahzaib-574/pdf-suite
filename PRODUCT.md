@@ -44,7 +44,7 @@ Shipped today:
 - Word conversion: compatibility warnings before conversion; footnotes and endnotes are retained in a numbered notes section. Unsupported headers, footers, charts and complex layouts still require export from Word for full fidelity.
 - Recents in IndexedDB: separate metadata and file bytes, up to 200 items / 512 MB subject to storage availability; search, rename, delete and external save.
 - Light / dark / system theme and a reduce-motion setting.
-- Ad-free Android and web builds; no advertising or analytics SDK.
+- Android 1.2.0 uses AdMob banners only on Tools and Recents with UMP gating; all requests use under-age-of-consent treatment and a General content ceiling for the selected teen/adult audience, while COPPA child-directed treatment remains unset. Document contents remain local. The website does not load an ad script.
 - All tools unlocked. `pro` flags exist for a future paywall; they are not charged.
 
 Confirmed product direction:
@@ -58,7 +58,7 @@ Open:
 
 - Exact Pro SKU, price, and which tools it gates.
 - Whether a future cloud path is optional, default, or quality-tiered.
-- Play target-audience / Families decision remains a publisher form, not a product-design fact.
+- Play currently selects 13-15, 16-17, and 18+. Publisher review of child-appropriate ads, UMP messages, and country-specific obligations remains an external gate.
 
 Constraints:
 

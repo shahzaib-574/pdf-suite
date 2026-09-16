@@ -8,6 +8,7 @@ def hasReleaseKeystore = keystorePropertiesFile.exists()
 def allowUnsignedRelease = project.findProperty('allowUnsignedRelease')?.toString()?.toBoolean() ?: false
 def releaseMetadataFile = file('src/main/assets/public/release-metadata.json')
 def webAssetDirectory = file('src/main/assets/public')
+def monetizationConfigFile = rootProject.file('../monetization.config.json')
 
 if (allowUnsignedRelease && System.getenv('CI')?.toBoolean() != true) {
     throw new GradleException(
@@ -35,16 +36,13 @@ if (hasReleaseKeystore) {
 
 def validateProductionRelease = tasks.register('validateProductionRelease') {
     group = 'verification'
-    description = 'Validates signing and ad-free production assets before any release build.'
+    description = 'Validates signing and production AdMob assets before any release build.'
 
     doLast {
         // The bypass always produces unsigned artifacts and is reserved for CI's build checks.
         if (allowUnsignedRelease) {
             logger.lifecycle('Skipping production credentials check for the unsigned CI release build.')
-            return
-        }
-
-        if (!hasReleaseKeystore) {
+        } else if (!hasReleaseKeystore) {
             throw new GradleException(
                 'Release signing is not configured. Copy keystore.properties.example to ' +
                 'keystore.properties and provide the private upload-keystore values.'
@@ -67,21 +65,47 @@ def validateProductionRelease = tasks.register('validateProductionRelease') {
             )
         }
 
-        if (releaseMetadata?.schemaVersion != 3 || releaseMetadata?.mode != 'production' || releaseMetadata?.advertising != false) {
-            throw new GradleException('Expected ad-free production web assets. Run `npm run android:sync` before building.')
+        if (releaseMetadata?.schemaVersion != 4 ||
+            releaseMetadata?.mode != 'production' ||
+            releaseMetadata?.advertising != true ||
+            releaseMetadata?.ads?.provider != 'google-admob' ||
+            releaseMetadata?.ads?.isTesting != false ||
+            releaseMetadata?.ads?.consent != 'google-ump' ||
+            releaseMetadata?.ads?.maxAdContentRating != 'G' ||
+            releaseMetadata?.ads?.tagForUnderAgeOfConsent != true) {
+            throw new GradleException('Expected production AdMob/UMP web assets. Run `npm run android:sync` before building.')
         }
-        def forbidden = ['ca-app-pub-', '@capacitor-community/admob', 'com.google.android.gms.ads']
-        if (fileTree(webAssetDirectory) { include '**/*.js' }.files.any { asset ->
-            def source = asset.getText('UTF-8')
-            forbidden.any { source.contains(it) }
-        }) {
-            throw new GradleException('Advertising code remains in synchronized web assets.')
+
+        if (!monetizationConfigFile.isFile()) {
+            throw new GradleException('monetization.config.json is missing.')
+        }
+        def monetization = new JsonSlurper().parseText(monetizationConfigFile.getText('UTF-8'))
+        if (monetization?.liveAdsEnabled != true ||
+            !(monetization?.admobAppId ==~ /ca-app-pub-\d{16}~\d{10}/) ||
+            !(monetization?.admobBannerUnitId ==~ /ca-app-pub-\d{16}\/\d{10}/) ||
+            monetization.admobAppId.contains('3940256099942544') ||
+            monetization.admobBannerUnitId.contains('3940256099942544')) {
+            throw new GradleException('Production AdMob configuration is missing, malformed, disabled, or uses a sample ID.')
+        }
+        if (releaseMetadata.ads.appId != monetization.admobAppId ||
+            releaseMetadata.ads.bannerId != monetization.admobBannerUnitId) {
+            throw new GradleException('Synchronized production IDs do not match monetization.config.json.')
+        }
+        def webSource = fileTree(webAssetDirectory) { include '**/*.js', '**/*.json' }.files.collect {
+            it.getText('UTF-8')
+        }.join('\n')
+        if (!webSource.contains(monetization.admobBannerUnitId) ||
+            webSource.contains('ca-app-pub-3940256099942544/9214589741') ||
+            webSource.contains('VITE_UMP_DEBUG_GEOGRAPHY')) {
+            throw new GradleException('Production web assets contain missing/mismatched IDs or Android debug ad settings.')
         }
     }
 }
 
 android {
-    testBuildType project.hasProperty('captureStoreScreenshots') ? 'release' : 'debug'
+    // Store screenshot automation must use the android-debug web bundle so it
+    // can only request Google's test banner and debug UMP configuration.
+    testBuildType 'debug'
     sourceSets { androidTest.assets.srcDir '../../store-assets/fixtures' }
     if (project.hasProperty('captureStoreScreenshots')) {
         sourceSets.androidTest.java.setIncludes(['**/StoreScreenshotInstrumentation.java'])
@@ -129,7 +153,14 @@ repositories {
     }
 }
 
+configurations.matching { it.name.endsWith('CompileClasspath') }.configureEach {
+    // CameraX exposes ListenableFuture from its public Java API. AdMob's graph
+    // otherwise selects Guava's intentionally empty conflict shim.
+    resolutionStrategy.force 'com.google.guava:listenablefuture:1.0'
+}
+
 dependencies {
+    compileOnly 'com.google.guava:listenablefuture:1.0'
     implementation 'androidx.camera:camera-camera2:1.5.3'
     implementation 'androidx.camera:camera-lifecycle:1.5.3'
     implementation 'androidx.camera:camera-view:1.5.3'
