@@ -7,4 +7,15 @@
     <color name="splash_background">#EEF1F7</color>
     <!-- Android 7 uses light navigation icons, so its fallback bar stays dark. -->
     <color name="navigation_bar_background">#181725</color>
+    <color name="camera_bg">#13141D</color>
+    <color name="camera_scrim">#E613141D</color>
+    <color name="camera_surface">#F21D1F2B</color>
+    <color name="camera_line">#414555</color>
+    <color name="camera_ink">#F8F8FC</color>
+    <color name="camera_muted">#C0C3CF</color>
+    <color name="camera_primary">#AFA5FF</color>
+    <color name="camera_primary_strong">#8677FB</color>
+    <color name="camera_on_primary">#151320</color>
+    <color name="camera_ready">#72E6D5</color>
+    <color name="camera_ripple">#66AFA5FF</color>
 </resources>

@@ -3,7 +3,11 @@ package com.reampdf.mobile;
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.graphics.*;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.view.*;
@@ -43,7 +47,7 @@ public class DocumentCameraActivity extends AppCompatActivity {
     private PreviewView preview;
     private DocumentOutlineView outline;
     private TextView status;
-    private Button shutter, torch;
+    private Button shutter, torch, gallery;
     private ProcessCameraProvider provider;
     private ImageCapture capture;
     private androidx.camera.core.Camera camera;
@@ -72,37 +76,104 @@ public class DocumentCameraActivity extends AppCompatActivity {
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         if (!OpenCVLoader.initLocal()) { fail("The document detector could not start. Please reinstall this APK."); return; }
-        FrameLayout root = new FrameLayout(this); root.setBackgroundColor(Color.BLACK);
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(color(R.color.camera_bg));
         preview = new PreviewView(this); preview.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
         preview.setScaleType(PreviewView.ScaleType.FIT_CENTER);
         root.addView(preview, new FrameLayout.LayoutParams(-1, -1));
         outline = new DocumentOutlineView(this); root.addView(outline, new FrameLayout.LayoutParams(-1, -1));
-        LinearLayout top = new LinearLayout(this); top.setGravity(Gravity.CENTER_VERTICAL);
-        top.setPadding(dp(16), dp(10), dp(16), dp(10)); top.setBackgroundColor(0xCC111827);
-        Button close = button("Close"); close.setOnClickListener(v -> finish()); top.addView(close);
-        TextView title = new TextView(this); title.setText("Document camera"); title.setTextColor(Color.WHITE); title.setTextSize(17); title.setGravity(Gravity.CENTER);
-        top.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        torch = button("Light off"); torch.setEnabled(false); torch.setOnClickListener(v -> {
+
+        LinearLayout top = new LinearLayout(this);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.setPadding(dp(16), dp(10), dp(16), dp(10));
+        top.setBackgroundColor(color(R.color.camera_scrim));
+        ImageButton close = iconButton(R.drawable.ic_camera_back, "Close");
+        close.setOnClickListener(v -> finish());
+        top.addView(close, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        TextView title = new TextView(this);
+        title.setText("Document camera");
+        title.setTextColor(color(R.color.camera_ink));
+        title.setTextSize(16);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        title.setLetterSpacing(-0.03f);
+        title.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1);
+        titleParams.setMargins(dp(10), 0, dp(10), 0);
+        top.addView(title, titleParams);
+        torch = iconTextButton(R.drawable.ic_camera_flash, "Light off");
+        torch.setEnabled(false);
+        torch.setAlpha(0.45f);
+        torch.setOnClickListener(v -> {
             if (camera == null || !camera.getCameraInfo().hasFlashUnit()) return;
-            torchOn = !torchOn; camera.getCameraControl().enableTorch(torchOn); torch.setText(torchOn ? "Light on" : "Light off");
-        }); top.addView(torch);
+            torchOn = !torchOn;
+            camera.getCameraControl().enableTorch(torchOn);
+            torch.setText(torchOn ? "Light on" : "Light off");
+            torch.setContentDescription(torchOn ? "Light on" : "Light off");
+            torch.setAlpha(1f);
+        });
+        top.addView(torch);
         root.addView(top, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
-        LinearLayout bottom = new LinearLayout(this); bottom.setOrientation(LinearLayout.VERTICAL); bottom.setGravity(Gravity.CENTER);
-        bottom.setPadding(dp(18), dp(12), dp(18), dp(18)); bottom.setBackgroundColor(0xDD111827);
-        status = new TextView(this); status.setText("Starting camera…"); status.setTextColor(Color.WHITE); status.setTextSize(15); status.setGravity(Gravity.CENTER);
-        bottom.addView(status, new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout controls = new LinearLayout(this); controls.setGravity(Gravity.CENTER);
-        Button gallery = button("Gallery"); gallery.setOnClickListener(v -> { if (!busy) { setResult(RESULT_CANCELED, new Intent().putExtra("gallery", true)); finish(); } });
-        controls.addView(gallery);
-        shutter = button("Take photo"); shutter.setTextSize(18); shutter.setEnabled(false); shutter.setOnClickListener(v -> takePhoto());
-        LinearLayout.LayoutParams shootParams = new LinearLayout.LayoutParams(0, dp(72), 1); shootParams.setMargins(dp(16), dp(8), dp(16), 0);
-        controls.addView(shutter, shootParams); bottom.addView(controls, new LinearLayout.LayoutParams(-1, -2));
-        TextView note = new TextView(this); note.setText("Tap to focus • Review the crop after capture"); note.setTextColor(0xFFC7D2E1); note.setTextSize(12); bottom.addView(note);
+
+        LinearLayout bottom = new LinearLayout(this);
+        bottom.setOrientation(LinearLayout.VERTICAL);
+        bottom.setGravity(Gravity.CENTER_HORIZONTAL);
+        bottom.setPadding(dp(20), dp(16), dp(20), dp(16));
+        bottom.setBackgroundColor(color(R.color.camera_scrim));
+        status = new TextView(this);
+        status.setText("Starting camera…");
+        status.setTextColor(color(R.color.camera_ink));
+        status.setTextSize(14);
+        status.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        status.setGravity(Gravity.CENTER);
+        status.setLetterSpacing(-0.02f);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
+        statusParams.setMargins(0, 0, 0, dp(14));
+        bottom.addView(status, statusParams);
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setGravity(Gravity.CENTER_VERTICAL);
+        gallery = iconTextButton(R.drawable.ic_camera_images, "Gallery");
+        gallery.setOnClickListener(v -> {
+            if (!busy) {
+                setResult(RESULT_CANCELED, new Intent().putExtra("gallery", true));
+                finish();
+            }
+        });
+        LinearLayout left = new LinearLayout(this);
+        left.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        left.addView(gallery, new LinearLayout.LayoutParams(-2, dp(48)));
+        controls.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
+        shutter = shutterButton();
+        shutter.setEnabled(false);
+        shutter.setAlpha(0.55f);
+        shutter.setOnClickListener(v -> takePhoto());
+        LinearLayout.LayoutParams shootParams = new LinearLayout.LayoutParams(dp(72), dp(72));
+        shootParams.setMargins(dp(12), 0, dp(12), 0);
+        controls.addView(shutter, shootParams);
+        View spacer = new View(this);
+        controls.addView(spacer, new LinearLayout.LayoutParams(0, dp(48), 1));
+        bottom.addView(controls, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView shutterLabel = new TextView(this);
+        shutterLabel.setText("Take photo");
+        shutterLabel.setTextColor(color(R.color.camera_ink));
+        shutterLabel.setTextSize(12);
+        shutterLabel.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        shutterLabel.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
+        labelParams.setMargins(0, dp(8), 0, dp(6));
+        bottom.addView(shutterLabel, labelParams);
+        TextView note = new TextView(this);
+        note.setText("Tap to focus • Review the crop after capture");
+        note.setTextColor(color(R.color.camera_muted));
+        note.setTextSize(12);
+        note.setGravity(Gravity.CENTER);
+        bottom.addView(note);
         root.addView(bottom, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
             androidx.core.graphics.Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
             top.setPadding(dp(16) + bars.left, dp(10) + bars.top, dp(16) + bars.right, dp(10));
-            bottom.setPadding(dp(18) + bars.left, dp(12), dp(18) + bars.right, dp(18) + bars.bottom);
+            bottom.setPadding(dp(20) + bars.left, dp(16), dp(20) + bars.right, dp(16) + bars.bottom);
             return insets;
         });
         setContentView(root);
@@ -119,9 +190,81 @@ public class DocumentCameraActivity extends AppCompatActivity {
         else permission.launch(Manifest.permission.CAMERA);
     }
 
-    private Button button(String label) { Button button = new Button(this); button.setText(label); button.setAllCaps(false); button.setContentDescription(label); return button; }
+    private int color(int id) { return ContextCompat.getColor(this, id); }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
     private void fail(String message) { setResult(RESULT_CANCELED, new Intent().putExtra("error", message)); finish(); }
+
+    private ImageButton iconButton(int icon, String label) {
+        ImageButton button = new ImageButton(this);
+        button.setImageResource(icon);
+        button.setContentDescription(label);
+        button.setBackground(ripple(chipShape(dp(16)), color(R.color.camera_ripple)));
+        button.setPadding(dp(12), dp(12), dp(12), dp(12));
+        button.setScaleType(ImageView.ScaleType.CENTER);
+        button.setStateListAnimator(null);
+        button.setElevation(0);
+        return button;
+    }
+
+    private Button iconTextButton(int icon, String label) {
+        Button button = new Button(this, null, android.R.attr.borderlessButtonStyle);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setContentDescription(label);
+        button.setTextColor(color(R.color.camera_ink));
+        button.setTextSize(13);
+        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        button.setLetterSpacing(-0.02f);
+        button.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, 0, 0, 0);
+        button.setCompoundDrawablePadding(dp(8));
+        button.setBackground(ripple(chipShape(dp(16)), color(R.color.camera_ripple)));
+        button.setPadding(dp(14), dp(10), dp(16), dp(10));
+        button.setMinHeight(dp(48));
+        button.setStateListAnimator(null);
+        button.setElevation(0);
+        button.setGravity(Gravity.CENTER);
+        return button;
+    }
+
+    private Button shutterButton() {
+        Button button = new Button(this, null, android.R.attr.borderlessButtonStyle);
+        button.setText("");
+        button.setContentDescription("Take photo");
+        button.setBackground(ripple(shutterShape(), color(R.color.camera_ripple)));
+        button.setMinWidth(dp(72));
+        button.setMinHeight(dp(72));
+        button.setPadding(0, 0, 0, 0);
+        button.setStateListAnimator(null);
+        button.setElevation(0);
+        button.setIncludeFontPadding(false);
+        return button;
+    }
+
+    private GradientDrawable chipShape(int radius) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(color(R.color.camera_surface));
+        shape.setCornerRadius(radius);
+        shape.setStroke(Math.max(1, dp(1)), color(R.color.camera_line));
+        return shape;
+    }
+
+    private LayerDrawable shutterShape() {
+        GradientDrawable fill = new GradientDrawable();
+        fill.setShape(GradientDrawable.OVAL);
+        fill.setColors(new int[] { color(R.color.camera_primary), color(R.color.camera_primary_strong) });
+        fill.setOrientation(GradientDrawable.Orientation.TL_BR);
+        GradientDrawable ring = new GradientDrawable();
+        ring.setShape(GradientDrawable.OVAL);
+        ring.setColor(Color.TRANSPARENT);
+        ring.setStroke(dp(3), color(R.color.camera_ink));
+        LayerDrawable layer = new LayerDrawable(new android.graphics.drawable.Drawable[] { fill, ring });
+        layer.setLayerInset(1, dp(7), dp(7), dp(7), dp(7));
+        return layer;
+    }
+
+    private RippleDrawable ripple(android.graphics.drawable.Drawable content, int rippleColor) {
+        return new RippleDrawable(ColorStateList.valueOf(rippleColor), content, content);
+    }
 
     private void startCamera() {
         ListenableFuture<ProcessCameraProvider> future = ProcessCameraProvider.getInstance(this);
@@ -144,7 +287,11 @@ public class DocumentCameraActivity extends AppCompatActivity {
                 analysis.setAnalyzer(analysisExecutor, this::analyze);
                 provider.unbindAll();
                 camera = provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, stream, capture, analysis);
-                shutter.setEnabled(true); torch.setEnabled(camera.getCameraInfo().hasFlashUnit()); status.setText("Place the whole page in view");
+                shutter.setEnabled(true);
+                shutter.setAlpha(1f);
+                torch.setEnabled(camera.getCameraInfo().hasFlashUnit());
+                torch.setAlpha(camera.getCameraInfo().hasFlashUnit() ? 1f : 0.45f);
+                setDetectionStatus("Place the whole page in view");
             } catch (Exception error) { fail("This camera could not start preview, photo capture and live detection together. Try the gallery or another device."); }
         }, ContextCompat.getMainExecutor(this));
     }
@@ -220,12 +367,15 @@ public class DocumentCameraActivity extends AppCompatActivity {
     }
 
     private void setDetectionStatus(String message) {
-        if (!message.contentEquals(status.getText())) status.setText(message);
+        if (message.contentEquals(status.getText())) return;
+        status.setText(message);
+        boolean ready = message.startsWith("Page found");
+        status.setTextColor(color(ready ? R.color.camera_ready : R.color.camera_ink));
     }
 
     private void takePhoto() {
         if (busy || capture == null) return;
-        busy = true; shutter.setEnabled(false); status.setText("Taking full-resolution photo…");
+        busy = true; shutter.setEnabled(false); shutter.setAlpha(0.55f); setDetectionStatus("Taking full-resolution photo…");
         File root = new File(getCacheDir(), "ream-incoming");
         if (!root.isDirectory() && !root.mkdirs()) { fail("Could not create camera storage."); return; }
         String id = UUID.randomUUID().toString(); File file = new File(root, id); pendingPhoto = file;
@@ -259,7 +409,7 @@ public class DocumentCameraActivity extends AppCompatActivity {
                 } catch (Exception error) { file.delete(); runOnUiThread(() -> fail("Could not read the captured photo. Please try again.")); }
             }
             @Override public void onError(@NonNull ImageCaptureException error) {
-                file.delete(); runOnUiThread(() -> { if (!isFinishing()) { busy = false; shutter.setEnabled(true); status.setText("Capture failed. Please try again."); } });
+                file.delete(); runOnUiThread(() -> { if (!isFinishing()) { busy = false; shutter.setEnabled(true); shutter.setAlpha(1f); setDetectionStatus("Capture failed. Please try again."); } });
             }
         });
     }

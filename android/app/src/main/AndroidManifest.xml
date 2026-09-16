@@ -41,7 +41,7 @@
 
         <activity android:name=".DocumentCameraActivity"
             android:exported="false"
-            android:theme="@style/AppTheme.NoActionBar" />
+            android:theme="@style/AppTheme.Camera" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

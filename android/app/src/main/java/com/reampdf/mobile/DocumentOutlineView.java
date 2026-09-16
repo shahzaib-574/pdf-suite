@@ -86,7 +86,7 @@ final class DocumentOutlineView extends View {
             corners.lineTo(x, y);
             corners.lineTo(x + bx * length / b, y + by * length / b);
         }
-        paint.setColor(stable ? 0xFF62E5A5 : 0xFFFFD16A);
+        paint.setColor(stable ? 0xFF72E6D5 : 0xFFAFA5FF);
         paint.setAlpha(165); canvas.drawPath(border, paint);
         paint.setAlpha(255); canvas.drawPath(corners, paint);
         if (progress < 1) postInvalidateOnAnimation();
