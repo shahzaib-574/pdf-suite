@@ -160,6 +160,86 @@ export type PdfViewerSession = {
   destroy(): Promise<void>;
 };
 
+function safePageScale(
+  base: { width: number; height: number },
+  maxDim = 4096,
+  maxPixels = 12_000_000,
+): number {
+  const width = Math.max(1, base.width);
+  const height = Math.max(1, base.height);
+  return Math.min(
+    maxDim / width,
+    maxDim / height,
+    Math.sqrt(maxPixels / (width * height)),
+  );
+}
+
+function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  type: string,
+  quality?: number,
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) =>
+        blob ? resolve(blob) : reject(new Error("Could not encode this page.")),
+      type,
+      quality,
+    );
+  });
+}
+
+async function renderClippedPage(
+  page: PDFPageProxy,
+  clip: { x: number; y: number; width: number; height: number },
+  outputWidth: number,
+): Promise<PdfViewerPageRegion> {
+  const base = page.getViewport({ scale: 1 });
+  const x = Math.min(Math.max(0, clip.x), Math.max(0, base.width - 0.01));
+  const y = Math.min(Math.max(0, clip.y), Math.max(0, base.height - 0.01));
+  const clipWidth = Math.max(
+    0.01,
+    Math.min(clip.width, base.width - x),
+  );
+  const clipHeight = Math.max(
+    0.01,
+    Math.min(clip.height, base.height - y),
+  );
+  const scale = Math.min(
+    Math.max(0.2, outputWidth) / clipWidth,
+    safePageScale(base, 8192, 16_000_000),
+  );
+  const width = Math.max(1, Math.round(clipWidth * scale));
+  const height = Math.max(1, Math.round(clipHeight * scale));
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const canvasContext = canvas.getContext("2d", { alpha: false });
+  if (!canvasContext) {
+    throw new Error("Could not create a canvas to render this page.");
+  }
+  canvasContext.fillStyle = "#ffffff";
+  canvasContext.fillRect(0, 0, width, height);
+  const renderTask = page.render({
+    canvas,
+    canvasContext,
+    viewport,
+    transform: [1, 0, 0, 1, -x * scale, -y * scale],
+    background: "#ffffff",
+  });
+  try {
+    await renderTask.promise;
+    // Viewer detail tiles contain text and line art. Keep them lossless so the
+    // sharpening layer does not introduce JPEG ringing at high zoom.
+    const blob = await canvasToBlob(canvas, "image/png");
+    return { blob, width, height };
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+}
+
 function canvasToJpeg(
   canvas: HTMLCanvasElement,
   quality: number,
@@ -373,89 +453,82 @@ export async function openPdfViewer(
       return next;
     }
 
+    let paintTail: Promise<unknown> = Promise.resolve();
+    function enqueuePaint<T>(
+      pageIndex: number,
+      work: () => Promise<T>,
+    ): Promise<T> {
+      const run = paintTail.then(
+        () => enqueuePage(pageIndex, work),
+        () => enqueuePage(pageIndex, work),
+      );
+      paintTail = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    }
+
     return {
       document: viewerDocument,
       async renderPage(pageIndex, width) {
-        return enqueuePage(pageIndex, async () => {
+        return enqueuePaint(pageIndex, async () => {
           if (destroyed) throw new Error("This viewer session is closed.");
           if (pageIndex < 0 || pageIndex >= pdf.numPages) {
             throw new Error("That page is out of range.");
           }
           const page = await pdf.getPage(pageIndex + 1);
-          const base = page.getViewport({ scale: 1 });
-          const scale = Math.min(
-            base.width > 0 ? Math.max(0.1, width / base.width) : 1,
-            Math.sqrt(12_000_000 / Math.max(1, base.width * base.height)),
-            8192 / Math.max(1, base.width, base.height),
-          );
-          const viewport = page.getViewport({ scale });
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.max(1, Math.ceil(viewport.width));
-          canvas.height = Math.max(1, Math.ceil(viewport.height));
-          const canvasContext = canvas.getContext("2d", { alpha: false });
-          if (!canvasContext) {
-            throw new Error("Could not create a canvas to render this page.");
-          }
-          canvasContext.fillStyle = "#ffffff";
-          canvasContext.fillRect(0, 0, canvas.width, canvas.height);
-          const renderTask = page.render({ canvas, canvasContext, viewport });
           try {
-            await renderTask.promise;
-            // Reader text and line art should not acquire JPEG ringing.
-            return await new Promise<Blob>((resolve, reject) => {
-              canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not encode this page.")), "image/png");
-            });
+            const base = page.getViewport({ scale: 1 });
+            const scale = Math.min(
+              base.width > 0 ? Math.max(0.1, width / base.width) : 1,
+              safePageScale(base),
+            );
+            const viewport = page.getViewport({ scale });
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.ceil(viewport.width));
+            canvas.height = Math.max(1, Math.ceil(viewport.height));
+            const canvasContext = canvas.getContext("2d", { alpha: false });
+            if (!canvasContext) {
+              throw new Error("Could not create a canvas to render this page.");
+            }
+            canvasContext.fillStyle = "#ffffff";
+            canvasContext.fillRect(0, 0, canvas.width, canvas.height);
+            const renderTask = page.render({ canvas, canvasContext, viewport });
+            try {
+              await renderTask.promise;
+              // Reader text and line art should not acquire JPEG ringing.
+              return await new Promise<Blob>((resolve, reject) => {
+                canvas.toBlob(
+                  (blob) =>
+                    blob
+                      ? resolve(blob)
+                      : reject(new Error("Could not encode this page.")),
+                  "image/png",
+                );
+              });
+            } finally {
+              canvas.width = 0;
+              canvas.height = 0;
+            }
           } finally {
-            canvas.width = 0;
-            canvas.height = 0;
+            page.cleanup();
           }
         });
       },
       async renderPageRegion(pageIndex, clip, outputWidth, _outputHeight) {
-        return enqueuePage(pageIndex, async () => {
+        return enqueuePaint(pageIndex, async () => {
           if (destroyed) throw new Error("This viewer session is closed.");
           if (pageIndex < 0 || pageIndex >= pdf.numPages) {
             throw new Error("That page is out of range.");
           }
-          const clipWidth = Math.max(clip.width, 0.01);
-          const clipHeight = Math.max(clip.height, 0.01);
-          const scale = Math.max(1, Math.floor(outputWidth)) / clipWidth;
-          const width = Math.max(1, Math.round(clipWidth * scale));
-          const height = Math.max(1, Math.round(clipHeight * scale));
           const page = await pdf.getPage(pageIndex + 1);
-          const viewport = page.getViewport({ scale });
-          const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
-          const canvasContext = canvas.getContext("2d", { alpha: false });
-          if (!canvasContext) {
-            throw new Error("Could not create a canvas to render this page.");
-          }
-          canvasContext.fillStyle = "#ffffff";
-          canvasContext.fillRect(0, 0, width, height);
-          const transform = [1, 0, 0, 1, -clip.x * scale, -clip.y * scale];
-          const renderTask = page.render({
-            canvas,
-            canvasContext,
-            viewport,
-            transform,
-            background: "#ffffff",
-          });
           try {
-            await renderTask.promise;
-            const blob = await new Promise<Blob>((resolve, reject) => {
-              canvas.toBlob(
-                (value) =>
-                  value
-                    ? resolve(value)
-                    : reject(new Error("Could not encode this page region.")),
-                "image/png",
-              );
-            });
-            return { blob, width, height };
+            return await renderClippedPage(page, clip, outputWidth);
+          } catch {
+            return await renderClippedPage(page, clip, Math.max(64, outputWidth / 2));
           } finally {
-            canvas.width = 0;
-            canvas.height = 0;
+            page.cleanup();
           }
         });
       },

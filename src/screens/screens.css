@@ -1204,6 +1204,9 @@
 .ps-reader-page {
   position: relative;
   flex: none;
+  overflow: hidden;
+  content-visibility: auto;
+  contain: layout paint;
   scroll-margin: 18px;
   border-radius: 3px;
   background: #fff;

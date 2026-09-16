@@ -66,8 +66,11 @@ type SearchResult = {
 const MIN_ZOOM = 0.65;
 const MAX_ZOOM = 100;
 const ZOOM_FACTOR = 1.2;
-const DETAIL_MAX_PIXELS = 8_000_000;
-const DETAIL_MAX_DIM = 4096;
+const MAX_PAGE_CSS = 12000;
+const TILE_CSS = 768;
+const DETAIL_MAX_PIXELS = 3_000_000;
+const DETAIL_MAX_DIM = 1536;
+const HUGE_PAGE_CSS = 1800;
 
 type ZoomFocal = {
   pageIndex: number;
@@ -89,6 +92,7 @@ type PinchSession = {
   startMidY: number;
   lastZoom: number;
   lastMid: { x: number; y: number };
+  maxZoom: number;
   pending: { mid: { x: number; y: number }; distance: number } | null;
 };
 
@@ -96,8 +100,8 @@ function zoomLabel(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function clampZoom(value: number): number {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+function clampZoom(value: number, maxZoom = MAX_ZOOM): number {
+  return Math.min(maxZoom, Math.max(MIN_ZOOM, value));
 }
 
 function occurrences(text: string, query: string): number {
@@ -207,6 +211,7 @@ function applyLivePinch(pages: HTMLElement, pinch: PinchSession): number {
   if (!pending) return pinch.lastZoom;
   const nextZoom = clampZoom(
     pinch.zoom * (pending.distance / pinch.distance),
+    pinch.maxZoom,
   );
   const ratio = nextZoom / pinch.zoom;
   pages.style.transition = "none";
@@ -257,6 +262,7 @@ export function Viewer({ recentId }: ViewerProps) {
   const wheelRafRef = useRef(0);
   const pinchRef = useRef<PinchSession | null>(null);
   const focalRef = useRef<ZoomFocal | null>(null);
+  const maxZoomRef = useRef(MAX_ZOOM);
 
   const backHash = recentId ? "#/recents" : lastJob.result ? "#/result" : "#/";
 
@@ -471,7 +477,7 @@ export function Viewer({ recentId }: ViewerProps) {
         const box = viewport.getBoundingClientRect();
         rememberFocal(box.left + box.width / 2, box.top + box.height / 2);
       }
-      setZoom((value) => clampZoom(value * factor));
+      setZoom((value) => clampZoom(value * factor, maxZoomRef.current));
     },
     [rememberFocal],
   );
@@ -637,9 +643,23 @@ export function Viewer({ recentId }: ViewerProps) {
     () => indexedPages.reduce((max, page) => Math.max(max, page.width), 1),
     [indexedPages],
   );
+  const maxPageHeight = useMemo(
+    () => indexedPages.reduce((max, page) => Math.max(max, page.height), 1),
+    [indexedPages],
+  );
   const pageGutter = viewportWidth < 620 ? 24 : 52;
   const fitScale = Math.max(0.1, (viewportWidth - pageGutter) / maxPageWidth);
-  const displayScale = fitScale * zoom;
+  const layoutMaxZoom = Math.min(
+    MAX_ZOOM,
+    MAX_PAGE_CSS / Math.max(1, maxPageWidth * fitScale),
+    MAX_PAGE_CSS / Math.max(1, maxPageHeight * fitScale),
+  );
+  maxZoomRef.current = layoutMaxZoom;
+  const displayScale = fitScale * Math.min(zoom, layoutMaxZoom);
+
+  useEffect(() => {
+    setZoom((value) => clampZoom(value, layoutMaxZoom));
+  }, [layoutMaxZoom]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -649,7 +669,7 @@ export function Viewer({ recentId }: ViewerProps) {
   }, [displayScale, viewportWidth, zoom]);
 
   const paintWidth = Math.min(
-    2048,
+    session && session.document.pageCount > 24 ? 1280 : 2048,
     Math.max(
       720,
       (viewportWidth - pageGutter) * Math.min(window.devicePixelRatio || 1, 2),
@@ -686,6 +706,7 @@ export function Viewer({ recentId }: ViewerProps) {
       if (pinch.pending) {
         pinch.lastZoom = clampZoom(
           pinch.zoom * (pinch.pending.distance / pinch.distance),
+          pinch.maxZoom,
         );
         pinch.lastMid = pinch.pending.mid;
         pinch.pending = null;
@@ -730,6 +751,7 @@ export function Viewer({ recentId }: ViewerProps) {
         startMidY: mid.y,
         lastZoom: zoomRef.current,
         lastMid: mid,
+        maxZoom: maxZoomRef.current,
         pending: null,
       };
       focalRef.current = focal;
@@ -761,6 +783,7 @@ export function Viewer({ recentId }: ViewerProps) {
       rememberFocal(event.clientX, event.clientY);
       const next = clampZoom(
         zoomRef.current * Math.exp(-event.deltaY * 0.0024),
+        maxZoomRef.current,
       );
       zoomRef.current = next;
       writeZoomLabel(next);
@@ -938,7 +961,7 @@ export function Viewer({ recentId }: ViewerProps) {
               </button>
               <ReaderIconButton
                 label="Zoom in"
-                disabled={zoom >= MAX_ZOOM}
+                disabled={zoom >= layoutMaxZoom}
                 onClick={() => zoomAroundViewportCenter(ZOOM_FACTOR)}
               >
                 <Plus size={17} />
@@ -1102,6 +1125,7 @@ export function Viewer({ recentId }: ViewerProps) {
                     renderWidth={paintWidth}
                     query={normalizedQuery}
                     active={activePage === pageIndex}
+                    highZoom={zoom > 1.2}
                     viewportRef={viewportRef}
                   />
                 ))}
@@ -1215,6 +1239,7 @@ type ReaderPageProps = {
   renderWidth: number;
   query: string;
   active: boolean;
+  highZoom: boolean;
   viewportRef: React.RefObject<HTMLDivElement | null>;
 };
 
@@ -1224,6 +1249,7 @@ type PageDetail = {
   top: number;
   width: number;
   height: number;
+  key: string;
 };
 
 function ReaderPage({
@@ -1234,6 +1260,7 @@ function ReaderPage({
   renderWidth,
   query,
   active,
+  highZoom,
   viewportRef,
 }: ReaderPageProps) {
   const [visible, setVisible] = useState(false);
@@ -1244,8 +1271,8 @@ function ReaderPage({
   const renderedTextRef = useRef<PdfViewerTextLayer | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const queryRef = useRef(query);
-  const [detail, setDetail] = useState<PageDetail | null>(null);
-  const detailUrlRef = useRef<string | null>(null);
+  const [tiles, setTiles] = useState<PageDetail[]>([]);
+  const tileUrlsRef = useRef<Map<string, string>>(new Map());
   const detailGen = useRef(0);
 
   useEffect(() => {
@@ -1259,11 +1286,14 @@ function ReaderPage({
       ([entry]) => {
         setVisible(entry?.isIntersecting === true);
       },
-      { rootMargin: "1400px 0px" },
+      {
+        root: viewportRef.current,
+        rootMargin: highZoom ? "160px 0px" : "1400px 0px",
+      },
     );
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [highZoom, viewportRef]);
 
   useEffect(() => {
     if (!visible) return;
@@ -1331,7 +1361,7 @@ function ReaderPage({
 
   const dpr = Math.min(
     typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
-    3,
+    2.5,
   );
   const sharpEnough =
     page.width * displayScale * dpr <= renderWidth * 1.12;
@@ -1349,7 +1379,7 @@ function ReaderPage({
       if (viewport.classList.contains("is-pinching")) return;
       const pageBox = pageEl.getBoundingClientRect();
       const viewBox = viewport.getBoundingClientRect();
-      const pad = 64;
+      const pad = 48;
       const cssLeft = Math.max(0, viewBox.left - pageBox.left - pad);
       const cssTop = Math.max(0, viewBox.top - pageBox.top - pad);
       const cssRight = Math.min(
@@ -1360,61 +1390,90 @@ function ReaderPage({
         pageBox.height,
         viewBox.bottom - pageBox.top + pad,
       );
-      const cssW = cssRight - cssLeft;
-      const cssH = cssBottom - cssTop;
-      if (cssW < 8 || cssH < 8) {
-        return;
+      if (cssRight - cssLeft < 8 || cssBottom - cssTop < 8) return;
+      // Tile clips are derived from the exact display scale. Reusing a tile
+      // from a nearby rounded scale shifts its PDF-space clip even when its
+      // CSS tile coordinates are unchanged, so the raster cache key must use
+      // the exact scale and output density as well.
+      const rasterKey = `${displayScale}:${dpr}`;
+      const startX = Math.floor(cssLeft / TILE_CSS);
+      const startY = Math.floor(cssTop / TILE_CSS);
+      const endX = Math.floor((cssRight - 1) / TILE_CSS);
+      const endY = Math.floor((cssBottom - 1) / TILE_CSS);
+      const jobs: PageDetail[] = [];
+      for (let ty = startY; ty <= endY; ty++) {
+        for (let tx = startX; tx <= endX; tx++) {
+          const left = tx * TILE_CSS;
+          const top = ty * TILE_CSS;
+          const width = Math.min(TILE_CSS, pageBox.width - left);
+          const height = Math.min(TILE_CSS, pageBox.height - top);
+          if (width < 8 || height < 8) continue;
+          jobs.push({
+            src: "",
+            key: `${rasterKey}:${tx}:${ty}`,
+            left: left / displayScale,
+            top: top / displayScale,
+            width: width / displayScale,
+            height: height / displayScale,
+          });
+        }
       }
-      let outW = Math.max(1, Math.round(cssW * dpr));
-      let outH = Math.max(1, Math.round(cssH * dpr));
-      const fit = Math.min(
-        1,
-        DETAIL_MAX_DIM / outW,
-        DETAIL_MAX_DIM / outH,
-        Math.sqrt(DETAIL_MAX_PIXELS / Math.max(1, outW * outH)),
-      );
-      outW = Math.max(1, Math.round(outW * fit));
-      outH = Math.max(1, Math.round(outH * fit));
+      if (jobs.length === 0) return;
       const generation = ++detailGen.current;
-      void session
-        .renderPageRegion(
-          pageIndex,
-          {
-            x: cssLeft / displayScale,
-            y: cssTop / displayScale,
-            width: cssW / displayScale,
-            height: cssH / displayScale,
-          },
-          outW,
-          outH,
-        )
-        .then(async (region: PdfViewerPageRegion) => {
-          if (generation !== detailGen.current) return;
+      void Promise.all(
+        jobs.map(async (job) => {
+          const cached = tileUrlsRef.current.get(job.key);
+          if (cached) return { ...job, src: cached };
+          let outW = Math.max(1, Math.round(job.width * displayScale * dpr));
+          let outH = Math.max(1, Math.round(job.height * displayScale * dpr));
+          const fit = Math.min(
+            1,
+            DETAIL_MAX_DIM / outW,
+            DETAIL_MAX_DIM / outH,
+            Math.sqrt(DETAIL_MAX_PIXELS / Math.max(1, outW * outH)),
+          );
+          outW = Math.max(1, Math.round(outW * fit));
+          outH = Math.max(1, Math.round(outH * fit));
+          const region: PdfViewerPageRegion = await session.renderPageRegion(
+            pageIndex,
+            {
+              x: job.left,
+              y: job.top,
+              width: job.width,
+              height: job.height,
+            },
+            outW,
+            outH,
+          );
           const url = URL.createObjectURL(region.blob);
-          // Decode before swapping so sharpening never flashes an empty patch.
           const image = new Image();
           image.src = url;
           try {
             await image.decode();
           } catch {
             URL.revokeObjectURL(url);
-            return;
+            throw new Error("Could not decode this page tile.");
           }
+          return { ...job, src: url };
+        }),
+      )
+        .then((next) => {
           if (generation !== detailGen.current) {
-            URL.revokeObjectURL(url);
+            next.forEach((tile) => {
+              if (!tileUrlsRef.current.has(tile.key))
+                URL.revokeObjectURL(tile.src);
+            });
             return;
           }
-          if (detailUrlRef.current) URL.revokeObjectURL(detailUrlRef.current);
-          detailUrlRef.current = url;
-          setDetail({
-            src: url,
-            // Store page coordinates: the previous sharp patch stays aligned
-            // during zoom while its replacement is rendered at the new density.
-            left: cssLeft / displayScale,
-            top: cssTop / displayScale,
-            width: cssW / displayScale,
-            height: cssH / displayScale,
+          const keep = new Set(next.map((tile) => tile.key));
+          tileUrlsRef.current.forEach((url, key) => {
+            if (!keep.has(key)) {
+              URL.revokeObjectURL(url);
+              tileUrlsRef.current.delete(key);
+            }
           });
+          next.forEach((tile) => tileUrlsRef.current.set(tile.key, tile.src));
+          setTiles(next);
         })
         .catch(() => undefined);
     };
@@ -1422,7 +1481,7 @@ function ReaderPage({
     const schedule = () => {
       window.clearTimeout(timer);
       if (!viewport.classList.contains("is-pinching")) {
-        timer = window.setTimeout(paint, 50);
+        timer = window.setTimeout(paint, 70);
       }
     };
     const pause = () => {
@@ -1442,15 +1501,25 @@ function ReaderPage({
     };
   }, [displayScale, dpr, needsDetail, pageIndex, session, viewportRef]);
 
+  useEffect(() => {
+    if (needsDetail) return;
+    tileUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    tileUrlsRef.current.clear();
+    setTiles([]);
+  }, [needsDetail]);
+
   useEffect(
     () => () => {
-      if (detailUrlRef.current) URL.revokeObjectURL(detailUrlRef.current);
+      tileUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      tileUrlsRef.current.clear();
     },
     [],
   );
 
   const width = page.width * displayScale;
   const height = page.height * displayScale;
+  const layoutHuge = width > HUGE_PAGE_CSS || height > HUGE_PAGE_CSS;
+  const showBase = Boolean(src) && (!layoutHuge || tiles.length === 0);
 
   return (
     <article
@@ -1458,18 +1527,23 @@ function ReaderPage({
       className={active ? "ps-reader-page is-active" : "ps-reader-page"}
       data-page-index={pageIndex}
       aria-label={`Page ${pageIndex + 1}`}
-      style={{ width, height }}
+      style={{
+        width,
+        height,
+        containIntrinsicSize: `${width}px ${height}px`,
+      }}
     >
       <div
         className="ps-reader-page__surface"
       >
-        {src ? (
+        {showBase ? (
           <img
-            src={src}
+            src={src!}
             alt=""
             draggable={false}
+            decoding="async"
           />
-        ) : (
+        ) : src || tiles.length > 0 ? null : (
           <div className="ps-reader-page__placeholder" aria-hidden="true">
             {renderError ? (
               <span>{renderError}</span>
@@ -1479,20 +1553,23 @@ function ReaderPage({
           </div>
         )}
       </div>
-      {needsDetail && detail ? (
-        <img
-          className="ps-reader-page__detail"
-          src={detail.src}
-          alt=""
-          draggable={false}
-          style={{
-            left: detail.left * displayScale,
-            top: detail.top * displayScale,
-            width: detail.width * displayScale,
-            height: detail.height * displayScale,
-          }}
-        />
-      ) : null}
+      {needsDetail
+        ? tiles.map((tile) => (
+            <img
+              key={tile.key}
+              className="ps-reader-page__detail"
+              src={tile.src}
+              alt=""
+              draggable={false}
+              style={{
+                left: tile.left * displayScale,
+                top: tile.top * displayScale,
+                width: tile.width * displayScale,
+                height: tile.height * displayScale,
+              }}
+            />
+          ))
+        : null}
       <div
         ref={textLayerRef}
         className="textLayer ps-reader-text-layer"

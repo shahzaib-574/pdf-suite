@@ -44,7 +44,7 @@ try {
       return [parseFloat(d.style.left) / el.offsetWidth, parseFloat(d.style.top) / el.offsetHeight, parseFloat(d.style.width) / el.offsetWidth];
     });
     await page.evaluate(() => window.pinchEvent('touchstart', 100));
-    assert.equal(await page.locator('[data-page-index="1"] .ps-reader-page__detail').evaluate(el => getComputedStyle(el).display), 'block');
+    assert.equal(await page.locator('[data-page-index="1"] .ps-reader-page__detail').first().evaluate(el => getComputedStyle(el).display), 'block');
     await page.evaluate(distance => window.pinchEvent('touchmove', distance), distance);
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const after = await page.evaluate(() => {
