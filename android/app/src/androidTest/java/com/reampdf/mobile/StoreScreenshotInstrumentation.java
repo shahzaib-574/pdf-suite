@@ -197,6 +197,8 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
             until("document.querySelector('.ps-reader-page__surface img')?.naturalWidth>0");
             capture("04-pdf-reader-1080x1920.png");
             clickText("Organize"); until("document.querySelectorAll('.ps-organize-card').length===5");
+            js("document.querySelector('.ps-organize-grid').scrollIntoView({block:'start',behavior:'auto'})");
+            until("document.querySelector('.ps-organize-preview img')?.naturalWidth>0&&document.querySelector('.ps-organize-preview img')?.getBoundingClientRect().top>=0&&document.querySelector('.ps-organize-controls')?.getBoundingClientRect().bottom<window.innerHeight-260");
             capture("05-organize-pages-1080x1920.png");
             js("history.back()");until("document.querySelector('.ps-reader-page__surface img')?.naturalWidth>0");
             clickText("Word");until("Array.from(document.querySelectorAll('button')).some(b=>b.textContent.trim()==='Convert to Word'&&!b.disabled)");

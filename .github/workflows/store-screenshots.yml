@@ -65,6 +65,7 @@ jobs:
           npm run verify:elf-alignment:self-test
           python -m pip install --disable-pip-version-check -r store-assets/scripts/requirements-screenshot-fixture.txt
           python store-assets/scripts/generate_screenshot_fixture.py --check
+          python store-assets/scripts/verify_ci_screenshots.py --self-test
 
       - name: Validate protected signing configuration
         shell: bash
