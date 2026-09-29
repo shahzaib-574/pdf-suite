@@ -50,13 +50,46 @@ fi
 
 adb shell am force-stop com.reampdf.mobile
 adb shell am start -W -n com.reampdf.mobile/.MainActivity > "$output/restart.txt"
-for delay in 0 5; do
-  sleep "$delay"
-  adb shell pidof com.reampdf.mobile | grep -Eq '[0-9]'
-  adb shell uiautomator dump /sdcard/ream-16k-window.xml >/dev/null
-  adb shell cat /sdcard/ream-16k-window.xml > "$output/window-${delay}.xml"
-  grep -Eq 'Merge PDFs|PDF to Word|Scan' "$output/window-${delay}.xml"
+ready_pid=""
+deadline=$((SECONDS + 30))
+attempt=0
+while (( SECONDS < deadline )); do
+  attempt=$((attempt + 1))
+  remaining=$((deadline - SECONDS))
+  (( remaining > 0 )) || break
+  remote="/sdcard/ream-16k-window-ready-${attempt}.xml"
+  local_dump="$output/.window-ready-${attempt}.xml"
+  adb shell rm -f "$remote" >/dev/null 2>&1 || true
+  rm -f "$local_dump"
+  candidate_pid="$(adb shell pidof com.reampdf.mobile 2>/dev/null | tr -d '\r' | xargs || true)"
+  if [[ "$candidate_pid" =~ ^[0-9]+$ ]] &&
+      timeout "${remaining}s" adb shell uiautomator dump "$remote" >/dev/null 2>&1 &&
+      adb shell cat "$remote" > "$local_dump" 2>/dev/null &&
+      grep -Eq 'Search tools|Your next document' "$local_dump"; then
+    ready_pid="$candidate_pid"
+    mv "$local_dump" "$output/window-ready.xml"
+    break
+  fi
+  rm -f "$local_dump"
+  if (( SECONDS < deadline )); then sleep 1; fi
 done
+if [[ -z "$ready_pid" ]]; then
+  echo 'Ream home did not become visible within 30 seconds after the 16 KB instrumentation restart.' >&2
+  exit 1
+fi
+
+sleep 5
+stable_pid="$(adb shell pidof com.reampdf.mobile 2>/dev/null | tr -d '\r' | xargs || true)"
+if [[ "$stable_pid" != "$ready_pid" ]]; then
+  echo "Ream process was not stable for 5 seconds (ready PID $ready_pid, final PID ${stable_pid:-none})." >&2
+  exit 1
+fi
+stable_remote=/sdcard/ream-16k-window-stable.xml
+adb shell rm -f "$stable_remote" >/dev/null 2>&1 || true
+rm -f "$output/window-stable.xml"
+timeout 15s adb shell uiautomator dump "$stable_remote" >/dev/null
+adb shell cat "$stable_remote" > "$output/window-stable.xml"
+grep -Eq 'Search tools|Your next document' "$output/window-stable.xml"
 
 collect_diagnostics
 if grep -Fq 'Process: com.reampdf.mobile' "$output/crash-buffer.txt"; then
