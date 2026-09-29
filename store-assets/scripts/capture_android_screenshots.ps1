@@ -31,6 +31,15 @@ $expectedHeight = 1920
 $expectedApiLevel = 36
 $packageName = 'com.reampdf.mobile'
 $provenanceFileName = 'capture-provenance.json'
+$googleTestBannerId = 'ca-app-pub-3940256099942544/9214589741'
+$monetizationConfigPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\monetization.config.json'))
+if (-not [IO.File]::Exists($monetizationConfigPath)) {
+    throw "Monetization configuration does not exist: $monetizationConfigPath"
+}
+$configuredAdmobAppId = [string](([IO.File]::ReadAllText($monetizationConfigPath) | ConvertFrom-Json).admobAppId)
+if ($configuredAdmobAppId -cnotmatch '^ca-app-pub-\d{16}~\d{10}$') {
+    throw 'monetization.config.json must contain a valid AdMob app ID.'
+}
 
 $captureStates = @(
     [pscustomobject]@{
@@ -600,8 +609,8 @@ function Assert-CaptureProvenanceManifest {
     }
 
     $schemaVersion = Get-RequiredObjectProperty -InputObject $manifest -Name 'schemaVersion' -Context 'Capture provenance manifest'
-    if ([string]$schemaVersion -cne '1') {
-        throw "Capture provenance schemaVersion must be 1, not '$schemaVersion'."
+    if ([string]$schemaVersion -cne '1' -and [string]$schemaVersion -cne '2') {
+        throw "Capture provenance schemaVersion must be 1 or 2, not '$schemaVersion'."
     }
 
     $manifestPackage = Assert-RequiredText -Value (
@@ -622,6 +631,34 @@ function Assert-CaptureProvenanceManifest {
         [ref]$manifestVersionCode
     ) -or $manifestVersionCode -ne $ExpectedRelease.VersionCode) {
         throw "Capture provenance versionCode '$manifestVersionCodeText' must equal expected code $($ExpectedRelease.VersionCode)."
+    }
+    if ($ExpectedRelease.VersionCode -ge 7 -and [string]$schemaVersion -cne '2') {
+        throw 'Capture provenance for versionCode 7 or later must use schemaVersion 2 test-ad/source-commit evidence.'
+    }
+    if ([string]$schemaVersion -ceq '2') {
+        $sourceCommit = Assert-RequiredText -Value (
+            Get-RequiredObjectProperty -InputObject $manifest -Name 'sourceCommit' -Context 'Capture provenance manifest'
+        ) -Label 'Capture provenance sourceCommit'
+        if ($sourceCommit -cnotmatch '^[0-9a-f]{40}$') {
+            throw 'Capture provenance sourceCommit must be a full lowercase Git commit SHA.'
+        }
+        $artifactMode = Assert-RequiredText -Value (
+            Get-RequiredObjectProperty -InputObject $manifest -Name 'artifactMode' -Context 'Capture provenance manifest'
+        ) -Label 'Capture provenance artifactMode'
+        if (-not [string]::Equals($artifactMode, 'signed-release-google-test-ads', [StringComparison]::Ordinal)) {
+            throw 'Capture provenance artifactMode must be signed-release-google-test-ads.'
+        }
+        $ads = Get-RequiredObjectProperty -InputObject $manifest -Name 'adConfiguration' -Context 'Capture provenance manifest'
+        $provider = Assert-RequiredText -Value (Get-RequiredObjectProperty -InputObject $ads -Name 'provider' -Context 'Capture provenance adConfiguration') -Label 'Capture provenance adConfiguration.provider'
+        $appId = Assert-RequiredText -Value (Get-RequiredObjectProperty -InputObject $ads -Name 'appId' -Context 'Capture provenance adConfiguration') -Label 'Capture provenance adConfiguration.appId'
+        $bannerId = Assert-RequiredText -Value (Get-RequiredObjectProperty -InputObject $ads -Name 'bannerId' -Context 'Capture provenance adConfiguration') -Label 'Capture provenance adConfiguration.bannerId'
+        $isTesting = Get-RequiredObjectProperty -InputObject $ads -Name 'isTesting' -Context 'Capture provenance adConfiguration'
+        $debugGeography = Assert-RequiredText -Value (Get-RequiredObjectProperty -InputObject $ads -Name 'debugGeography' -Context 'Capture provenance adConfiguration') -Label 'Capture provenance adConfiguration.debugGeography'
+        if ($provider -cne 'google-admob' -or $appId -cne $configuredAdmobAppId -or
+            $bannerId -cne $googleTestBannerId -or $isTesting -isnot [bool] -or -not $isTesting -or
+            $debugGeography -cne 'OTHER') {
+            throw 'Capture provenance adConfiguration must attest the configured app ID and Google test banner mode.'
+        }
     }
 
     $manifestVersionName = Assert-RequiredText -Value (
@@ -1564,6 +1601,9 @@ $expectedRelease = Resolve-ExpectedReleaseIdentity `
     -RequestedVersionCode $ExpectedVersionCode `
     -VersionNameWasSpecified $PSBoundParameters.ContainsKey('ExpectedVersionName') `
     -RequestedVersionName $ExpectedVersionName
+if (-not $ValidateOnly -and $expectedRelease.VersionCode -ge 7) {
+    throw 'Version 7 and later captures must use the protected store-screenshots workflow so source commit and test-ad provenance are attested. This helper can validate the promoted selection with -ValidateOnly.'
+}
 $selectedNumbers = @($State | Sort-Object -Unique)
 $selectedStates = @($captureStates | Where-Object { $_.Number -in $selectedNumbers })
 if ($selectedStates.Count -ne $selectedNumbers.Count) {

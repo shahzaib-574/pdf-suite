@@ -32,7 +32,15 @@ python store-assets/scripts/generate_screenshot_fixture.py
 npm run pdf-selfcheck
 ```
 
-## Guarded Windows capture workflow
+## Protected capture workflow
+
+Version 7 and later store evidence must come from the protected GitHub Actions
+`store-screenshots.yml` workflow. It builds the exact main commit with protected
+signing, Google test ads and consent geography `OTHER`, verifies the actual APK
+identity and signer, captures API 36 framebuffer pixels, and emits schema 2
+provenance. Do not recreate or hand-edit those attestations.
+
+## Guarded Windows validation and legacy capture helper
 
 Use the repository helper instead of shell redirection, browser screenshots, or
 mockups. It reads the emulator framebuffer through `adb exec-out screencap -p`,
@@ -62,21 +70,21 @@ Android SDK Build-Tools; pass `-ApksignerPath` only when automatic discovery doe
 not find it. `apksigner` verifies the installed base APK and supplies the signing
 certificate SHA-256 digest used for provenance.
 
-After each successful capture, the helper atomically creates or updates
-`capture-provenance.json`. Version 7 and later evidence uses schema 2 and records
-the exact source commit and attested Google test-ad configuration in addition to
-the package and exact version, API level,
-emulator manufacturer/model/device name and serial, UTC capture time, signing
-certificate SHA-256, installed base-APK SHA-256, and a SHA-256 for every covered image. Partial capture runs
-may extend the same manifest only with the same emulator identity, app version,
-and signing certificate. Use a new empty output directory when any of those
-change; existing screenshots without a manifest are intentionally not adopted.
+For legacy candidates, each successful interactive capture atomically creates or
+updates `capture-provenance.json`. The helper intentionally refuses to generate
+version 7 or later evidence because it cannot independently attest the source
+commit and packaged test-ad mode; use the protected workflow above. Its validation
+path accepts schema 2 and checks the exact source commit format, artifact mode,
+configured AdMob app ID, Google test banner, testing flag and `OTHER` geography in
+addition to package/version/API, device, signing certificate, installed APK and
+image hashes. Existing screenshots without a manifest are intentionally not
+adopted.
 
 The helper refuses to overwrite a capture. Move an existing image aside only
 after reviewing it, or validate the current set without connecting a device:
 
 ```powershell
-pwsh -File store-assets/scripts/capture_android_screenshots.ps1 -ValidateOnly
+pwsh -Command "& 'store-assets/scripts/capture_android_screenshots.ps1' -ValidateOnly -State @(1,3,4,5,6)"
 ```
 
 Validation decodes each requested PNG and checks its exact filename, dimensions,

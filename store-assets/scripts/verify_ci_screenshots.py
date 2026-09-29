@@ -54,7 +54,8 @@ for record in manifest["screenshots"]:
             assert image.getchannel("A").getextrema() == (255, 255)
         rgb = image.convert("RGB")
         rgb.save(image_path, format="PNG")
-    record["sourceFramebufferPngSha256"] = source_hash
+    source_framebuffer_hash = record.setdefault("sourceFramebufferPngSha256", source_hash)
+    assert re.fullmatch(r"[0-9a-f]{64}", source_framebuffer_hash)
     record["sha256"] = hashlib.sha256(image_path.read_bytes()).hexdigest()
 manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 print(f"Verified {len(manifest['screenshots'])} real release screenshots with native 1080x1920 pixels.")

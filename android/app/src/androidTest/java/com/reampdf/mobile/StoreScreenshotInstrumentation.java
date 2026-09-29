@@ -86,6 +86,17 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
         until("Array.from(document.querySelectorAll('button')).some(b=>b.textContent.trim()==="+quoted+"&&!b.disabled)");
         js("Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==="+quoted+"&&!b.disabled).click()");
     }
+    private void untilVisualStateReady() throws Exception {
+        CountDownLatch latch=new CountDownLatch(1); AtomicReference<Boolean> found=new AtomicReference<>(false);
+        runOnMainSync(() -> {
+            WebView web=webView(activity.getWindow().getDecorView());
+            if(web==null){latch.countDown();return;}
+            found.set(true);
+            web.postVisualStateCallback(System.nanoTime(),new WebView.VisualStateCallback(){@Override public void onComplete(long requestId){latch.countDown();}});
+        });
+        assertTrue("WebView visual state timed out",latch.await(20,TimeUnit.SECONDS));
+        assertTrue("WebView was missing while waiting for a visual frame",found.get());
+    }
     private static String sha(byte[] data) throws Exception {
         StringBuilder out=new StringBuilder(); for(byte b:MessageDigest.getInstance("SHA-256").digest(data))out.append(String.format("%02x",b&255)); return out.toString();
     }
@@ -113,7 +124,7 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
         return ads;
     }
     private void capture(String name) throws Exception {
-        until("document.fonts.status==='loaded'"); Thread.sleep(700);
+        until("document.fonts.status==='loaded'"); untilVisualStateReady();
         Bitmap bitmap=getUiAutomation().takeScreenshot();
         assertNotNull(bitmap);assertEquals(1080,bitmap.getWidth());assertEquals(1920,bitmap.getHeight());
         File file=new File(directory,name);assertFalse("Capture must not overwrite an image",file.exists());
@@ -182,13 +193,13 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
         Intent launch=context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());assertNotNull(launch);
         activity=startActivitySync(launch);
         try {
-            until("document.querySelector('.ps-home')");
+            until("!document.querySelector('#app-boot')&&(()=>{const e=document.querySelector('.ps-home');const r=e?.getBoundingClientRect();return r&&r.width>300&&r.height>500&&document.body.innerText.includes('Your next document, ready.')})()");
             capture("01-tools-home-1080x1920.png");
             Uri scanUri=Uri.parse("content://"+context.getPackageName()+".fileprovider/ream_exports/"+Uri.encode(scan.getName()));
             Intent review=new Intent(Intent.ACTION_SEND).setClassName(context,context.getPackageName()+".MainActivity").setType("image/png")
                 .putExtra(Intent.EXTRA_STREAM,scanUri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP);
             context.startActivity(review); clickText("Review images");
-            until("document.querySelector('.ps-scan-editor__image img')?.naturalWidth>0");
+            until("(()=>{const e=document.querySelector('.ps-scan-editor__image img');const r=e?.getBoundingClientRect();return e?.complete&&e.naturalWidth>500&&e.naturalHeight>500&&r&&r.width>180&&r.height>240})()");
             capture("02-scan-intake-1080x1920.png");
             Uri uri=Uri.parse("content://"+context.getPackageName()+".fileprovider/ream_exports/"+Uri.encode(fixture.getName()));
             Intent open=new Intent(Intent.ACTION_VIEW).setClassName(context,context.getPackageName()+".MainActivity")

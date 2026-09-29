@@ -12,12 +12,20 @@ or approval.
 
 The repository has no version 6 release manifest or Play-downloaded AAB hash to
 prove that the uploaded bundle is byte-for-byte from exact pre-audit baseline
-`2f6e330`. GitHub Verify
-[run 35107922071](https://github.com/shahzaib-574/pdf-suite/actions/runs/35107922071)
-at that audited code commit also fails because selected screenshot provenance is
-version 1.1.1 (4), not 1.2.0 (6). Preserve the historical images and recapture
-signed version 6 screens with matching hashes/provenance; do not weaken the version
-gate. See the
+`2f6e330`. That historical gap remains explicit and is not rewritten.
+
+The next candidate is **1.2.1 (7)**. Protected screenshot
+[run 36566379362](https://github.com/shahzaib-574/pdf-suite/actions/runs/36566379362)
+built a signed, nondebuggable Google-test-ad APK from exact source
+`6b3ead375d7d039b7346452d2043f9d30dd9fcad`. Five useful API 36 captures were
+visually reviewed and selected with schema 2 source, signer, APK and test-ad
+provenance; the blank scan-editor frame was rejected and retained only as original
+evidence. The former 1.1.1 (4) selection is archived rather than overwritten.
+Follow-up [run 36568038787](https://github.com/shahzaib-574/pdf-suite/actions/runs/36568038787)
+passed signing, artifact, ELF/ZIP and screenshot-provenance checks, but its official
+API 35 16 KB emulator instrumentation process crashed before a success marker.
+That signed 16 KB smoke remains red pending captured crash diagnostics. No 1.2.1
+bundle has been uploaded to Play. See the
 [repository and upgrade audit](../docs/repository-audit-2026-09-29.md).
 
 **1.2.0 candidate note (16 September 2026):** the repository now prepares an ad-supported candidate. Play Console has saved the Contains ads, Advertising ID, Data safety, and target-audience declarations; the selected audience is 13-15, 16-17, and 18+. Play warns that some users in these groups are children depending on country. The app therefore uses under-age-of-consent treatment for every request, a General ad-content ceiling, and no COPPA child-directed flag. The European privacy message is published in AdMob. The US-state message and final Play review remain external gates, and none of these saved declarations constitutes approval.
@@ -37,7 +45,7 @@ The August quality notification announces future requirements, rather than a cur
 
 ## Ream
 
-Latest delivery: **1.1.1 (4)** is now Active / Available to internal testers, published at 3:31 AM Asia/Karachi on 10 September 2026. See [camera update record](PLAY_UPDATE_1.1.1.md). The 1.1.0 details below are retained as the initial release history.
+Historical internal delivery: **1.1.1 (4)** became Active / Available to internal testers at 3:31 AM Asia/Karachi on 10 September 2026. See [camera update record](PLAY_UPDATE_1.1.1.md). The later closed Alpha 1.2.0 (6) observation is recorded above; the 1.1.0 details below are retained as the initial release history.
 
 The publisher confirmed the policy/export declarations after the compliance review. Ream: PDF Tools & Scanner, `com.reampdf.mobile`, English (US), App and Free was created. Version 3 (1.1.0) is now published to the active internal testing track and shown as available to internal testers. See [verified upload record](PLAY_UPLOAD_2026-09-10.md) for the release and tester links.
 

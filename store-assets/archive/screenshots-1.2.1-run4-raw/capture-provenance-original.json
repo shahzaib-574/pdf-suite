@@ -9,7 +9,7 @@
   "adConfiguration": {
     "provider": "google-admob",
     "appId": "ca-app-pub-9959568404035601~6472905937",
-    "bannerId": "ca-app-pub-3940256099942544/9214589741",
+    "bannerId": "ca-app-pub-3940256099942544\/9214589741",
     "isTesting": true,
     "debugGeography": "OTHER"
   },
@@ -19,34 +19,39 @@
     "name": "emu64xa"
   },
   "serial": "emulator-5554",
-  "signingCertificateSha256": "47AF4BE263F6BFB63065BA344D1C14096320308C75C55CC40ACAEE430C82063A",
-  "installedApkSha256": "7FDACBAAFD1E9F5D9FBA30F996B2923752C275B99F25D9E5C4E4AAA97429112B",
+  "signingCertificateSha256": "47af4be263f6bfb63065ba344d1c14096320308c75c55cc40acaee430c82063a",
+  "installedApkSha256": "7fdacbaafd1e9f5d9fba30f996b2923752c275b99f25d9e5c4e4aaa97429112b",
   "generatedAtUtc": "2026-09-29T12:18:52.117016Z",
   "screenshots": [
     {
       "fileName": "01-tools-home-1080x1920.png",
       "capturedAtUtc": "2026-09-29T12:18:00.447724Z",
-      "sha256": "08F977CA90FEBB92C8A21389FBF21C88B85289A60D25FCACA16FF98DC57EE826"
+      "sha256": "c292d886a78e5d5d2f67d1c6127c0103838449cb15b939b286c94baba7ad4ca8"
+    },
+    {
+      "fileName": "02-scan-intake-1080x1920.png",
+      "capturedAtUtc": "2026-09-29T12:18:06.593399Z",
+      "sha256": "50356a9ad4f42f74e0176f0b2a496512fbda67d9e2e8c8423818ecd866072cf2"
     },
     {
       "fileName": "04-pdf-reader-1080x1920.png",
       "capturedAtUtc": "2026-09-29T12:18:12.726041Z",
-      "sha256": "C2326ED03FB53A2FEF9D1EB9943A096A3AE151C0623C84A0AEAA75A33ACC9A3B"
+      "sha256": "98063adc0bb6a1fad234e6f7b109e975c350521706269bdaf9e4f0c222b4c899"
     },
     {
       "fileName": "05-organize-pages-1080x1920.png",
       "capturedAtUtc": "2026-09-29T12:18:19.630407Z",
-      "sha256": "16FA3895C2902C2C2B13CFDEAA4EE16217048CE3B15CFB0B1D75C7A42F6C4CE5"
+      "sha256": "1a8bc34235ab5ab0e918d565b568ac07882a24ed99579f056d976149e1cba7ff"
     },
     {
       "fileName": "03-pdf-to-word-1080x1920.png",
       "capturedAtUtc": "2026-09-29T12:18:26.706251Z",
-      "sha256": "10276D901BCC4B060B4BAD230777312210C54650C8358E404DFC1761512AADD1"
+      "sha256": "107a7112bcb8ec5bfe4a073f1eb9939c4b472907376478da52c81af711e7c78e"
     },
     {
       "fileName": "06-recents-1080x1920.png",
       "capturedAtUtc": "2026-09-29T12:18:38.068107Z",
-      "sha256": "039506C19DDBC6B42329A5266EAFEAAD0D4E48045C6860664555761F985498FC"
+      "sha256": "6fc40754bda002c7a81b9273065d8fb34bb1a159efb31ae497443b852a3d7c35"
     }
   ]
 }

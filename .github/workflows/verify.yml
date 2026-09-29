@@ -143,6 +143,7 @@ jobs:
           "$apksigner_path" verify "$apk"
           jarsigner -verify "$aab" >/dev/null
           npm run verify:android-artifact -- "$apk"
+          npm run verify:elf-alignment -- "$apk"
 
       - name: Verify release APK 16 KB page alignment
         working-directory: android
@@ -153,7 +154,6 @@ jobs:
           zipalign_path="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name zipalign -print | sort -V | tail -n 1)"
           test -n "$zipalign_path"
           "$zipalign_path" -c -P 16 -v 4 "$apk"
-          npm run verify:elf-alignment -- "$apk"
 
       - name: Clean disposable production-path files
         if: ${{ always() }}

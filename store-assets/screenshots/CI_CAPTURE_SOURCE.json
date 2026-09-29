@@ -1,54 +1,63 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "sourceCommit": "6b3ead375d7d039b7346452d2043f9d30dd9fcad",
+  "artifactMode": "signed-release-google-test-ads",
   "packageName": "com.reampdf.mobile",
-  "versionCode": 4,
-  "versionName": "1.1.1",
+  "versionCode": 7,
+  "versionName": "1.2.1",
   "androidApiLevel": 36,
+  "adConfiguration": {
+    "provider": "google-admob",
+    "appId": "ca-app-pub-9959568404035601~6472905937",
+    "bannerId": "ca-app-pub-3940256099942544/9214589741",
+    "isTesting": true,
+    "debugGeography": "OTHER"
+  },
   "device": {
-    "manufacturer": "unknown",
-    "model": "Android SDK built for x86_64",
-    "name": "emu64x"
+    "manufacturer": "Google",
+    "model": "sdk_gphone64_x86_64",
+    "name": "emu64xa"
   },
   "serial": "emulator-5554",
   "signingCertificateSha256": "47af4be263f6bfb63065ba344d1c14096320308c75c55cc40acaee430c82063a",
-  "installedApkSha256": "5e07cbbb4108acdb83501a4b97b82f27a34a7f1e1b25ccc1e4af9d2de3dad21e",
-  "generatedAtUtc": "2026-09-09T22:23:23.363337Z",
+  "installedApkSha256": "7fdacbaafd1e9f5d9fba30f996b2923752c275b99f25d9e5c4e4aaa97429112b",
+  "generatedAtUtc": "2026-09-29T12:18:52.117016Z",
   "screenshots": [
     {
       "fileName": "01-tools-home-1080x1920.png",
-      "capturedAtUtc": "2026-09-09T22:22:48.674100Z",
-      "sha256": "e1a279d0149b0325cbe9fc8b1011c6d7ef5dae9031d0c32f6baa9544fced9967",
-      "sourceFramebufferPngSha256": "a3c971ff9d9b9675ae9af0dd786148e77479a9f4d2b164714056845e0f93b6b6"
+      "capturedAtUtc": "2026-09-29T12:18:00.447724Z",
+      "sha256": "08f977ca90febb92c8a21389fbf21c88b85289a60d25fcaca16ff98dc57ee826",
+      "sourceFramebufferPngSha256": "c292d886a78e5d5d2f67d1c6127c0103838449cb15b939b286c94baba7ad4ca8"
     },
     {
       "fileName": "02-scan-intake-1080x1920.png",
-      "capturedAtUtc": "2026-09-09T22:22:52.030333Z",
-      "sha256": "9c322a293b0c745f5eadad973a198acafbc7cf6c642f97dc4561ca5dbf32ada4",
-      "sourceFramebufferPngSha256": "7fa040addbbf37cfe065ace9a3c3901571dedf597d78bec78925c2d140d0a61a"
+      "capturedAtUtc": "2026-09-29T12:18:06.593399Z",
+      "sha256": "113e11d0b5317c2a3b86977eee036b38e77011203216fe293015de66abd85486",
+      "sourceFramebufferPngSha256": "50356a9ad4f42f74e0176f0b2a496512fbda67d9e2e8c8423818ecd866072cf2"
     },
     {
       "fileName": "04-pdf-reader-1080x1920.png",
-      "capturedAtUtc": "2026-09-09T22:22:57.368838Z",
-      "sha256": "8bd11aebd9fa95f18c2fc92fc05d3ce62c794ee8b1e92bed65cde7b4e702a5af",
-      "sourceFramebufferPngSha256": "7b6f101f74910df71131feec696cc69616c55ac87c555fd69cecf5fc8b473851"
+      "capturedAtUtc": "2026-09-29T12:18:12.726041Z",
+      "sha256": "c2326ed03fb53a2fef9d1eb9943a096a3ae151c0623c84a0aeaa75a33acc9a3b",
+      "sourceFramebufferPngSha256": "98063adc0bb6a1fad234e6f7b109e975c350521706269bdaf9e4f0c222b4c899"
     },
     {
       "fileName": "05-organize-pages-1080x1920.png",
-      "capturedAtUtc": "2026-09-09T22:23:01.110455Z",
-      "sha256": "ff2b23d464f120676f8f75dabc2931db848b25325692a38707fb0319a9b41d6f",
-      "sourceFramebufferPngSha256": "36effcf32e3ce14abeb6f27cdf93f8fe02221e4b8d8648bfcdd25e0e9871eb92"
+      "capturedAtUtc": "2026-09-29T12:18:19.630407Z",
+      "sha256": "16fa3895c2902c2c2b13cfdeaa4ee16217048ce3b15cfb0b1d75c7a42f6c4ce5",
+      "sourceFramebufferPngSha256": "1a8bc34235ab5ab0e918d565b568ac07882a24ed99579f056d976149e1cba7ff"
     },
     {
       "fileName": "03-pdf-to-word-1080x1920.png",
-      "capturedAtUtc": "2026-09-09T22:23:06.209018Z",
-      "sha256": "892c8c6ef7f3dc38e416e4f6fba0426609faac4838e341d55981f3fa869a8982",
-      "sourceFramebufferPngSha256": "d474df99d79f938f7617c4b85fcfa669fbe598f5775c818213de1894b0953bb7"
+      "capturedAtUtc": "2026-09-29T12:18:26.706251Z",
+      "sha256": "10276d901bcc4b060b4bad230777312210c54650c8358e404dfc1761512aadd1",
+      "sourceFramebufferPngSha256": "107a7112bcb8ec5bfe4a073f1eb9939c4b472907376478da52c81af711e7c78e"
     },
     {
       "fileName": "06-recents-1080x1920.png",
-      "capturedAtUtc": "2026-09-09T22:23:14.579844Z",
-      "sha256": "0dc614638e93972738a292bf91f2f91063c35c184f3124a733985cc9c8e84b86",
-      "sourceFramebufferPngSha256": "9cd384cfd89854764c01ef1498a859d5aeff6d76e83323992c97652ad899112f"
+      "capturedAtUtc": "2026-09-29T12:18:38.068107Z",
+      "sha256": "039506c19ddbc6b42329a5266eafeaad0d4e48045c6860664555761f985498fc",
+      "sourceFramebufferPngSha256": "6fc40754bda002c7a81b9273065d8fb34bb1a159efb31ae497443b852a3d7c35"
     }
   ]
 }

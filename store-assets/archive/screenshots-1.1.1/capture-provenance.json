@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "packageName": "com.reampdf.mobile",
+  "versionCode": 4,
+  "versionName": "1.1.1",
+  "androidApiLevel": 36,
+  "device": {
+    "manufacturer": "unknown",
+    "model": "Android SDK built for x86_64",
+    "name": "emu64x"
+  },
+  "serial": "emulator-5554",
+  "signingCertificateSha256": "47AF4BE263F6BFB63065BA344D1C14096320308C75C55CC40ACAEE430C82063A",
+  "installedApkSha256": "5E07CBBB4108ACDB83501A4B97B82F27A34A7F1E1B25CCC1E4AF9D2DE3DAD21E",
+  "generatedAtUtc": "2026-09-09T22:23:23.363337Z",
+  "screenshots": [
+    {
+      "fileName": "01-tools-home-1080x1920.png",
+      "capturedAtUtc": "2026-09-09T22:22:48.674100Z",
+      "sha256": "E1A279D0149B0325CBE9FC8B1011C6D7EF5DAE9031D0C32F6BAA9544FCED9967"
+    },
+    {
+      "fileName": "03-pdf-to-word-1080x1920.png",
+      "capturedAtUtc": "2026-09-09T22:23:06.209018Z",
+      "sha256": "892C8C6EF7F3DC38E416E4F6FBA0426609FAAC4838E341D55981F3FA869A8982"
+    },
+    {
+      "fileName": "06-recents-1080x1920.png",
+      "capturedAtUtc": "2026-09-09T22:23:14.579844Z",
+      "sha256": "0DC614638E93972738A292BF91F2F91063C35C184F3124A733985CC9C8E84B86"
+    }
+  ]
+}

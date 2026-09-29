@@ -66,7 +66,7 @@ for a local candidate, not proof that the Play bundle was built from exact pre-a
 baseline `2f6e330`. Record the source commit, AAB/APK/mapping hashes, and signing
 certificate digest for every future Play upload.
 
-## Current validation blocker
+## Remediation status
 
 GitHub Verify [run 35107922071](https://github.com/shahzaib-574/pdf-suite/actions/runs/35107922071)
 failed at the audited code commit `2f6e330`. A fresh local
@@ -74,13 +74,23 @@ failed at the audited code commit `2f6e330`. A fresh local
 provenance is from version 1.1.1 (4), while the release identity is version 1.2.0
 (6). All later Android CI stages were skipped.
 
-This guard must not be loosened, and the old images must not be removed merely to
-take an absent-assets path. The truthful repair is to capture and visually review
-real, signed version 6 screens with Google test ads, then promote matching hashes
-and provenance. The existing guarded capture scripts can be used, or the dedicated
-API 36 capture workflow called for by the compliance notes can be added (it is not
-currently present under `.github/workflows`). Until matching version 6 evidence is
-promoted, exact-head verification is red.
+That guard was not loosened. Remediation advanced the post-upgrade candidate to
+1.2.1 (7), then protected API 36 run
+[36566379362](https://github.com/shahzaib-574/pdf-suite/actions/runs/36566379362)
+captured a signed, nondebuggable Google-test-ad APK from exact source
+`6b3ead375d7d039b7346452d2043f9d30dd9fcad`. Five useful frames were visually
+reviewed and selected with schema 2 source, signer, APK and test-ad provenance.
+The blank scan-editor frame was rejected rather than promoted. Original framebuffer
+PNGs and the original manifest are preserved separately from the losslessly
+normalized RGB store files, and the former 1.1.1 (4) selection is archived.
+
+Follow-up run
+[36568038787](https://github.com/shahzaib-574/pdf-suite/actions/runs/36568038787)
+passed signing, artifact, ELF/ZIP and screenshot-provenance checks. Its signed APK
+then crashed inside the official API 35 16 KB emulator instrumentation before a
+success marker. That native smoke remains an explicit red gate while crash-buffer,
+logcat and process-exit diagnostics are added; it is not treated as proof of 16 KB
+compatibility. No Play or OTA publication occurred.
 
 ## Checks run during this audit
 
@@ -91,16 +101,20 @@ promoted, exact-head verification is red.
   old `Reader` heading on the viewer route. An isolated diagnostic confirmed the
   viewer actually opened the four-page fixture and rendered all four pages; the
   harness locator is stale and should be corrected in a separate code change.
-- Failed as intentionally preserved: `verify:store-assets`, for the version 4 versus
-  version 6 provenance mismatch described above.
+- Failed at the pre-remediation baseline: `verify:store-assets`, for the version 4
+  versus version 6 provenance mismatch described above. The reviewed 1.2.1 (7)
+  five-image selection now passes the local store verifier and schema 2 provenance
+  checks; exact-head hosted Verify is still required after promotion is committed.
 - Not run: a fresh Android build, signing, emulator/device checks, and Play upload.
   Java and ADB were not available on this shell's PATH, and the limited free-disk
   margin made a new heavy Android build inappropriate for a documentation audit.
 
 ## Upgrade priorities
 
-1. **Repair release evidence and return exact-head CI to green.** Complete the
-   version 6 capture/provenance work above before changing dependencies.
+1. **Finish exact-head release evidence.** The genuine 1.2.1 (7) screenshot
+   selection is prepared; run exact-head hosted Verify after promotion, retain the
+   historical version 6 provenance gap, and keep source/hash/signer manifests for
+   every future Play candidate.
 2. **Keep the current Android baseline.** `compileSdkVersion` and
    `targetSdkVersion` are already 36. Google Play requires API 36 for new apps and
    updates from 31 August 2026. Capacitor 8 also documents Node 22+, Android Studio
