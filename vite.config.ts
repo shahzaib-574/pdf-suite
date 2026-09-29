@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import monetization from './monetization.config.json' with { type: 'json' }
 
@@ -14,7 +14,12 @@ function assertMonetizationConfig() {
 
 assertMonetizationConfig()
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode }) => {
+  const environment = loadEnv(mode, process.cwd(), '')
+  const debugGeography = mode === 'android-debug'
+    ? environment.VITE_UMP_DEBUG_GEOGRAPHY?.trim().toUpperCase() || null
+    : null
+  return {
   base: './',
   define: {
     __REAM_AD_CONFIG__: JSON.stringify({
@@ -42,6 +47,7 @@ export default defineConfig(({ mode }) => ({
             consent: 'google-ump',
             maxAdContentRating: 'G',
             tagForUnderAgeOfConsent: true,
+            debugGeography,
           } : null,
         }) + '\n' })
       if (mode === 'website') {
@@ -75,4 +81,5 @@ AddType text/javascript .mjs
   }],
   worker: { format: 'es' },
   server: { host: true, port: 5173 },
-}))
+  }
+})

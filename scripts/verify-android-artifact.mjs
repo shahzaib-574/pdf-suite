@@ -554,6 +554,7 @@ function checkAdsMetadata(metadata, violations, artifactMode = 'production') {
   addMismatch(violations, 'consent platform', metadata?.ads?.consent, 'google-ump');
   addMismatch(violations, 'maximum ad content rating', metadata?.ads?.maxAdContentRating, 'G');
   addMismatch(violations, 'under-age-of-consent treatment', metadata?.ads?.tagForUnderAgeOfConsent, true);
+  addMismatch(violations, 'consent debug geography', metadata?.ads?.debugGeography, capture ? 'OTHER' : null);
 }
 
 function checkAdsManifest(manifest, resolvedAppId, violations) {
@@ -668,21 +669,21 @@ function runSelfTest() {
   checkAdsMetadata({schemaVersion: 4, mode: 'production', advertising: true, ads: {
     provider: 'google-admob', appId: MONETIZATION.admobAppId,
     bannerId: MONETIZATION.admobBannerUnitId, isTesting: false,
-    consent: 'google-ump', maxAdContentRating: 'G', tagForUnderAgeOfConsent: true,
+    consent: 'google-ump', maxAdContentRating: 'G', tagForUnderAgeOfConsent: true, debugGeography: null,
   }}, clean);
   assert.deepEqual(clean, []);
   const capture = [];
   checkAdsMetadata({schemaVersion: 4, mode: 'android-debug', advertising: true, ads: {
     provider: 'google-admob', appId: MONETIZATION.admobAppId,
     bannerId: GOOGLE_TEST_BANNER_ID, isTesting: true,
-    consent: 'google-ump', maxAdContentRating: 'G', tagForUnderAgeOfConsent: true,
+    consent: 'google-ump', maxAdContentRating: 'G', tagForUnderAgeOfConsent: true, debugGeography: 'OTHER',
   }}, capture, 'capture-test-ads');
   assert.deepEqual(capture, []);
   const productionInCaptureMode = [];
   checkAdsMetadata({schemaVersion: 4, mode: 'production', advertising: true, ads: {
     provider: 'google-admob', appId: MONETIZATION.admobAppId,
     bannerId: MONETIZATION.admobBannerUnitId, isTesting: false,
-    consent: 'google-ump', maxAdContentRating: 'G', tagForUnderAgeOfConsent: true,
+    consent: 'google-ump', maxAdContentRating: 'G', tagForUnderAgeOfConsent: true, debugGeography: null,
   }}, productionInCaptureMode, 'capture-test-ads');
   assert(productionInCaptureMode.some((message) => /web build mode/.test(message)));
   assert(productionInCaptureMode.some((message) => /AdMob banner ID/.test(message)));
@@ -691,7 +692,7 @@ function runSelfTest() {
   checkAdsMetadata({schemaVersion: 4, mode: 'android-debug', advertising: true, ads: {
     provider: 'google-admob', appId: MONETIZATION.admobAppId,
     bannerId: GOOGLE_TEST_BANNER_ID, isTesting: true,
-    consent: 'google-ump', maxAdContentRating: 'G', tagForUnderAgeOfConsent: true,
+    consent: 'google-ump', maxAdContentRating: 'G', tagForUnderAgeOfConsent: true, debugGeography: 'OTHER',
   }}, captureInProductionMode, 'production');
   assert(captureInProductionMode.some((message) => /web build mode/.test(message)));
   assert(captureInProductionMode.some((message) => /AdMob banner ID/.test(message)));

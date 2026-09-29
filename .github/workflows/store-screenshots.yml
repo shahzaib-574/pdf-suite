@@ -132,6 +132,8 @@ jobs:
           chmod 600 android/keystore.properties
 
       - name: Build signed nondebuggable test-ad capture APK
+        env:
+          VITE_UMP_DEBUG_GEOGRAPHY: OTHER
         run: |
           npm run android:sync:debug
           npm run verify:ads -- --debug

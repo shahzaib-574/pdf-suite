@@ -74,7 +74,8 @@ def validateProductionRelease = tasks.register('validateProductionRelease') {
             releaseMetadata?.ads?.isTesting != captureStoreScreenshots ||
             releaseMetadata?.ads?.consent != 'google-ump' ||
             releaseMetadata?.ads?.maxAdContentRating != 'G' ||
-            releaseMetadata?.ads?.tagForUnderAgeOfConsent != true) {
+            releaseMetadata?.ads?.tagForUnderAgeOfConsent != true ||
+            releaseMetadata?.ads?.debugGeography != (captureStoreScreenshots ? 'OTHER' : null)) {
             throw new GradleException(captureStoreScreenshots
                 ? 'Screenshot capture requires android-debug Google test-ad assets. Run `npm run android:sync:debug` first.'
                 : 'Expected production AdMob/UMP web assets. Run `npm run android:sync` before building.')

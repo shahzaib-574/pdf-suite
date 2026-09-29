@@ -37,6 +37,7 @@ monetization = json.loads(pathlib.Path("monetization.config.json").read_text())
 assert manifest["adConfiguration"]["appId"] == monetization["admobAppId"]
 assert manifest["adConfiguration"]["bannerId"] == "ca-app-pub-3940256099942544/9214589741"
 assert manifest["adConfiguration"]["isTesting"] is True
+assert manifest["adConfiguration"]["debugGeography"] == "OTHER"
 for record in manifest["screenshots"]:
     image_path = root / record["fileName"]
     assert image_path.parent == root and image_path.suffix == ".png"

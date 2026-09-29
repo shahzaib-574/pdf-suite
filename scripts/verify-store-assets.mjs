@@ -381,11 +381,11 @@ function validateCaptureProvenance(manifest, imageEntries, releaseIdentity, read
     }
     const ads = requireExactObject(
       manifest.adConfiguration,
-      ['provider', 'appId', 'bannerId', 'isTesting'],
+      ['provider', 'appId', 'bannerId', 'isTesting', 'debugGeography'],
       'Capture provenance adConfiguration',
     )
     if (ads.provider !== 'google-admob' || ads.appId !== expectedAdmobAppId ||
-        ads.bannerId !== GOOGLE_TEST_BANNER_ID || ads.isTesting !== true) {
+        ads.bannerId !== GOOGLE_TEST_BANNER_ID || ads.isTesting !== true || ads.debugGeography !== 'OTHER') {
       fail('Capture provenance adConfiguration must attest the configured app ID and Google test banner mode.')
     }
   }
@@ -651,6 +651,7 @@ function runSelfTest() {
       appId: 'ca-app-pub-1111111111111111~2222222222',
       bannerId: GOOGLE_TEST_BANNER_ID,
       isTesting: true,
+      debugGeography: 'OTHER',
     },
     screenshots: [
       {
@@ -731,6 +732,7 @@ function runSelfTest() {
   expectProvenanceFailure((candidate) => { candidate.adConfiguration.appId = 'ca-app-pub-9999999999999999~9999999999' }, /attest the configured app ID/, 'a mismatched AdMob app ID')
   expectProvenanceFailure((candidate) => { candidate.adConfiguration.bannerId = 'ca-app-pub-1111111111111111/3333333333' }, /Google test banner mode/, 'a production banner ID')
   expectProvenanceFailure((candidate) => { candidate.adConfiguration.isTesting = false }, /Google test banner mode/, 'disabled test-ad mode')
+  expectProvenanceFailure((candidate) => { candidate.adConfiguration.debugGeography = 'EEA' }, /Google test banner mode/, 'a consent-form capture geography')
   expectProvenanceFailure((candidate) => { candidate.artifactMode = 'production' }, /artifactMode must be/, 'an invalid artifact mode')
   console.log('Store asset verifier self-test passed.')
 }

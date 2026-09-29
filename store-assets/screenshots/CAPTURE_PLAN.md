@@ -11,6 +11,7 @@ Capture the release candidate itself. Do not substitute design mockups.
 - Remove developer overlays, notifications, personal account details, file paths, and service-provider names.
 - Show complete system status icons or crop the status bar consistently; never edit app content into the capture.
 - Capture the actual guarded candidate after device QA; do not fabricate app content, request a live ad, or interact with an ad.
+- The protected capture workflow attests UMP debug geography `OTHER` so a consent form cannot cover listing pixels. Normal Android debug testing remains `EEA`, and production has no debug geography.
 - Export each screenshot as a 24-bit RGB PNG with no alpha.
 
 Copy the canonical fixture into the emulator's Downloads directory before the

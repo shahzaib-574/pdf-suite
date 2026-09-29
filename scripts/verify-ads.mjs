@@ -36,6 +36,12 @@ assert(source.includes('consent.canRequestAds'));
 const debugEnv = read('.env.android-debug');
 assert.match(debugEnv, /^VITE_ADMOB_TEST_MODE=true$/m);
 assert(!debugEnv.includes(config.admobBannerUnitId));
+const expectedDebugGeography = (
+  process.env.VITE_UMP_DEBUG_GEOGRAPHY ??
+  debugEnv.match(/^VITE_UMP_DEBUG_GEOGRAPHY=(\S+)$/m)?.[1] ??
+  ''
+).trim().toUpperCase();
+assert(['EEA', 'US', 'OTHER'].includes(expectedDebugGeography));
 
 const manifest = read('android/app/src/main/AndroidManifest.xml');
 assert.match(manifest, /com\.google\.android\.gms\.ads\.APPLICATION_ID/);
@@ -61,6 +67,7 @@ for (const dir of ['dist', assetRoot]) {
   assert.equal(metadata.ads.consent, 'google-ump');
   assert.equal(metadata.ads.maxAdContentRating, 'G');
   assert.equal(metadata.ads.tagForUnderAgeOfConsent, true);
+  assert.equal(metadata.ads.debugGeography, requestedMode === 'android-debug' ? expectedDebugGeography : null);
 }
 
 const plugins = json('android/app/src/main/assets/capacitor.plugins.json');

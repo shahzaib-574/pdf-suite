@@ -73,7 +73,7 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
             if(web==null){latch.countDown();return;}
             web.evaluateJavascript(expression,value->{result.set(value);latch.countDown();});
         });
-        assertTrue("WebView evaluation timed out",latch.await(8,TimeUnit.SECONDS));
+        assertTrue("WebView evaluation timed out",latch.await(20,TimeUnit.SECONDS));
         return result.get();
     }
     private void until(String expression) throws Exception {
@@ -109,6 +109,7 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
         assertEquals("google-admob",ads.getString("provider"));
         assertEquals("ca-app-pub-3940256099942544/9214589741",ads.getString("bannerId"));
         assertTrue("Screenshot capture must package Google test ads",ads.getBoolean("isTesting"));
+        assertEquals("OTHER",ads.getString("debugGeography"));
         return ads;
     }
     private void capture(String name) throws Exception {
@@ -210,7 +211,8 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
                 .put("artifactMode","signed-release-google-test-ads").put("packageName",context.getPackageName())
                 .put("versionCode",info.getLongVersionCode()).put("versionName",info.versionName).put("androidApiLevel",Build.VERSION.SDK_INT)
                 .put("adConfiguration",new JSONObject().put("provider",ads.getString("provider"))
-                    .put("appId",ads.getString("appId")).put("bannerId",ads.getString("bannerId")).put("isTesting",ads.getBoolean("isTesting")))
+                    .put("appId",ads.getString("appId")).put("bannerId",ads.getString("bannerId"))
+                    .put("isTesting",ads.getBoolean("isTesting")).put("debugGeography",ads.getString("debugGeography")))
                 .put("device",new JSONObject().put("manufacturer",Build.MANUFACTURER).put("model",Build.MODEL).put("name",Build.DEVICE))
                 .put("serial",arguments.getString("deviceSerial")).put("signingCertificateSha256",sha(info.signingInfo.getApkContentsSigners()[0].toByteArray()))
                 .put("installedApkSha256",fileSha(new File(context.getApplicationInfo().sourceDir)))
