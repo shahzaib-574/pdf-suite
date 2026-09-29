@@ -2,6 +2,24 @@
 
 This is a dated Console observation, not a guarantee of future approval.
 
+**Live update — 29 September 2026:** Play Console showed
+Ream: PDF Tools & Scanner / `com.reampdf.mobile` with closed Alpha release
+**1.2.0 (6) — Ads and privacy choices** fully rolled out since 16 September 2026.
+Production remained inactive. The dashboard showed 12 testers opted in for 12
+continuous days, so the production-access application remained unavailable pending
+the 14-day condition. This is closed-test delivery, not a public production release
+or approval.
+
+The repository has no version 6 release manifest or Play-downloaded AAB hash to
+prove that the uploaded bundle is byte-for-byte from exact pre-audit baseline
+`2f6e330`. GitHub Verify
+[run 35107922071](https://github.com/shahzaib-574/pdf-suite/actions/runs/35107922071)
+at that audited code commit also fails because selected screenshot provenance is
+version 1.1.1 (4), not 1.2.0 (6). Preserve the historical images and recapture
+signed version 6 screens with matching hashes/provenance; do not weaken the version
+gate. See the
+[repository and upgrade audit](../docs/repository-audit-2026-09-29.md).
+
 **1.2.0 candidate note (16 September 2026):** the repository now prepares an ad-supported candidate. Play Console has saved the Contains ads, Advertising ID, Data safety, and target-audience declarations; the selected audience is 13-15, 16-17, and 18+. Play warns that some users in these groups are children depending on country. The app therefore uses under-age-of-consent treatment for every request, a General ad-content ceiling, and no COPPA child-directed flag. The European privacy message is published in AdMob. The US-state message and final Play review remain external gates, and none of these saved declarations constitutes approval.
 
 ## Existing apps

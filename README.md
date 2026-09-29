@@ -5,6 +5,14 @@ On-device PDF tools for web and Android. Files never leave the phone or browser.
 Public privacy policy:
 <https://shahzaib-574.github.io/pdf-suite/privacy.html>
 
+## Canonical repository
+
+This repository is the canonical source for the Ream Android and web app.
+`ream-pdf-updates` is its signed OTA bundle store, not a duplicate source checkout.
+See the [29 September 2026 repository and upgrade audit](docs/repository-audit-2026-09-29.md)
+for Play identity evidence, linked-worktree status, the current validation blocker,
+and prioritized upgrades.
+
 ## Stack
 
 - Vite + React + TypeScript
