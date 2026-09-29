@@ -245,6 +245,8 @@ const SENSITIVE_PERMISSION_DENYLIST = Object.freeze([
 
 function usage() {
   return `Usage: node scripts/verify-android-artifact.mjs [APK_PATH]
+       node scripts/verify-android-artifact.mjs --capture-test-ads APK_PATH
+       node scripts/verify-android-artifact.mjs --print-artifact-identity APK_PATH
        node scripts/verify-android-artifact.mjs --print-release-identity
        node scripts/verify-android-artifact.mjs --self-test
 
@@ -252,6 +254,9 @@ Verifies the packaged release manifest and Capacitor web assets. APK_PATH
 defaults to ${DEFAULT_APK}.
 
 Options:
+  --capture-test-ads       Verify a signed, non-debuggable screenshot-capture
+                           APK that embeds Google's test banner configuration.
+  --print-artifact-identity  Print package and version values read from the APK.
   --print-release-identity  Print versionCode and versionName from
                             android/variables.gradle for release automation.
   --self-test  Exercise the parsers and policy checks without an Android SDK.
@@ -476,7 +481,7 @@ function readStringResource(analyzer, resourceName, apkPath) {
   );
 }
 
-async function checkWebBundle(apkPath, violations) {
+async function checkWebBundle(apkPath, violations, artifactMode = 'production') {
   const apk = await JSZip.loadAsync(await readFile(apkPath));
   let hasMobileAds = false;
   let hasUmpPackage = false;
@@ -513,33 +518,39 @@ async function checkWebBundle(apkPath, violations) {
   } else {
     try {
       metadata = JSON.parse((await metadataEntry.async('nodebuffer')).toString('utf8'));
-      checkAdsMetadata(metadata, violations);
+      checkAdsMetadata(metadata, violations, artifactMode);
     } catch (error) {
       violations.push(`packaged production metadata is invalid JSON: ${error.message}`);
     }
   }
 
   let productionBannerPresent = false;
-  const forbiddenHits = [];
+  let testBannerPresent = false;
   for (const entry of webEntries) {
     const contents = await entry.async('nodebuffer');
     productionBannerPresent ||= contents.includes(Buffer.from(MONETIZATION.admobBannerUnitId));
-    if (contents.includes(Buffer.from(GOOGLE_TEST_BANNER_ID))) forbiddenHits.push(entry.name);
+    testBannerPresent ||= contents.includes(Buffer.from(GOOGLE_TEST_BANNER_ID));
   }
-  if (!productionBannerPresent) violations.push('Configured production banner ID is missing from packaged web assets');
-  if (forbiddenHits.length > 0) violations.push(`Google test banner ID is packaged in production assets: ${forbiddenHits.join(', ')}`);
+  if (artifactMode === 'capture-test-ads') {
+    if (!testBannerPresent) violations.push('Google test banner ID is missing from screenshot-capture assets');
+    if (productionBannerPresent) violations.push('Production banner ID is packaged in screenshot-capture assets');
+  } else {
+    if (!productionBannerPresent) violations.push('Configured production banner ID is missing from packaged web assets');
+    if (testBannerPresent) violations.push('Google test banner ID is packaged in production assets');
+  }
 
   return { entryCount: webEntries.length, metadata };
 }
 
-function checkAdsMetadata(metadata, violations) {
+function checkAdsMetadata(metadata, violations, artifactMode = 'production') {
+  const capture = artifactMode === 'capture-test-ads';
   addMismatch(violations, 'web metadata schema', metadata?.schemaVersion, 4);
-  addMismatch(violations, 'web build mode', metadata?.mode, 'production');
+  addMismatch(violations, 'web build mode', metadata?.mode, capture ? 'android-debug' : 'production');
   addMismatch(violations, 'advertising enabled', metadata?.advertising, true);
   addMismatch(violations, 'ad provider', metadata?.ads?.provider, 'google-admob');
   addMismatch(violations, 'AdMob app ID', metadata?.ads?.appId, MONETIZATION.admobAppId);
-  addMismatch(violations, 'AdMob banner ID', metadata?.ads?.bannerId, MONETIZATION.admobBannerUnitId);
-  addMismatch(violations, 'production ad test mode', metadata?.ads?.isTesting, false);
+  addMismatch(violations, 'AdMob banner ID', metadata?.ads?.bannerId, capture ? GOOGLE_TEST_BANNER_ID : MONETIZATION.admobBannerUnitId);
+  addMismatch(violations, capture ? 'capture ad test mode' : 'production ad test mode', metadata?.ads?.isTesting, capture);
   addMismatch(violations, 'consent platform', metadata?.ads?.consent, 'google-ump');
   addMismatch(violations, 'maximum ad content rating', metadata?.ads?.maxAdContentRating, 'G');
   addMismatch(violations, 'under-age-of-consent treatment', metadata?.ads?.tagForUnderAgeOfConsent, true);
@@ -660,6 +671,31 @@ function runSelfTest() {
     consent: 'google-ump', maxAdContentRating: 'G', tagForUnderAgeOfConsent: true,
   }}, clean);
   assert.deepEqual(clean, []);
+  const capture = [];
+  checkAdsMetadata({schemaVersion: 4, mode: 'android-debug', advertising: true, ads: {
+    provider: 'google-admob', appId: MONETIZATION.admobAppId,
+    bannerId: GOOGLE_TEST_BANNER_ID, isTesting: true,
+    consent: 'google-ump', maxAdContentRating: 'G', tagForUnderAgeOfConsent: true,
+  }}, capture, 'capture-test-ads');
+  assert.deepEqual(capture, []);
+  const productionInCaptureMode = [];
+  checkAdsMetadata({schemaVersion: 4, mode: 'production', advertising: true, ads: {
+    provider: 'google-admob', appId: MONETIZATION.admobAppId,
+    bannerId: MONETIZATION.admobBannerUnitId, isTesting: false,
+    consent: 'google-ump', maxAdContentRating: 'G', tagForUnderAgeOfConsent: true,
+  }}, productionInCaptureMode, 'capture-test-ads');
+  assert(productionInCaptureMode.some((message) => /web build mode/.test(message)));
+  assert(productionInCaptureMode.some((message) => /AdMob banner ID/.test(message)));
+  assert(productionInCaptureMode.some((message) => /capture ad test mode/.test(message)));
+  const captureInProductionMode = [];
+  checkAdsMetadata({schemaVersion: 4, mode: 'android-debug', advertising: true, ads: {
+    provider: 'google-admob', appId: MONETIZATION.admobAppId,
+    bannerId: GOOGLE_TEST_BANNER_ID, isTesting: true,
+    consent: 'google-ump', maxAdContentRating: 'G', tagForUnderAgeOfConsent: true,
+  }}, captureInProductionMode, 'production');
+  assert(captureInProductionMode.some((message) => /web build mode/.test(message)));
+  assert(captureInProductionMode.some((message) => /AdMob banner ID/.test(message)));
+  assert(captureInProductionMode.some((message) => /production ad test mode/.test(message)));
   const legacy = [];
   checkAdsMetadata({schemaVersion: 3, mode: 'production', advertising: false}, legacy);
   assert(legacy.length > 0);
@@ -689,7 +725,14 @@ async function main() {
     console.log(`versionName=${EXPECTED.versionName}`);
     return;
   }
-  const positionalArgs = args;
+  const captureTestAds = args.includes('--capture-test-ads');
+  const printArtifactIdentity = args.includes('--print-artifact-identity');
+  if (captureTestAds && printArtifactIdentity) {
+    throw new Error('--capture-test-ads cannot be combined with --print-artifact-identity');
+  }
+  const positionalArgs = args.filter(
+    (argument) => argument !== '--capture-test-ads' && argument !== '--print-artifact-identity',
+  );
   if (positionalArgs.length > 1 || positionalArgs[0]?.startsWith('-')) {
     throw new Error(`${usage()}\n\nUnexpected arguments: ${args.join(' ')}`);
   }
@@ -707,6 +750,12 @@ async function main() {
   }
 
   const analyzer = resolveApkAnalyzer();
+  if (printArtifactIdentity) {
+    console.log(`package=${runApkAnalyzer(analyzer, 'application-id', apkPath)}`);
+    console.log(`versionCode=${runApkAnalyzer(analyzer, 'version-code', apkPath)}`);
+    console.log(`versionName=${runApkAnalyzer(analyzer, 'version-name', apkPath)}`);
+    return;
+  }
   const violations = [];
   addMismatch(
     violations,
@@ -764,7 +813,8 @@ async function main() {
     runApkAnalyzer(analyzer, 'permissions', apkPath),
   );
   checkPermissions(permissions, violations);
-  const webBundle = await checkWebBundle(apkPath, violations);
+  const artifactMode = captureTestAds ? 'capture-test-ads' : 'production';
+  const webBundle = await checkWebBundle(apkPath, violations, artifactMode);
   checkAdsManifest(manifestXml, resolvedAdmobAppId, violations);
 
   if (violations.length > 0) {
@@ -778,7 +828,9 @@ async function main() {
   console.log('  non-debuggable; backup disabled; cleartext traffic disabled');
   console.log(`  exact merged permissions (${permissions.length}): ${permissions.join(', ')}`);
   console.log(
-    `  production web bundle (${webBundle.entryCount} files): AdMob/UMP metadata and production IDs`,
+    captureTestAds
+      ? `  screenshot-capture web bundle (${webBundle.entryCount} files): Google test banner and UMP test mode`
+      : `  production web bundle (${webBundle.entryCount} files): AdMob/UMP metadata and production IDs`,
   );
 }
 

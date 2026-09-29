@@ -1,7 +1,7 @@
 ext {
     // App release identity lives here so Play versioning has one source of truth.
-    appVersionCode = 6
-    appVersionName = '1.2.0'
+    appVersionCode = 7
+    appVersionName = '1.2.1'
     minSdkVersion = 24
     compileSdkVersion = 36
     targetSdkVersion = 36

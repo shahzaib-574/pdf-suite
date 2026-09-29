@@ -60,6 +60,7 @@ See [quality improvements and verification limits](docs/quality-improvements.md)
 
 ```bash
 npm run lint
+npm run dependency-selfcheck
 npm run pdf-selfcheck
 npm run docx-selfcheck
 npm run quality-selfcheck
@@ -70,6 +71,7 @@ npm run ads-selfcheck
 npm run verify:ads
 npm run verify:monetization
 npm run verify:android-artifact -- --self-test
+npm run verify:elf-alignment:self-test
 npm run build
 ```
 
@@ -100,7 +102,7 @@ npm run android:debug
 npm run android:bundle
 ```
 
-Android 1.2.0 is ad-supported. Anchored adaptive banners are limited to native Tools and Recents, use Google UMP consent eligibility, and reserve no gap until an ad reports its real size. Because the selected Play audience includes 13-15 and 16-17 users and there is no neutral age screen, every UMP/ad request is tagged as under the age of consent and capped at Google's General content rating. COPPA child-directed treatment remains unset because under-13 users are not selected. Document contents remain on-device and are not sent to the advertising SDK. Debug builds use Google's test banner; production uses the exact public IDs in `monetization.config.json`. Run `npm run verify:ads` after a production sync, or `npm run verify:ads -- --debug` after `npm run android:sync:debug`.
+Android 1.2.1 (7) is the next ad-supported maintenance candidate. Anchored adaptive banners are limited to native Tools and Recents, use Google UMP consent eligibility, and reserve no gap until an ad reports its real size. Because the selected Play audience includes 13-15 and 16-17 users and there is no neutral age screen, every UMP/ad request is tagged as under the age of consent and capped at Google's General content rating. COPPA child-directed treatment remains unset because under-13 users are not selected. Document contents remain on-device and are not sent to the advertising SDK. Debug and store-capture builds use Google's test banner; production uses the exact public IDs in `monetization.config.json`. Run `npm run verify:ads` after a production sync, or `npm run verify:ads -- --debug` after `npm run android:sync:debug`.
 
 See [the internal testing guide](docs/internal-testing.md) for build commands, test coverage, and the remaining release gates.
 

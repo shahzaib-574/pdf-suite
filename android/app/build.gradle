@@ -6,6 +6,7 @@ def keystorePropertiesFile = rootProject.file('keystore.properties')
 def keystoreProperties = new Properties()
 def hasReleaseKeystore = keystorePropertiesFile.exists()
 def allowUnsignedRelease = project.findProperty('allowUnsignedRelease')?.toString()?.toBoolean() ?: false
+def captureStoreScreenshots = project.findProperty('captureStoreScreenshots')?.toString()?.toBoolean() ?: false
 def releaseMetadataFile = file('src/main/assets/public/release-metadata.json')
 def webAssetDirectory = file('src/main/assets/public')
 def monetizationConfigFile = rootProject.file('../monetization.config.json')
@@ -65,21 +66,25 @@ def validateProductionRelease = tasks.register('validateProductionRelease') {
             )
         }
 
+        def expectedMode = captureStoreScreenshots ? 'android-debug' : 'production'
         if (releaseMetadata?.schemaVersion != 4 ||
-            releaseMetadata?.mode != 'production' ||
+            releaseMetadata?.mode != expectedMode ||
             releaseMetadata?.advertising != true ||
             releaseMetadata?.ads?.provider != 'google-admob' ||
-            releaseMetadata?.ads?.isTesting != false ||
+            releaseMetadata?.ads?.isTesting != captureStoreScreenshots ||
             releaseMetadata?.ads?.consent != 'google-ump' ||
             releaseMetadata?.ads?.maxAdContentRating != 'G' ||
             releaseMetadata?.ads?.tagForUnderAgeOfConsent != true) {
-            throw new GradleException('Expected production AdMob/UMP web assets. Run `npm run android:sync` before building.')
+            throw new GradleException(captureStoreScreenshots
+                ? 'Screenshot capture requires android-debug Google test-ad assets. Run `npm run android:sync:debug` first.'
+                : 'Expected production AdMob/UMP web assets. Run `npm run android:sync` before building.')
         }
 
         if (!monetizationConfigFile.isFile()) {
             throw new GradleException('monetization.config.json is missing.')
         }
         def monetization = new JsonSlurper().parseText(monetizationConfigFile.getText('UTF-8'))
+        def expectedBannerId = captureStoreScreenshots ? 'ca-app-pub-3940256099942544/9214589741' : monetization?.admobBannerUnitId
         if (monetization?.liveAdsEnabled != true ||
             !(monetization?.admobAppId ==~ /ca-app-pub-\d{16}~\d{10}/) ||
             !(monetization?.admobBannerUnitId ==~ /ca-app-pub-\d{16}\/\d{10}/) ||
@@ -88,15 +93,21 @@ def validateProductionRelease = tasks.register('validateProductionRelease') {
             throw new GradleException('Production AdMob configuration is missing, malformed, disabled, or uses a sample ID.')
         }
         if (releaseMetadata.ads.appId != monetization.admobAppId ||
-            releaseMetadata.ads.bannerId != monetization.admobBannerUnitId) {
-            throw new GradleException('Synchronized production IDs do not match monetization.config.json.')
+            releaseMetadata.ads.bannerId != expectedBannerId) {
+            throw new GradleException(captureStoreScreenshots
+                ? 'Screenshot capture assets must use the configured app ID and Google test banner ID.'
+                : 'Synchronized production IDs do not match monetization.config.json.')
         }
         def webSource = fileTree(webAssetDirectory) { include '**/*.js', '**/*.json' }.files.collect {
             it.getText('UTF-8')
         }.join('\n')
-        if (!webSource.contains(monetization.admobBannerUnitId) ||
-            webSource.contains('ca-app-pub-3940256099942544/9214589741') ||
-            webSource.contains('VITE_UMP_DEBUG_GEOGRAPHY')) {
+        if (captureStoreScreenshots) {
+            if (!webSource.contains(expectedBannerId) || webSource.contains(monetization.admobBannerUnitId)) {
+                throw new GradleException('Screenshot capture web assets must contain only Google test banner configuration.')
+            }
+        } else if (!webSource.contains(monetization.admobBannerUnitId) ||
+                   webSource.contains('ca-app-pub-3940256099942544/9214589741') ||
+                   webSource.contains('VITE_UMP_DEBUG_GEOGRAPHY')) {
             throw new GradleException('Production web assets contain missing/mismatched IDs or Android debug ad settings.')
         }
     }
@@ -107,7 +118,7 @@ android {
     // can only request Google's test banner and debug UMP configuration.
     testBuildType 'debug'
     sourceSets { androidTest.assets.srcDir '../../store-assets/fixtures' }
-    if (project.hasProperty('captureStoreScreenshots')) {
+    if (captureStoreScreenshots) {
         sourceSets.androidTest.java.setIncludes(['**/StoreScreenshotInstrumentation.java'])
     }
     namespace = "com.reampdf.mobile"
@@ -173,7 +184,7 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
-    if (!project.hasProperty('captureStoreScreenshots')) {
+    if (!captureStoreScreenshots) {
         androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
         androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     }

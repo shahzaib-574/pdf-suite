@@ -99,9 +99,14 @@ try {
           .fill(" secret ");
       }
       if (id === "view") {
-        await page
-          .getByRole("heading", { name: "Reader", exact: true })
-          .waitFor();
+        await page.waitForURL(/#\/viewer$/);
+        await page.getByText("fixture.pdf", { exact: true }).waitFor();
+        await page.locator(".ps-reader-page").first().waitFor();
+        assert.equal(
+          await page.locator(".ps-reader-page").count(),
+          4,
+          "Reader did not create one page surface per fixture page",
+        );
         await page
           .locator(".ps-reader-page img")
           .first()

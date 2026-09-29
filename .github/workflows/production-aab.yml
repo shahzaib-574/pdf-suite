@@ -85,6 +85,8 @@ jobs:
       - name: Run production preflight checks
         run: |
           npm run lint
+          npm run dependency-selfcheck
+          npm run verify:elf-alignment:self-test
           npm run ads-selfcheck
           npm run docx-selfcheck
           npm run pdf-selfcheck
@@ -220,15 +222,24 @@ jobs:
           "$apksigner_path" verify "$apk"
           "$zipalign_path" -c -P 16 -v 4 "$apk"
           npm run verify:android-artifact -- "$apk"
+          npm run verify:elf-alignment -- "$apk"
 
           release_manifest="android/app/build/outputs/release-manifest.txt"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           {
             echo "commit=$GITHUB_SHA"
-            echo "package=com.reampdf.mobile"
-            node scripts/verify-android-artifact.mjs --print-release-identity
+            node scripts/verify-android-artifact.mjs --print-artifact-identity "$apk"
             sha256sum "$aab" "$apk" "$mapping"
             "$apksigner_path" verify --print-certs "$apk"
           } > "$release_manifest"
+          grep -Fx "commit=$GITHUB_SHA" "$release_manifest"
+          node scripts/verify-android-artifact.mjs --print-artifact-identity "$apk" | while IFS= read -r line; do
+            grep -Fx "$line" "$release_manifest"
+          done
+          grep -E '^[0-9a-f]{64}  android/app/build/outputs/' "$release_manifest" | sha256sum --check
+          certificate_digest="$("$apksigner_path" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          test -n "$certificate_digest"
+          grep -Fxi "Signer #1 certificate SHA-256 digest: $certificate_digest" "$release_manifest"
 
       # Do not launch production ad units in an automated emulator. Placement
       # and UMP tests run in the debug workflow with Google's test banner.

@@ -1,0 +1,1 @@
+Maintenance update with refreshed Android and web libraries, stronger release checks, and reader reliability improvements.

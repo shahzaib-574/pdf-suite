@@ -4,13 +4,13 @@ Capture the release candidate itself. Do not substitute design mockups.
 
 ## Capture setup
 
-- Install the signed release candidate or the exact internal-track build on an API 36 Android emulator for the guarded workflow below. Physical-device captures require a separate manual capture path and must still pass `-ValidateOnly`.
+- Install the signed, nondebuggable screenshot-capture candidate on an API 36 Android emulator for the guarded workflow below. It must come from the exact candidate source and package Google's test banner/test mode, never the production banner. Physical-device captures require a separate manual capture path and must still pass `-ValidateOnly`.
 - Use a 1080 x 1920 portrait viewport for all phone images.
 - Set display/font scaling to the Android defaults and keep one theme across the core sequence.
 - Use the canonical synthetic fixture at `../fixtures/ream-screenshot-fixture.pdf`. It contains five non-confidential pages with varied text, a ruled table, two columns, and mixed orientation.
 - Remove developer overlays, notifications, personal account details, file paths, and service-provider names.
 - Show complete system status icons or crop the status bar consistently; never edit app content into the capture.
-- Capture the actual ad-free release build after device QA; do not fabricate app content.
+- Capture the actual guarded candidate after device QA; do not fabricate app content, request a live ad, or interact with an ad.
 - Export each screenshot as a 24-bit RGB PNG with no alpha.
 
 Copy the canonical fixture into the emulator's Downloads directory before the
@@ -62,7 +62,9 @@ not find it. `apksigner` verifies the installed base APK and supplies the signin
 certificate SHA-256 digest used for provenance.
 
 After each successful capture, the helper atomically creates or updates
-`capture-provenance.json`. It records the package and exact version, API level,
+`capture-provenance.json`. Version 7 and later evidence uses schema 2 and records
+the exact source commit and attested Google test-ad configuration in addition to
+the package and exact version, API level,
 emulator manufacturer/model/device name and serial, UTC capture time, signing
 certificate SHA-256, installed base-APK SHA-256, and a SHA-256 for every covered image. Partial capture runs
 may extend the same manifest only with the same emulator identity, app version,

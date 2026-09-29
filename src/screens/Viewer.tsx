@@ -482,10 +482,6 @@ export function Viewer({ recentId }: ViewerProps) {
     [rememberFocal],
   );
 
-  useEffect(() => {
-    zoomRef.current = zoom;
-  }, [zoom]);
-
   const writeZoomLabel = useCallback((value: number) => {
     const label = zoomLabelRef.current;
     if (label) label.textContent = zoomLabel(value);
@@ -654,8 +650,15 @@ export function Viewer({ recentId }: ViewerProps) {
     MAX_PAGE_CSS / Math.max(1, maxPageWidth * fitScale),
     MAX_PAGE_CSS / Math.max(1, maxPageHeight * fitScale),
   );
-  maxZoomRef.current = layoutMaxZoom;
   const displayScale = fitScale * Math.min(zoom, layoutMaxZoom);
+
+  useLayoutEffect(() => {
+    maxZoomRef.current = layoutMaxZoom;
+  }, [layoutMaxZoom]);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
 
   useEffect(() => {
     setZoom((value) => clampZoom(value, layoutMaxZoom));

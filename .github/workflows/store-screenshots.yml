@@ -1,0 +1,218 @@
+name: Capture store screenshots with Google test ads
+
+run-name: "Store screenshots · ${{ github.ref_name }} · #${{ github.run_number }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_capture:
+        description: Confirm an approved signed test-ad capture on main
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ream-store-screenshot-capture
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    if: ${{ inputs.confirm_capture && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: 3.12.13
+          cache: pip
+          cache-dependency-path: store-assets/scripts/requirements-screenshot-fixture.txt
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+
+      - name: Install exact dependencies
+        run: npm ci
+
+      - name: Verify dependencies and deterministic fixture
+        run: |
+          npm run dependency-selfcheck
+          npm run verify:elf-alignment:self-test
+          python -m pip install --disable-pip-version-check -r store-assets/scripts/requirements-screenshot-fixture.txt
+          python store-assets/scripts/generate_screenshot_fixture.py --check
+
+      - name: Validate protected signing configuration
+        shell: bash
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "$ANDROID_UPLOAD_KEYSTORE_BASE64" ]] || missing+=(ANDROID_UPLOAD_KEYSTORE_BASE64)
+          [[ -n "$ANDROID_UPLOAD_STORE_PASSWORD" ]] || missing+=(ANDROID_UPLOAD_STORE_PASSWORD)
+          [[ -n "$ANDROID_UPLOAD_KEY_ALIAS" ]] || missing+=(ANDROID_UPLOAD_KEY_ALIAS)
+          [[ -n "$ANDROID_UPLOAD_KEY_PASSWORD" ]] || missing+=(ANDROID_UPLOAD_KEY_PASSWORD)
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required production secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Stage runner-only signing configuration
+        shell: bash
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          keystore_path="$RUNNER_TEMP/ream-capture-upload.jks"
+          printf '%s' "$ANDROID_UPLOAD_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          test -s "$keystore_path"
+          chmod 600 "$keystore_path"
+          keytool -list -keystore "$keystore_path" -storepass:env ANDROID_UPLOAD_STORE_PASSWORD -alias "$ANDROID_UPLOAD_KEY_ALIAS" >/dev/null
+          export RELEASE_KEYSTORE_PATH="$keystore_path"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          const required = ['RELEASE_KEYSTORE_PATH', 'ANDROID_UPLOAD_STORE_PASSWORD', 'ANDROID_UPLOAD_KEY_ALIAS', 'ANDROID_UPLOAD_KEY_PASSWORD']
+          for (const name of required) if (!process.env[name]) throw new Error(`Required environment value ${name} is missing.`)
+          function escapeProperty(value) {
+            let escaped = ''
+            for (let index = 0; index < value.length; index += 1) {
+              const character = value[index]
+              const code = value.charCodeAt(index)
+              if (character === '\\') escaped += '\\\\'
+              else if (character === '\t') escaped += '\\t'
+              else if (character === '\n') escaped += '\\n'
+              else if (character === '\r') escaped += '\\r'
+              else if (character === '\f') escaped += '\\f'
+              else if (code < 0x20 || code > 0x7e) escaped += `\\u${code.toString(16).padStart(4, '0')}`
+              else if ('=:#!'.includes(character) || (index === 0 && character === ' ')) escaped += `\\${character}`
+              else escaped += character
+            }
+            return escaped
+          }
+          const values = [
+            ['storeFile', process.env.RELEASE_KEYSTORE_PATH],
+            ['storePassword', process.env.ANDROID_UPLOAD_STORE_PASSWORD],
+            ['keyAlias', process.env.ANDROID_UPLOAD_KEY_ALIAS],
+            ['keyPassword', process.env.ANDROID_UPLOAD_KEY_PASSWORD],
+          ]
+          fs.writeFileSync('android/keystore.properties', `${values.map(([key, value]) => `${key}=${escapeProperty(value)}`).join('\n')}\n`, { encoding: 'ascii', mode: 0o600 })
+          NODE
+          chmod 600 android/keystore.properties
+
+      - name: Build signed nondebuggable test-ad capture APK
+        run: |
+          npm run android:sync:debug
+          npm run verify:ads -- --debug
+          cd android
+          chmod +x gradlew
+          ./gradlew --no-daemon lintRelease assembleRelease assembleReleaseAndroidTest -PcaptureStoreScreenshots=true
+
+      - name: Verify capture APK policy and 16 KB ELF/ZIP alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/release/app-release.apk"
+          apksigner_path="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          zipalign_path="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name zipalign -print | sort -V | tail -n 1)"
+          test -n "$apksigner_path"
+          test -n "$zipalign_path"
+          "$apksigner_path" verify "$apk"
+          "$zipalign_path" -c -P 16 -v 4 "$apk"
+          npm run verify:android-artifact -- --capture-test-ads "$apk"
+          npm run verify:elf-alignment -- "$apk"
+
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Capture signed API 36 screenshots without live ads
+        uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          avd-name: ream-api36-capture
+          force-avd-creation: true
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated -camera-front none
+          script: |
+            adb shell cmd uimode night no
+            bash store-assets/scripts/capture_release_ci.sh
+
+      - name: Verify captured pixels, source, signer and test-ad provenance
+        shell: bash
+        run: |
+          apksigner_path="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          test -n "$apksigner_path"
+          python store-assets/scripts/verify_ci_screenshots.py store-assets/screenshots/release-capture android/app/build/outputs/apk/release/app-release.apk "$GITHUB_SHA" "$apksigner_path"
+
+      - name: Smoke test the same APK on a 16 KB emulator
+        uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
+        with:
+          api-level: 35
+          target: google_apis_ps16k
+          arch: x86_64
+          profile: pixel_2
+          avd-name: ream-api35-ps16k
+          force-avd-creation: true
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated -camera-front none
+          script: bash scripts/verify-16k-emulator.sh android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload capture evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: ${{ always() }}
+        with:
+          name: ream-store-capture-${{ github.run_number }}
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android/app/build/reports/
+            android/app/build/outputs/androidTest-results/
+            store-assets/screenshots/release-capture/
+            tmp/16k-smoke/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Clean runner-only signing files
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f -- android/keystore.properties
+          if [[ -n "${RUNNER_TEMP:-}" && -d "$RUNNER_TEMP" ]]; then
+            rm -f -- "$RUNNER_TEMP/ream-capture-upload.jks"
+          fi

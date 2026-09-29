@@ -4,6 +4,15 @@ This is a point-in-time audit of repository identity, Google Play delivery evide
 validation, and upgrade needs. It does not record a production rollout or Google
 approval.
 
+## Approved remediation sequence
+
+The audit originally put the red screenshot gate before dependency maintenance.
+Implementation deliberately updates the approved same-major runtime dependencies
+and advances the candidate to 1.2.1 (7) first, then performs one genuine capture
+from that exact candidate. Capturing version 6 first would not prove the historical
+Play binary and would require a second capture after the runtime changed. Version 6
+remains historical and its exact-source provenance gap is not rewritten.
+
 ## Canonical source and related repositories
 
 - [`shahzaib-574/pdf-suite`](https://github.com/shahzaib-574/pdf-suite) is the
@@ -101,9 +110,9 @@ promoted, exact-head verification is red.
 3. **Verify native 16 KB compatibility, not only ZIP alignment.** Google now says
    Play updates targeting API 35+ must support 16 KB page sizes from 1 February
    2027, and specifically calls for checking ELF segments when native code exists.
-   Ream packages native libraries, while current automation only runs
-   `zipalign -P 16`. Add an ELF-alignment check and a 16 KB emulator/device smoke
-   test before that deadline. Source: [Android 16 KB guidance](https://developer.android.com/guide/practices/page-sizes).
+   Ream packages native libraries. Remediation adds fail-closed ELF program-header
+   checks alongside `zipalign -P 16` and a signed APK smoke test on the official
+   16 KB emulator image. Source: [Android 16 KB guidance](https://developer.android.com/guide/practices/page-sizes).
 4. **Take a conservative same-major dependency batch after CI is repaired.** The
    29 September `npm outdated` snapshot identified Capacitor core/Android/CLI
    8.5.2, Capacitor Share 8.0.2, Capawesome Live Update 8.4.4,
@@ -122,9 +131,13 @@ promoted, exact-head verification is red.
 reported three moderate development-only findings in the Capacitor CLI chain
 (`@capacitor/cli` → `xcode` → `uuid`; advisory
 [GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq)).
-The suggested automatic resolution was a Capacitor CLI downgrade, so do not apply
-`npm audit fix` blindly. Track the upstream CLI dependency and retest it with the
-same-major update.
+The suggested automatic resolution was a Capacitor CLI downgrade, so remediation
+does not apply `npm audit fix` blindly. Capacitor CLI 8.5.2 still selects xcode
+3.0.1, whose UUID use is `uuid.v4()` without the advisory's caller-provided buffer.
+A dependency self-check proves xcode can parse/write a PBX project and generate its
+24-character identifier with a narrowly scoped UUID 11.1.1 override. The resulting
+full audit reports zero vulnerabilities; the override remains covered by that
+compatibility test until xcode updates its own dependency.
 
 React 19.3 is an optional feature release, not a Play compliance requirement; use
 its [official release notes](https://react.dev/blog/2026/09/09/react-19-3) to review

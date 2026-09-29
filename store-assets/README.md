@@ -13,6 +13,7 @@ Use [`PLAY_CONSOLE_DECLARATIONS.md`](PLAY_CONSOLE_DECLARATIONS.md) as the audite
 | Full description | `listing/en-US/full-description.txt` | 4,000 characters or fewer |
 | Release notes (1.0.0) | `listing/en-US/release-notes-1.0.0.txt` | 500 characters or fewer |
 | Release notes (1.2.0) | `listing/en-US/release-notes-1.2.0.txt` | 500 characters or fewer; ad and privacy behavior disclosed |
+| Release notes (1.2.1) | `listing/en-US/release-notes-1.2.1.txt` | 500 characters or fewer; maintenance candidate |
 | App icon | `graphics/app-icon-512.png` | 512 x 512, 32-bit RGBA PNG, fully opaque, sRGB, 1 MB or smaller |
 | JPEG logo copy | `graphics/app-logo-512.jpg` | 512 x 512, high-quality RGB JPEG for non-icon uses; do not upload as the Play app icon |
 | Feature graphic | `graphics/feature-graphic-1024x500.jpg` | 1024 x 500, high-quality RGB JPEG with embedded sRGB profile |
@@ -58,11 +59,19 @@ installed in a standard location.
 
 Do not upload mockups, browser crops, or fabricated screens. Follow `screenshots/CAPTURE_PLAN.md` after the release candidate is installed on an Android emulator or physical phone. Upload at least four real 1080 x 1920 portrait captures for stronger Play discovery eligibility. Write final alt text from the captured pixels using `screenshots/ALT_TEXT_TEMPLATE.md`.
 
+For the ad-supported candidate, use the protected **Capture store screenshots with
+Google test ads** workflow on `main`. It builds a signed, nondebuggable capture APK
+from the exact source commit, proves that only Google's test banner is packaged,
+captures on API 36, and runs the same APK through a 16 KB page-size smoke. It does
+not publish to Play or OTA and must never click an ad. Download and visually review
+the evidence artifact before promoting any image.
+
 On Windows, the guarded ADB helper captures and validates the six planned
 emulator states without overwriting existing images. It also verifies the exact
 installed version and signing certificate and records API/device identity,
 the installed base-APK SHA-256, capture timestamps, and per-image SHA-256 hashes in
-`screenshots/capture-provenance.json`:
+`screenshots/capture-provenance.json`. Version 7+ provenance also records the build
+commit and verified Google test-ad mode:
 
 ```powershell
 pwsh -File store-assets/scripts/capture_android_screenshots.ps1

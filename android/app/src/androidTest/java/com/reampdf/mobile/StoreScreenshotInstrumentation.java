@@ -14,6 +14,8 @@ import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
+import android.system.Os;
+import android.system.OsConstants;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
@@ -35,8 +37,13 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
     @Override public void onStart() {
         Bundle result=new Bundle();
         try {
-            captureSignedReleaseListing();
-            result.putString("stream", "REAM_CAPTURE_SUCCESS\n");
+            if ("16kSmoke".equals(arguments.getString("mode"))) {
+                verifySixteenKbRelease();
+                result.putString("stream", "REAM_16K_SMOKE_SUCCESS\n");
+            } else {
+                captureSignedReleaseListing();
+                result.putString("stream", "REAM_CAPTURE_SUCCESS\n");
+            }
             finish(Activity.RESULT_OK,result);
         } catch(Throwable failure) {
             result.putString("stream", "REAM_CAPTURE_FAILURE: "+android.util.Log.getStackTraceString(failure));
@@ -86,6 +93,23 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
         MessageDigest digest=MessageDigest.getInstance("SHA-256");
         try(InputStream input=new FileInputStream(file)){byte[] buffer=new byte[65536];int count;while((count=input.read(buffer))!=-1)digest.update(buffer,0,count);}
         StringBuilder out=new StringBuilder();for(byte b:digest.digest())out.append(String.format("%02x",b&255));return out.toString();
+    }
+    private static String assetText(Context context,String name) throws Exception {
+        try(InputStream input=context.getAssets().open(name);ByteArrayOutputStream output=new ByteArrayOutputStream()) {
+            byte[] buffer=new byte[8192];int count;while((count=input.read(buffer))!=-1)output.write(buffer,0,count);
+            return output.toString("UTF-8");
+        }
+    }
+    private JSONObject requireTestAdMetadata(Context context) throws Exception {
+        JSONObject releaseMetadata=new JSONObject(assetText(context,"public/release-metadata.json"));
+        JSONObject ads=releaseMetadata.getJSONObject("ads");
+        assertEquals(4,releaseMetadata.getInt("schemaVersion"));
+        assertEquals("android-debug",releaseMetadata.getString("mode"));
+        assertTrue(releaseMetadata.getBoolean("advertising"));
+        assertEquals("google-admob",ads.getString("provider"));
+        assertEquals("ca-app-pub-3940256099942544/9214589741",ads.getString("bannerId"));
+        assertTrue("Screenshot capture must package Google test ads",ads.getBoolean("isTesting"));
+        return ads;
     }
     private void capture(String name) throws Exception {
         until("document.fonts.status==='loaded'"); Thread.sleep(700);
@@ -141,6 +165,9 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
         Context context=getTargetContext();
         assertEquals("com.reampdf.mobile",context.getPackageName());assertEquals(36,Build.VERSION.SDK_INT);
         assertEquals("Store captures must use the signed, non-debuggable release",0,context.getApplicationInfo().flags&ApplicationInfo.FLAG_DEBUGGABLE);
+        String sourceCommit=arguments.getString("sourceCommit","");
+        assertTrue("Capture source commit must be a full Git SHA",sourceCommit.matches("[0-9a-f]{40}"));
+        JSONObject ads=requireTestAdMetadata(context);
         directory=new File(context.getExternalFilesDir(null),"store-screenshots");assertTrue(directory.isDirectory()||directory.mkdirs());
         File export=new File(context.getCacheDir(),"ream-exports");assertTrue(export.isDirectory()||export.mkdirs());
         File fixture=new File(export,"Ream sample document.pdf");
@@ -179,13 +206,45 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
             capture("06-recents-1080x1920.png");
             verifyReleaseCamera(context);
             PackageInfo info=context.getPackageManager().getPackageInfo(context.getPackageName(),android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES);
-            JSONObject manifest=new JSONObject().put("schemaVersion",1).put("packageName",context.getPackageName())
+            JSONObject manifest=new JSONObject().put("schemaVersion",2).put("sourceCommit",sourceCommit)
+                .put("artifactMode","signed-release-google-test-ads").put("packageName",context.getPackageName())
                 .put("versionCode",info.getLongVersionCode()).put("versionName",info.versionName).put("androidApiLevel",Build.VERSION.SDK_INT)
+                .put("adConfiguration",new JSONObject().put("provider",ads.getString("provider"))
+                    .put("appId",ads.getString("appId")).put("bannerId",ads.getString("bannerId")).put("isTesting",ads.getBoolean("isTesting")))
                 .put("device",new JSONObject().put("manufacturer",Build.MANUFACTURER).put("model",Build.MODEL).put("name",Build.DEVICE))
                 .put("serial",arguments.getString("deviceSerial")).put("signingCertificateSha256",sha(info.signingInfo.getApkContentsSigners()[0].toByteArray()))
                 .put("installedApkSha256",fileSha(new File(context.getApplicationInfo().sourceDir)))
                 .put("generatedAtUtc",Instant.now().toString()).put("screenshots",screenshots);
             try(Writer writer=new FileWriter(new File(directory,"capture-provenance.json"))){writer.write(manifest.toString(2));}
         } finally {runOnMainSync(() -> activity.finish());}
+    }
+
+    private void verifySixteenKbRelease() throws Exception {
+        Context context=getTargetContext();
+        assertEquals("com.reampdf.mobile",context.getPackageName());
+        assertEquals("16 KB smoke must use the signed, nondebuggable release",0,context.getApplicationInfo().flags&ApplicationInfo.FLAG_DEBUGGABLE);
+        assertEquals("Expected a 16384-byte OS page size",16384,(int)Os.sysconf(OsConstants._SC_PAGESIZE));
+        requireTestAdMetadata(context);
+        String sourceCommit=arguments.getString("sourceCommit","");
+        assertTrue("16 KB source commit must be a full Git SHA",sourceCommit.matches("[0-9a-f]{40}"));
+
+        directory=new File(context.getExternalFilesDir(null),"16k-smoke");assertTrue(directory.isDirectory()||directory.mkdirs());
+        File export=new File(context.getCacheDir(),"ream-exports");assertTrue(export.isDirectory()||export.mkdirs());
+        File fixture=new File(export,"Ream 16 KB smoke.pdf");
+        try(InputStream input=getContext().getAssets().open("ream-screenshot-fixture.pdf");OutputStream output=new FileOutputStream(fixture)) {
+            byte[] bytes=new byte[8192];int count;while((count=input.read(bytes))!=-1)output.write(bytes,0,count);
+        }
+        Intent launch=context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());assertNotNull(launch);
+        activity=startActivitySync(launch);
+        until("document.querySelector('.ps-home')");
+        Uri uri=Uri.parse("content://"+context.getPackageName()+".fileprovider/ream_exports/"+Uri.encode(fixture.getName()));
+        Intent open=new Intent(Intent.ACTION_VIEW).setClassName(context,context.getPackageName()+".MainActivity")
+            .setDataAndType(uri,"application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        context.startActivity(open);
+        until("location.hash==='#/viewer'&&document.querySelector('.ps-reader-page__surface img')?.naturalWidth>0");
+        assertTrue("PDF reader did not expose its page controls",Boolean.parseBoolean(js("Boolean(document.querySelector('.ps-reader-page-input'))")));
+        verifyReleaseCamera(context);
+        Thread.sleep(2000);
+        assertFalse("Main activity exited after native camera/PDF smoke",activity.isFinishing());
     }
 }

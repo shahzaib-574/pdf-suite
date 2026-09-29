@@ -10,7 +10,9 @@ const MAX_ALT_TEXT_CHARACTERS = 140
 const PROVENANCE_FILE_NAME = 'capture-provenance.json'
 const EXPECTED_PACKAGE_NAME = 'com.reampdf.mobile'
 const EXPECTED_CAPTURE_API_LEVEL = 36
+const GOOGLE_TEST_BANNER_ID = 'ca-app-pub-3940256099942544/9214589741'
 const SHA256_PATTERN = /^[0-9A-F]{64}$/
+const GIT_COMMIT_PATTERN = /^[0-9a-f]{40}$/
 const UTC_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z$/
 
 const PLANNED_SCREENSHOTS = [
@@ -336,25 +338,28 @@ function sha256Hex(bytes) {
   return createHash('sha256').update(bytes).digest('hex').toUpperCase()
 }
 
-function validateCaptureProvenance(manifest, imageEntries, releaseIdentity, readScreenshotBytes) {
+function validateCaptureProvenance(manifest, imageEntries, releaseIdentity, readScreenshotBytes, expectedAdmobAppId) {
+  const schemaVersion = manifest?.schemaVersion
+  if (schemaVersion !== 1 && schemaVersion !== 2) fail('Capture provenance schemaVersion must be 1 or 2.')
+  const fields = [
+    'schemaVersion',
+    'packageName',
+    'versionCode',
+    'versionName',
+    'androidApiLevel',
+    'device',
+    'serial',
+    'signingCertificateSha256',
+    'installedApkSha256',
+    'generatedAtUtc',
+    'screenshots',
+  ]
+  if (schemaVersion === 2) fields.push('sourceCommit', 'artifactMode', 'adConfiguration')
   requireExactObject(
     manifest,
-    [
-      'schemaVersion',
-      'packageName',
-      'versionCode',
-      'versionName',
-      'androidApiLevel',
-      'device',
-      'serial',
-      'signingCertificateSha256',
-      'installedApkSha256',
-      'generatedAtUtc',
-      'screenshots',
-    ],
+    fields,
     'Capture provenance manifest',
   )
-  if (manifest.schemaVersion !== 1) fail('Capture provenance schemaVersion must be exactly 1.')
   if (requireNonblankText(manifest.packageName, 'Capture provenance packageName') !== EXPECTED_PACKAGE_NAME) {
     fail(`Capture provenance packageName must be exactly ${EXPECTED_PACKAGE_NAME}.`)
   }
@@ -363,6 +368,26 @@ function validateCaptureProvenance(manifest, imageEntries, releaseIdentity, read
   }
   if (requireNonblankText(manifest.versionName, 'Capture provenance versionName') !== releaseIdentity.versionName) {
     fail(`Capture provenance versionName must match android/variables.gradle (${releaseIdentity.versionName}).`)
+  }
+  if (releaseIdentity.versionCode >= 7 && schemaVersion !== 2) {
+    fail('Capture provenance for versionCode 7 or later must use schemaVersion 2 test-ad/source-commit evidence.')
+  }
+  if (schemaVersion === 2) {
+    if (!GIT_COMMIT_PATTERN.test(manifest.sourceCommit)) {
+      fail('Capture provenance sourceCommit must be a full lowercase Git commit SHA.')
+    }
+    if (manifest.artifactMode !== 'signed-release-google-test-ads') {
+      fail('Capture provenance artifactMode must be signed-release-google-test-ads.')
+    }
+    const ads = requireExactObject(
+      manifest.adConfiguration,
+      ['provider', 'appId', 'bannerId', 'isTesting'],
+      'Capture provenance adConfiguration',
+    )
+    if (ads.provider !== 'google-admob' || ads.appId !== expectedAdmobAppId ||
+        ads.bannerId !== GOOGLE_TEST_BANNER_ID || ads.isTesting !== true) {
+      fail('Capture provenance adConfiguration must attest the configured app ID and Google test banner mode.')
+    }
   }
   if (!Number.isSafeInteger(manifest.androidApiLevel) || manifest.androidApiLevel !== EXPECTED_CAPTURE_API_LEVEL) {
     fail(`Capture provenance androidApiLevel must be exactly ${EXPECTED_CAPTURE_API_LEVEL}.`)
@@ -406,6 +431,7 @@ function validateCaptureProvenance(manifest, imageEntries, releaseIdentity, read
 
 function validateStoreAssets(repoRoot) {
   const storeRoot = join(repoRoot, 'store-assets')
+  const releaseIdentity = readGradleReleaseIdentity(repoRoot)
   const graphicsRoot = join(storeRoot, 'graphics')
   const listingAltPath = join(storeRoot, 'listing', 'en-US', 'alt-text.md')
   const screenshotsRoot = join(storeRoot, 'screenshots')
@@ -452,6 +478,7 @@ function validateStoreAssets(repoRoot) {
     ['short-description.txt', 80],
     ['full-description.txt', 4000],
     ['release-notes-1.0.0.txt', 500],
+    [`release-notes-${releaseIdentity.versionName}.txt`, 500],
   ]
   for (const [fileName, maxChars] of listingLimits) {
     const listingPath = join(listingRoot, fileName)
@@ -533,11 +560,12 @@ function validateStoreAssets(repoRoot) {
   const provenanceCount = validateCaptureProvenance(
     provenance,
     imageEntries,
-    readGradleReleaseIdentity(repoRoot),
+    releaseIdentity,
     (fileName) => readFileSync(join(screenshotsRoot, fileName)),
+    JSON.parse(readFileSync(join(repoRoot, 'monetization.config.json'), 'utf8')).admobAppId,
   )
   results.push(`Screenshots: ${imageEntries.length} planned 1080x1920 RGB PNGs with final alt text`)
-  results.push(`Capture provenance: schema 1 with ${provenanceCount} verified screenshot SHA-256 hashes`)
+  results.push(`Capture provenance: schema ${provenance.schemaVersion} with ${provenanceCount} verified screenshot SHA-256 hashes`)
   return { results, screenshotsPending: false }
 }
 
@@ -606,7 +634,9 @@ function runSelfTest() {
   const screenshotName = PLANNED_SCREENSHOTS[0]
   const screenshotBytes = Buffer.from('self-test screenshot bytes')
   const provenance = {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    sourceCommit: 'a'.repeat(40),
+    artifactMode: 'signed-release-google-test-ads',
     packageName: EXPECTED_PACKAGE_NAME,
     versionCode: 7,
     versionName: '7.0.0',
@@ -616,6 +646,12 @@ function runSelfTest() {
     signingCertificateSha256: 'A'.repeat(64),
     installedApkSha256: 'B'.repeat(64),
     generatedAtUtc: '2026-08-22T12:00:00.0000000Z',
+    adConfiguration: {
+      provider: 'google-admob',
+      appId: 'ca-app-pub-1111111111111111~2222222222',
+      bannerId: GOOGLE_TEST_BANNER_ID,
+      isTesting: true,
+    },
     screenshots: [
       {
         fileName: screenshotName,
@@ -628,7 +664,13 @@ function runSelfTest() {
     if (fileName !== screenshotName) fail(`Unexpected self-test screenshot request: ${fileName}`)
     return screenshotBytes
   }
-  validateCaptureProvenance(provenance, [screenshotName], { versionCode: 7, versionName: '7.0.0' }, selfTestReader)
+  validateCaptureProvenance(
+    provenance,
+    [screenshotName],
+    { versionCode: 7, versionName: '7.0.0' },
+    selfTestReader,
+    provenance.adConfiguration.appId,
+  )
 
   const badHashProvenance = structuredClone(provenance)
   badHashProvenance.screenshots[0].sha256 = '0'.repeat(64)
@@ -639,6 +681,7 @@ function runSelfTest() {
       [screenshotName],
       { versionCode: 7, versionName: '7.0.0' },
       selfTestReader,
+      provenance.adConfiguration.appId,
     )
   } catch (error) {
     rejectedHashMismatch = /hash mismatch/.test(error.message)
@@ -646,7 +689,7 @@ function runSelfTest() {
   if (!rejectedHashMismatch) fail('Self-test did not reject a screenshot provenance hash mismatch.')
 
   const badSchemaProvenance = structuredClone(provenance)
-  badSchemaProvenance.schemaVersion = 2
+  badSchemaProvenance.schemaVersion = 3
   let rejectedBadSchema = false
   try {
     validateCaptureProvenance(
@@ -654,11 +697,41 @@ function runSelfTest() {
       [screenshotName],
       { versionCode: 7, versionName: '7.0.0' },
       selfTestReader,
+      provenance.adConfiguration.appId,
     )
   } catch (error) {
-    rejectedBadSchema = /schemaVersion must be exactly 1/.test(error.message)
+    rejectedBadSchema = /schemaVersion must be 1 or 2/.test(error.message)
   }
   if (!rejectedBadSchema) fail('Self-test did not reject an unsupported provenance schema.')
+
+  function expectProvenanceFailure(mutator, pattern, label) {
+    const candidate = structuredClone(provenance)
+    mutator(candidate)
+    let rejected = false
+    try {
+      validateCaptureProvenance(
+        candidate,
+        [screenshotName],
+        { versionCode: 7, versionName: '7.0.0' },
+        selfTestReader,
+        provenance.adConfiguration.appId,
+      )
+    } catch (error) {
+      rejected = pattern.test(error.message)
+    }
+    if (!rejected) fail(`Self-test did not reject ${label}.`)
+  }
+  expectProvenanceFailure((candidate) => {
+    candidate.schemaVersion = 1
+    delete candidate.sourceCommit
+    delete candidate.artifactMode
+    delete candidate.adConfiguration
+  }, /versionCode 7 or later must use schemaVersion 2/, 'a schema 1 downgrade for version 7')
+  expectProvenanceFailure((candidate) => { candidate.sourceCommit = 'ABC' }, /full lowercase Git commit SHA/, 'an invalid source commit')
+  expectProvenanceFailure((candidate) => { candidate.adConfiguration.appId = 'ca-app-pub-9999999999999999~9999999999' }, /attest the configured app ID/, 'a mismatched AdMob app ID')
+  expectProvenanceFailure((candidate) => { candidate.adConfiguration.bannerId = 'ca-app-pub-1111111111111111/3333333333' }, /Google test banner mode/, 'a production banner ID')
+  expectProvenanceFailure((candidate) => { candidate.adConfiguration.isTesting = false }, /Google test banner mode/, 'disabled test-ad mode')
+  expectProvenanceFailure((candidate) => { candidate.artifactMode = 'production' }, /artifactMode must be/, 'an invalid artifact mode')
   console.log('Store asset verifier self-test passed.')
 }
 
