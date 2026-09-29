@@ -116,7 +116,7 @@ def validateProductionRelease = tasks.register('validateProductionRelease') {
 android {
     // Store screenshot automation must use the android-debug web bundle so it
     // can only request Google's test banner and debug UMP configuration.
-    testBuildType 'debug'
+    testBuildType captureStoreScreenshots ? 'release' : 'debug'
     sourceSets { androidTest.assets.srcDir '../../store-assets/fixtures' }
     if (captureStoreScreenshots) {
         sourceSets.androidTest.java.setIncludes(['**/StoreScreenshotInstrumentation.java'])
