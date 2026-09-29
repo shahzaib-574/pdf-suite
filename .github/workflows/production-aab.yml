@@ -225,21 +225,27 @@ jobs:
           npm run verify:elf-alignment -- "$apk"
 
           release_manifest="android/app/build/outputs/release-manifest.txt"
+          certificate_output="$(mktemp)"
+          trap 'rm -f "$certificate_output"' EXIT
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           {
             echo "commit=$GITHUB_SHA"
             node scripts/verify-android-artifact.mjs --print-artifact-identity "$apk"
             sha256sum "$aab" "$apk" "$mapping"
-            "$apksigner_path" verify --print-certs "$apk"
+            "$apksigner_path" verify --print-certs "$apk" 2>&1
           } > "$release_manifest"
           grep -Fx "commit=$GITHUB_SHA" "$release_manifest"
           node scripts/verify-android-artifact.mjs --print-artifact-identity "$apk" | while IFS= read -r line; do
             grep -Fx "$line" "$release_manifest"
           done
           grep -E '^[0-9a-f]{64}  android/app/build/outputs/' "$release_manifest" | sha256sum --check
-          certificate_digest="$("$apksigner_path" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
-          test -n "$certificate_digest"
-          grep -Fxi "Signer #1 certificate SHA-256 digest: $certificate_digest" "$release_manifest"
+          "$apksigner_path" verify --print-certs "$apk" > "$certificate_output" 2>&1
+          python store-assets/scripts/apksigner_certificate.py --self-test
+          certificate_digest="$(python store-assets/scripts/apksigner_certificate.py --extract "$certificate_output")"
+          manifest_certificate_digest="$(python store-assets/scripts/apksigner_certificate.py --extract "$release_manifest")"
+          test "$certificate_digest" = "$manifest_certificate_digest"
+          rm -f "$certificate_output"
+          trap - EXIT
 
       # Do not launch production ad units in an automated emulator. Placement
       # and UMP tests run in the debug workflow with Google's test banner.
