@@ -1,0 +1,11 @@
+commit=aaeca68531169bd28a1676fccb6cf3df81f5d867
+package=com.reampdf.mobile
+versionCode=7
+versionName=1.2.1
+16b50c07155520cfc1a2bffd058bb4ef313c5c7b2bbbd3e0f897808e1f0517a4  android/app/build/outputs/bundle/release/app-release.aab
+928d1bb268252e7d55446dbd9b359c227f7a8971901cf29d7e626fc665dfe719  android/app/build/outputs/apk/release/app-release.apk
+26076d26c2bad150239a935c7a935eeeb1186c6880b16713f570187b8f175142  android/app/build/outputs/mapping/release/mapping.txt
+V2 Signer: certificate DN: CN=Ream, OU=Android, O=Ream, C=US
+V2 Signer: certificate SHA-256 digest: 47af4be263f6bfb63065ba344d1c14096320308c75c55cc40acaee430c82063a
+V2 Signer: certificate SHA-1 digest: 84f748e5a53c47f4b3a6640d91a6276f5e19b692
+V2 Signer: certificate MD5 digest: 2f3e7028c696ecd23076d6a4bfc24177

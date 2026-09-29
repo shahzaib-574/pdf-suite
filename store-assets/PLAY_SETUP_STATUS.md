@@ -21,11 +21,16 @@ built a signed, nondebuggable Google-test-ad APK from exact source
 visually reviewed and selected with schema 2 source, signer, APK and test-ad
 provenance; the blank scan-editor frame was rejected and retained only as original
 evidence. The former 1.1.1 (4) selection is archived rather than overwritten.
-Follow-up [run 36568038787](https://github.com/shahzaib-574/pdf-suite/actions/runs/36568038787)
-passed signing, artifact, ELF/ZIP and screenshot-provenance checks, but its official
-API 35 16 KB emulator instrumentation process crashed before a success marker.
-That signed 16 KB smoke remains red pending captured crash diagnostics. No 1.2.1
-bundle has been uploaded to Play. See the
+Final exact-head capture
+[run 36583170884](https://github.com/shahzaib-574/pdf-suite/actions/runs/36583170884)
+passed signing, artifact, ELF/ZIP, screenshot provenance, corrected visual
+readiness, and the official API 35 16 KB smoke. The smoke exercised the signed
+release PDF reader and native camera, then verified a visible home screen and the
+same live process after five seconds. Signed production candidate
+[run 36581089000](https://github.com/shahzaib-574/pdf-suite/actions/runs/36581089000)
+also passed and recorded exact package/version, signer and AAB/APK/mapping hashes;
+it did not upload anything to Play. No 1.2.1 bundle has been published. See the
+[signed candidate record](RELEASE_1.2.1_CANDIDATE.md) and
 [repository and upgrade audit](../docs/repository-audit-2026-09-29.md).
 
 **1.2.0 candidate note (16 September 2026):** the repository now prepares an ad-supported candidate. Play Console has saved the Contains ads, Advertising ID, Data safety, and target-audience declarations; the selected audience is 13-15, 16-17, and 18+. Play warns that some users in these groups are children depending on country. The app therefore uses under-age-of-consent treatment for every request, a General ad-content ceiling, and no COPPA child-directed flag. The European privacy message is published in AdMob. The US-state message and final Play review remain external gates, and none of these saved declarations constitutes approval.

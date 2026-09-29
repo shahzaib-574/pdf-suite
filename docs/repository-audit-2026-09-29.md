@@ -84,56 +84,70 @@ The blank scan-editor frame was rejected rather than promoted. Original framebuf
 PNGs and the original manifest are preserved separately from the losslessly
 normalized RGB store files, and the former 1.1.1 (4) selection is archived.
 
-Follow-up run
-[36568038787](https://github.com/shahzaib-574/pdf-suite/actions/runs/36568038787)
-passed signing, artifact, ELF/ZIP and screenshot-provenance checks. Its signed APK
-then crashed inside the official API 35 16 KB emulator instrumentation before a
-success marker. That native smoke remains an explicit red gate while crash-buffer,
-logcat and process-exit diagnostics are added; it is not treated as proof of 16 KB
-compatibility. No Play or OTA publication occurred.
+Final exact-head capture
+[run 36583170884](https://github.com/shahzaib-574/pdf-suite/actions/runs/36583170884)
+passed signing, artifact, ELF/ZIP and screenshot-provenance checks, corrected API
+36 visual readiness, and the official API 35 16 KB smoke. The signed release test
+exercised PDF rendering and the native camera, then confirmed a visible home screen
+and the same live process after five seconds. Signed production candidate
+[run 36581089000](https://github.com/shahzaib-574/pdf-suite/actions/runs/36581089000)
+also passed without publishing: exact source
+`aaeca68531169bd28a1676fccb6cf3df81f5d867`, package `com.reampdf.mobile`, version
+1.2.1 (7), AAB SHA-256
+`16b50c07155520cfc1a2bffd058bb4ef313c5c7b2bbbd3e0f897808e1f0517a4`, and APK
+SHA-256 `928d1bb268252e7d55446dbd9b359c227f7a8971901cf29d7e626fc665dfe719`.
+No Play or OTA publication occurred.
 
 ## Checks run during this audit
 
-- Passed: `git diff --check`, lint (with four existing React warnings), PDF,
+- At the documentation-only audit baseline, passed: `git diff --check`, lint
+  (with four then-existing React warnings), PDF,
   PDF-to-Word, quality self-checks, the production web build, and all five product
   quality browser checks.
-- The browser UI suite passed 12 of 13 tools twice, then timed out waiting for the
+- At that baseline, the browser UI suite passed 12 of 13 tools twice, then timed out waiting for the
   old `Reader` heading on the viewer route. An isolated diagnostic confirmed the
-  viewer actually opened the four-page fixture and rendered all four pages; the
-  harness locator is stale and should be corrected in a separate code change.
-- Failed at the pre-remediation baseline: `verify:store-assets`, for the version 4
+  viewer actually opened the four-page fixture and rendered all four pages.
+- Failed at that pre-remediation baseline: `verify:store-assets`, for the version 4
   versus version 6 provenance mismatch described above. The reviewed 1.2.1 (7)
   five-image selection now passes the local store verifier and schema 2 provenance
-  checks; exact-head hosted Verify is still required after promotion is committed.
-- Not run: a fresh Android build, signing, emulator/device checks, and Play upload.
+  checks.
+- Not run during that initial documentation-only audit: a fresh Android build,
+  signing, emulator/device checks, and Play upload.
   Java and ADB were not available on this shell's PATH, and the limited free-disk
   margin made a new heavy Android build inappropriate for a documentation audit.
+- Post-remediation validation fixed the stale reader locator: the browser suite is
+  now 13/13, all eight edge/engine checks and all five product-quality checks pass,
+  lint has three known React effect warnings, and both production-only and full
+  dependency audits report zero vulnerabilities. Exact-head hosted Verify
+  [36583144638](https://github.com/shahzaib-574/pdf-suite/actions/runs/36583144638),
+  the signed production candidate, and the final signed 16 KB smoke all passed.
 
 ## Upgrade priorities
 
-1. **Finish exact-head release evidence.** The genuine 1.2.1 (7) screenshot
-   selection is prepared; run exact-head hosted Verify after promotion, retain the
-   historical version 6 provenance gap, and keep source/hash/signer manifests for
-   every future Play candidate.
+1. **Completed: exact-head release evidence.** The genuine 1.2.1 (7) screenshot
+   selection, schema 2 provenance, preserved originals, release manifest, and
+   exact-head hosted Verify are complete. Retain the historical version 6
+   provenance gap and keep source/hash/signer manifests for every future Play
+   candidate.
 2. **Keep the current Android baseline.** `compileSdkVersion` and
    `targetSdkVersion` are already 36. Google Play requires API 36 for new apps and
    updates from 31 August 2026. Capacitor 8 also documents Node 22+, Android Studio
    Otter or newer, and AGP 8.13; the repository matches these project-level values.
    Sources: [Play target API policy](https://support.google.com/googleplay/android-developer/answer/11926878?hl=en-gb),
    [Capacitor 8 migration guide](https://next.capacitorjs.com/docs/next/updating/8-0).
-3. **Verify native 16 KB compatibility, not only ZIP alignment.** Google now says
+3. **Implemented and emulator-smoked: native 16 KB compatibility.** Google now says
    Play updates targeting API 35+ must support 16 KB page sizes from 1 February
    2027, and specifically calls for checking ELF segments when native code exists.
-   Ream packages native libraries. Remediation adds fail-closed ELF program-header
-   checks alongside `zipalign -P 16` and a signed APK smoke test on the official
-   16 KB emulator image. Source: [Android 16 KB guidance](https://developer.android.com/guide/practices/page-sizes).
-4. **Take a conservative same-major dependency batch after CI is repaired.** The
-   29 September `npm outdated` snapshot identified Capacitor core/Android/CLI
-   8.5.2, Capacitor Share 8.0.2, Capawesome Live Update 8.4.4,
-   `fast-xml-parser` 5.11.2, JSZip 3.10.2, PDF.js 6.3.289, Vite 8.3.1,
-   React/React DOM 19.3.0, and their compatible tooling updates. Keep Capacitor
-   core, Android, and CLI on the same version and run the full web, Android, OTA,
-   ad-policy, artifact, and real-device gates.
+   Ream packages native libraries. Fail-closed ELF program-header checks,
+   `zipalign -P 16`, and the signed PDF-reader/native-camera smoke on the official
+   16 KB emulator image all pass. A physical 16 KB device remains a useful external
+   acceptance check, not evidence produced by this repository run. Source:
+   [Android 16 KB guidance](https://developer.android.com/guide/practices/page-sizes).
+4. **Completed: conservative same-major dependency batch.** Capacitor
+   core/Android/CLI 8.5.2 remain aligned; Capacitor Share 8.0.2, Capawesome Live
+   Update 8.4.4, PDF.js 6.3.289, Vite 8.3.1, React/React DOM 19.3.0 and their
+   compatible tooling updates passed the full web, Android, ad-policy, artifact,
+   browser and dependency gates. Major AGP and TypeScript changes remain separate.
 5. **Treat major toolchain changes as separate work.** Do not combine AGP 9.4 or
    TypeScript 7 with the same-major batch. AGP 9.4 requires Gradle 9.6 and is outside
    Capacitor 8's documented AGP 8.13 baseline. TypeScript 7 uses a new native
