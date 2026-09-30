@@ -11,6 +11,7 @@ import {
 import { AnimatedButton, AppShell } from '../components';
 import { clearRecents } from '../store/recents';
 import { useTheme } from '../theme/context';
+import { isWebsite } from '../web/platform';
 import {
   showAdPrivacyOptions,
   subscribeAdPrivacyState,
@@ -100,7 +101,7 @@ export function Settings() {
             </div>
             <a
               className="ps-setting-link"
-              href="./privacy.html"
+              href={isWebsite ? './website-privacy.html' : './privacy.html'}
               target="_blank"
               rel="noreferrer"
             >
@@ -110,6 +111,18 @@ export function Settings() {
               </span>
               <ExternalLink size={17} aria-hidden="true" />
             </a>
+            {isWebsite ? (
+              <>
+                <a className="ps-setting-link" href="./website-cookies.html" target="_blank" rel="noreferrer">
+                  <span><strong>Cookies & local storage</strong><small>What stays in this browser and how to clear it</small></span>
+                  <ExternalLink size={17} aria-hidden="true" />
+                </a>
+                <a className="ps-setting-link" href="./website-terms.html" target="_blank" rel="noreferrer">
+                  <span><strong>Terms & acceptable use</strong><small>Using the website and checking your results</small></span>
+                  <ExternalLink size={17} aria-hidden="true" />
+                </a>
+              </>
+            ) : null}
             {adPrivacyRequired ? (
               <AnimatedButton
                 variant="ghost"

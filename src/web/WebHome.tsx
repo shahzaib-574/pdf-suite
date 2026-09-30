@@ -237,7 +237,13 @@ export function WebFooter() {
             <a href="#/settings">Preferences</a>
           </li>
           <li>
-            <a href="./privacy.html">Privacy</a>
+            <a href="./website-privacy.html">Privacy</a>
+          </li>
+          <li>
+            <a href="./website-cookies.html">Cookies & local storage</a>
+          </li>
+          <li>
+            <a href="./website-terms.html">Terms & acceptable use</a>
           </li>
         </ul>
       </nav>

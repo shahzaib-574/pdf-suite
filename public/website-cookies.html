@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Cookies & local storage · Ream</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="./website-legal.css" />
+</head>
+<body>
+  <a class="legal-skip" href="#main-content">Skip to storage notice</a>
+  <header class="legal-header"><a class="legal-brand" href="./#/"><img src="./favicon.svg" alt="" width="32" height="32" />Ream</a><a href="./#/">Back to PDF tools</a></header>
+  <main id="main-content">
+    <h1>Cookies & local storage</h1>
+    <p class="legal-meta">Website only · Review draft updated 30 September 2026</p>
+    <div class="legal-draft"><p><strong>Review draft.</strong> The inventory below reflects current website code. Hosting-layer storage and the legal basis or consent exemption for each use still need review before public release. This draft is not an effective policy or a blanket “strictly necessary” classification.</p></div>
+    <p>Ream is operated by <strong>shahdotdev, an independent developer in Pakistan</strong>. Contact <a href="mailto:info@reampdfsuite.com">info@reampdfsuite.com</a> about storage or privacy. Read the <a href="./website-privacy.html">website privacy policy</a> for hosting and support information.</p>
+    <h2>What the website uses</h2>
+    <p>The current Ream website code does not set HTTP cookies, load analytics trackers, advertising scripts or tracking pixels. It does use localStorage and IndexedDB in your browser profile. These technologies are not HTTP cookies, but rules about storing or accessing information on a device can apply to them too.</p>
+    <p>Ream's current browser stores are not transmitted to a Ream backend. This does not rule out technical data being received by the website host. Hostinger is the selected hosting provider; enabled CDN/security services, server-set cookies or other host features have not yet been verified. The deployment must be checked before the final notice is published.</p>
+    <dl class="storage-list">
+      <dt>Appearance preference — localStorage: <code>pdf.theme</code></dt>
+      <dd>Stores light, dark or system appearance when you choose a theme. Read on later visits to restore that choice. Persists until changed or removed using browser site-data controls.</dd>
+      <dt>Motion preference — localStorage: <code>pdf.reducedMotion</code></dt>
+      <dd>Stores your reduced-motion preference when you change it in Preferences. The site also reads your operating system's reduced-motion setting. Stored preference persists until changed or cleared.</dd>
+      <dt>Tool availability flag — localStorage: <code>pdf.pro</code></dt>
+      <dd>A local compatibility flag initialized by the current app to keep tools unlocked. It is not a purchase record, subscription, account identifier or advertising identifier. Persists until browser site data is cleared; the current app can recreate it on the next visit.</dd>
+      <dt>Local file library — IndexedDB: <code>pdf.library.v2</code> and <code>pdf.file.&lt;id&gt;</code></dt>
+      <dd>Stores recent-file metadata (such as name, size, file type, tool and creation time) and saved file bytes for local reopening. Legacy installations may also contain <code>pdf.recents</code>, migrated to the current library. The library is limited to 200 items and 512 MB, subject to browser quota. Copies remain until you delete or clear them or the browser removes site data; they are not a guaranteed backup.</dd>
+      <dt>Resumable scan draft — IndexedDB: <code>ream-scan-draft-v1</code> and <code>ream-scan-draft-files-v1</code></dt>
+      <dd>If scanner functionality is used, these records can retain an unfinished draft, edits and image bytes for resuming on this device. The website's public tool catalog does not list Scan, but its shared scanner route can be opened. Clearing the recent-file library alone does not clear a scan draft. Use Discard in the scanner and confirm Discard, or clear all site data in your browser. Reset only resets page edits; it does not delete the whole draft.</dd>
+      <dt>Downloaded assets and temporary data</dt>
+      <dd>Your browser can cache website files, fonts, PDF-rendering resources and OCR language assets under its normal caching rules. OCR may also cache language data locally in IndexedDB. Processing files also uses temporary browser memory while a tool or reader is open. Cache lifetime depends on browser and hosting settings, not a fixed retention promise from Ream.</dd>
+    </dl>
+    <h2>How to remove local data</h2>
+    <ol>
+      <li>To remove one library item, open <a href="./#/recents">Your files</a> and delete it.</li>
+      <li>To remove the current recent-file library, open <a href="./#/settings">Preferences</a>, find Privacy & storage, select Clear recent files, then confirm with Clear files.</li>
+      <li>To remove all data for this site, use your browser's site-data or storage settings for the Ream website address. This also removes stored preferences, cached data and any draft records. Labels differ between browsers.</li>
+    </ol>
+    <p>Export anything you want to keep first. Deleting local data does not remove copies saved to Downloads, another folder, email, a sharing app or another device. Clearing data in one browser profile does not clear another profile.</p>
+    <h2>Blocking storage and consent</h2>
+    <p>You can restrict browser storage. Preferences, local recents and resumable drafts may then be unavailable; browser quota or private-browsing mode can also affect saving. Ream's tools should not be treated as a durable storage service.</p>
+    <p>No advertising or analytics consent banner has been added to the current website because Ream's code does not include those features. That is not a legal conclusion that all current storage is consent-exempt. The operator must assess each purpose, the user-requested functionality, automatic writes and applicable storage-access rules before public release, and add appropriate choices where required. Any future non-essential tracking must be reviewed and gated before it is activated.</p>
+    <h2>Website and Android are different</h2>
+    <p>The Android app's advertising identifiers, AdMob and privacy-choice forms are outside this website notice. Read the <a href="./privacy.html">Android privacy policy</a> for those features. We will update the final website inventory if its storage or services change.</p>
+  </main>
+  <footer class="legal-footer"><nav aria-label="Related policies"><a href="./website-privacy.html">Website privacy</a><a href="./website-cookies.html" aria-current="page">Cookies & local storage</a><a href="./website-terms.html">Terms & acceptable use</a><a href="mailto:info@reampdfsuite.com">Contact</a></nav></footer>
+</body>
+</html>
