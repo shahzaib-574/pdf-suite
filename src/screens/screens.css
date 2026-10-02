@@ -3,7 +3,8 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  gap: 28px;
+  --home-gap: 28px;
+  gap: var(--home-gap);
   padding-bottom: calc(24px);
 }
 
@@ -2889,3 +2890,10 @@
 .scan-edit .ps-scan-editor__image { transition: none; }
 .scan-edit .ps-scan-editor__image.is-rotating { transition: transform 280ms cubic-bezier(.22, 1, .36, 1), width 280ms cubic-bezier(.22, 1, .36, 1); }
 @media (prefers-reduced-motion: reduce) { .scan-edit .ps-scan-editor__image.is-rotating { transition: none; } }
+/* A reserved measured native slot, never a clickable HTML imitation of the ad. */
+.tools-banner-slot { width:100%; height:0; overflow:hidden; pointer-events:none; }
+/* The inert zero-height width probe must not create a second parent flex gap. */
+.ps-home > .tools-banner-slot:not(.is-loaded) { margin-top:calc(-1 * var(--home-gap)); }
+.tools-banner-slot.is-loaded { height:auto; padding-block:12px; display:flex; flex-direction:column; align-items:center; gap:6px; }
+.tools-banner-label { font-size:11px; line-height:16px; color:var(--muted); }
+.tools-banner-preview { margin-block:12px; min-height:100px; display:flex; align-items:center; justify-content:center; padding:16px; border:1px dashed var(--muted); color:var(--muted); font-size:12px; text-align:center; pointer-events:none; }

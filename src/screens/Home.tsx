@@ -14,6 +14,7 @@ import { listRecents } from "../store/recents";
 import { recentFile } from "../store/toolInput";
 import { TOOL_ICONS } from "./icons";
 import { navigate } from "./nav";
+import { ToolsBannerSlot } from '../ads/ToolsBannerSlot';
 import { loadScanDraft } from '../store/scanDraft';
 
 type FilterId = "all" | "convert" | "edit" | "capture";
@@ -41,7 +42,9 @@ const FILTERS: { id: FilterId; label: string; tools?: ToolId[] }[] = [
   { id: "capture", label: "Scan & view", tools: ["scan", "view"] },
 ];
 
-export function Home() {
+export type HomeProps = { bannerEligible: boolean };
+
+export function Home({ bannerEligible }: HomeProps) {
   const [recents, setRecents] = useState<RecentItem[]>([]);
   const [query, setQuery] = useState("");
   const [draftPages, setDraftPages] = useState(0);
@@ -233,6 +236,8 @@ export function Home() {
             </>
           )}
         </section>}
+
+        <ToolsBannerSlot eligible={bannerEligible && !searching} />
 
         <section className="ps-tools-section" aria-labelledby="tools-title">
           <div className="ps-section-heading">

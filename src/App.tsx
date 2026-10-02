@@ -25,16 +25,14 @@ import { Capacitor } from "@capacitor/core";
 import { isWebsite } from './web/platform';
 import { WebFooter, WebHeader, WebHome, WebNavProvider } from './web/WebHome';
 import './web/website.css';
-import { initializeMobileAds, setDiscoveryBannerVisible } from './ads/admob';
-import { shouldShowDiscoveryBanner } from './ads/policy';
+import { initializeMobileAds, retireMobileBanners, markBannerCleanupFailed } from './ads/admob';
+import { shouldShowToolsBanner } from './ads/policy';
 
 export default function App() {
   useEffect(() => { document.getElementById('app-boot')?.remove(); }, []);
   useEffect(() => {
     void initializeMobileAds();
-    return () => {
-      void setDiscoveryBannerVisible(false);
-    };
+    return () => { void retireMobileBanners().catch(markBannerCleanupFailed); };
   }, []);
   useEffect(() => {
     const frame = requestAnimationFrame(() => { void markUpdateReady(); });
@@ -132,11 +130,6 @@ export default function App() {
     }
   }, [route]);
 
-  useEffect(() => {
-    void setDiscoveryBannerVisible(
-      shouldShowDiscoveryBanner(route, incoming.length > 0),
-    );
-  }, [route, incoming.length]);
 
   return (
     <ThemeProvider>
@@ -230,7 +223,7 @@ export default function App() {
           </section>
         ) : null}
         <div className="route-stage" key={routeKey(route)}>
-          <RouteView key={inputRevision} route={route} />
+          <RouteView key={inputRevision} route={route} bannerEligible={shouldShowToolsBanner(route, incoming.length > 0, false)} />
         </div>
         {isWebsite || (route.name === "tool" && route.id === "scan") || route.name === "viewer" ? null : (
           <BottomNav activeTab={activeNavTab(route)} />
@@ -242,10 +235,10 @@ export default function App() {
   );
 }
 
-function RouteView({ route }: { route: Route }) {
+function RouteView({ route, bannerEligible }: { route: Route; bannerEligible: boolean }) {
   switch (route.name) {
     case "home":
-      return isWebsite ? <WebHome /> : <Home />;
+      return isWebsite ? <WebHome /> : <Home bannerEligible={bannerEligible} />;
     case "recents":
       return <Recents />;
     case "tool":

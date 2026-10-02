@@ -3,15 +3,12 @@ import type { Route } from '../lib/types';
 export const GOOGLE_ANDROID_TEST_BANNER_ID =
   'ca-app-pub-3940256099942544/9214589741';
 
-export function isDiscoveryRoute(route: Route): boolean {
-  return route.name === 'home' || route.name === 'recents';
-}
-
-export function shouldShowDiscoveryBanner(
+export function shouldShowToolsBanner(
   route: Route,
   hasIncomingFileChoice: boolean,
+  searching: boolean,
 ): boolean {
-  return isDiscoveryRoute(route) && !hasIncomingFileChoice;
+  return route.name === 'home' && !hasIncomingFileChoice && !searching;
 }
 
 export function parseDebugTestDeviceIds(value: string | undefined): string[] {

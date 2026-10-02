@@ -115,6 +115,7 @@ def validateProductionRelease = tasks.register('validateProductionRelease') {
 }
 
 android {
+    buildFeatures { buildConfig true }
     // Store screenshot automation must use the android-debug web bundle so it
     // can only request Google's test banner and debug UMP configuration.
     testBuildType captureStoreScreenshots ? 'release' : 'debug'
@@ -125,6 +126,8 @@ android {
     namespace = "com.reampdf.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
+        // Local test-ad proof only. Enabling production requires separate physical acceptance.
+        buildConfigField 'boolean', 'TOOLS_INLINE_BANNER_PRODUCTION_VERIFIED', 'false'
         applicationId "com.reampdf.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
@@ -172,6 +175,9 @@ configurations.matching { it.name.endsWith('CompileClasspath') }.configureEach {
 }
 
 dependencies {
+    // App-owned host uses the same pinned SDK already supplied by the community plugin.
+    implementation "com.google.android.gms:play-services-ads:$playServicesAdsVersion"
+    implementation "com.google.android.ump:user-messaging-platform:$userMessagingPlatformVersion"
     compileOnly 'com.google.guava:listenablefuture:1.0'
     implementation 'androidx.camera:camera-camera2:1.5.3'
     implementation 'androidx.camera:camera-lifecycle:1.5.3'

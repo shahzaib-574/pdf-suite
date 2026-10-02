@@ -14,6 +14,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(FileExporterPlugin.class);
         registerPlugin(FileImporterPlugin.class);
         registerPlugin(DocumentCameraPlugin.class);
+        registerPlugin(ToolsBannerPlugin.class);
         SplashScreen.installSplashScreen(this);
         super.onCreate(savedInstanceState);
         WindowCompat.enableEdgeToEdge(getWindow());
