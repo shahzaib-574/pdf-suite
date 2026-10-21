@@ -2,6 +2,8 @@
 
 The actual `#/tool/organize` page accepts one PDF **or** a batch of supported images. Previews use three columns and one bounded scrolling area. Selection starts empty; tap pages in output order, deselect to renumber, or select all in original order. Organize exports only the numbered selection. Individual rotation, repeated Rotate all 90°, and Reverse selected order affect both previews and output.
 
+> **Superseded 2026-10-21 (product decision):** every page now starts kept in original order. Hold and drag (touch long-press, mouse drag, or arrow keys) to reorder; the grid auto-scrolls near its edges. Tap a page to leave it out (dimmed, "Out") or bring it back. **Tap order** mode keeps the original pick-in-sequence flow: tapped pages move to the front in tap order and untapped pages are left out. **Reset to original** restores all pages in order; **Reverse order** reverses only kept pages within their slots. `tests/browser/organize-selection-selfcheck.mjs` was updated to this model and adds a real mouse-drag assertion.
+
 ## Bounded implementation
 
 - Image input uses the existing normalization contract (including filename fallback for missing/generic MIME), up to 200 files / 128 MB. Images are prepared sequentially and converted into one temporary PDF, without library mutation. This is generic image-tool normalization, **not** scan-gallery original-byte preservation; existing resizing/format conversion may apply.

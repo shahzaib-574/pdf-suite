@@ -1,8 +1,9 @@
 import { useId, useRef, useState, type ChangeEvent } from "react";
-import { Camera, Upload, X, ArrowUp, ArrowDown } from "lucide-react";
+import { Camera, Upload, Plus } from "lucide-react";
 import "../motion/gsapSetup";
 import { usePress } from "../motion/press";
-import { AnimatedButton } from "./AnimatedButton";
+import { FileOrderGrid } from "./FileOrderGrid";
+import type { PickedFile } from "../lib/types";
 import {
   androidGalleryPickerAvailable,
   fileArrayToFileList,
@@ -12,6 +13,10 @@ import {
 export type FileWellItem = {
   name: string;
   size: number;
+  /** Stable identity, required for the reorderable preview grid. */
+  id?: string;
+  /** Source bytes for first-page or image previews. */
+  source?: PickedFile;
 };
 
 export type FileWellProps = {
@@ -22,6 +27,8 @@ export type FileWellProps = {
   onPick: (fileList: FileList) => void;
   onRemove?: (index: number) => void;
   onMove?: (index: number, direction: -1 | 1) => void;
+  /** Enables the preview grid: receives old indices in their new order. */
+  onReorder?: (order: number[]) => void;
   label: string;
   hint: string;
   capture?: boolean | "user" | "environment";
@@ -52,6 +59,7 @@ export function FileWell({
   onPick,
   onRemove,
   onMove,
+  onReorder,
   label,
   hint,
   capture,
@@ -96,8 +104,38 @@ export function FileWell({
     void chooseImages();
   }
 
+  const compact = files.length > 0;
+  // A lone file that cannot be reordered gets the wide card, and + replaces it.
+  const single = !multiple || (!onReorder && files.length === 1);
+  const hitProps = {
+    htmlFor: useNativeGallery ? undefined : id,
+    role: useNativeGallery ? "button" : undefined,
+    tabIndex: useNativeGallery && !disabled ? 0 : undefined,
+    onClick: onNativeHit,
+    onKeyDown: (event: { key: string; preventDefault(): void }) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      onNativeHit(event);
+    },
+  };
+
   return (
-    <div className="well">
+    <div
+      className="well"
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.files.length) return;
+        event.preventDefault();
+        if (disabled) return;
+        if (!multiple && event.dataTransfer.files.length > 1) {
+          setPickerError("Choose one file for this tool.");
+          return;
+        }
+        setPickerError(null);
+        onPick(event.dataTransfer.files);
+      }}
+    >
       <input
         ref={inputRef}
         id={id}
@@ -110,82 +148,44 @@ export function FileWell({
         tabIndex={useNativeGallery ? -1 : undefined}
         onChange={handleChange}
       />
-      <label
-        ref={ref}
-        onDragOver={(event) => { event.preventDefault(); }}
-        onDrop={(event) => {
-          event.preventDefault();
-          if (disabled || !event.dataTransfer.files.length) return;
-          if (!multiple && event.dataTransfer.files.length > 1) {
-            setPickerError('Choose one file for this tool.');
-            return;
-          }
-          setPickerError(null);
-          onPick(event.dataTransfer.files);
-        }}
-        className="well__hit"
-        htmlFor={useNativeGallery ? undefined : id}
-        role={useNativeGallery ? "button" : undefined}
-        tabIndex={useNativeGallery && !disabled ? 0 : undefined}
-        onClick={onNativeHit}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" && event.key !== " ") return;
-          onNativeHit(event);
-        }}
-        {...bind}
-      >
-        <span className="well__glyph" aria-hidden="true">
-          <Glyph size={22} strokeWidth={2} />
-        </span>
-        <span className="well__label">{label}</span>
-        <span className="well__hint">{hint}</span>
-      </label>
+      {compact ? null : (
+        <label ref={ref} className="well__hit" {...hitProps} {...bind}>
+          <span className="well__glyph" aria-hidden="true">
+            <Glyph size={22} strokeWidth={2} />
+          </span>
+          <span className="well__label">{label}</span>
+          <span className="well__hint">{hint}</span>
+        </label>
+      )}
       {pickerError ? (
         <p className="well__hint" role="alert">
           {pickerError}
         </p>
       ) : null}
-      {files.length > 0 ? (
-        <ul className="well__list">
-          {files.map((file, index) => (
-            <li key={`${file.name}-${index}`} className="well__item">
-              <div className="well__meta">
-                <p className="well__file">{file.name}</p>
-                <p className="well__size tabular">{formatBytes(file.size)}</p>
-              </div>
-              {onMove && files.length > 1 ? (
-                <>
-                  <AnimatedButton
-                    variant="ghost"
-                    className="btn--icon"
-                    icon={ArrowUp}
-                    disabled={disabled || index === 0}
-                    aria-label={`Move ${file.name} earlier`}
-                    onClick={() => onMove(index, -1)}
-                  />
-                  <AnimatedButton
-                    variant="ghost"
-                    className="btn--icon"
-                    icon={ArrowDown}
-                    disabled={disabled || index === files.length - 1}
-                    aria-label={`Move ${file.name} later`}
-                    onClick={() => onMove(index, 1)}
-                  />
-                </>
-              ) : null}
-              {onRemove ? (
-                <AnimatedButton
-                  variant="ghost"
-                  className="btn--icon well__remove"
-                  icon={X}
-                  disabled={disabled}
-                  aria-label={`Remove ${file.name}`}
-                  onClick={() => onRemove(index)}
-                />
-              ) : null}
-            </li>
-          ))}
-        </ul>
+      {compact ? (
+        <FileOrderGrid
+          items={files.map((file, index) => ({
+            ...file,
+            id: file.id ?? `${file.name}-${index}`,
+          }))}
+          disabled={disabled}
+          hint={hint}
+          single={single}
+          formatBytes={formatBytes}
+          onReorder={onReorder}
+          onMove={onMove}
+          onRemove={onRemove}
+          addControl={
+            <label
+              className={`well__add${disabled ? " is-disabled" : ""}`}
+              aria-label={single ? "Choose a different file" : label}
+              title={single ? "Choose a different file" : label}
+              {...hitProps}
+            >
+              <Plus size={22} strokeWidth={2.2} aria-hidden="true" />
+            </label>
+          }
+        />
       ) : null}
     </div>
   );

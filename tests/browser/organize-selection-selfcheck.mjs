@@ -19,6 +19,14 @@ try {
     mimeType: "application/pdf",
     buffer: bytes,
   };
+  const tapOnly = async (pages) => {
+    await page.getByRole("button", { name: "Tap order", exact: true }).click();
+    for (const n of pages)
+      await page
+        .getByRole("button", { name: `Pick page ${n}`, exact: true })
+        .click();
+    await page.getByRole("button", { name: "Done", exact: true }).click();
+  };
   const output = () =>
     page.evaluate(async () => {
       const { lastJob } = await import("/src/store/lastJob.ts");
@@ -27,7 +35,7 @@ try {
   await page.goto(url);
   await choose(payload);
   await page
-    .getByRole("button", { name: "Select page 40", exact: true })
+    .getByRole("button", { name: "Leave out page 40", exact: true })
     .waitFor({ state: "attached" });
   assert.equal(
     await page
@@ -44,22 +52,44 @@ try {
         (e) => e.scrollHeight > e.clientHeight && e.clientHeight <= 520,
       ),
   );
+  assert.equal(await page.locator(".ps-organize-number").count(), 40);
   assert(
     await page
       .getByRole("button", { name: "Organize", exact: true })
-      .isDisabled(),
+      .isEnabled(),
   );
+  // Dragging page 1 onto page 3's slot moves it to position 3.
+  const box = async (n) =>
+    page.locator(`[data-page="${n}"] .ps-organize-preview`).boundingBox();
+  const from = await box(0),
+    to = await box(2);
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, {
+    steps: 8,
+  });
+  await page.mouse.up();
+  assert.equal(
+    await page.locator('[data-page="0"] .ps-organize-number').textContent(),
+    "3",
+  );
+  assert.equal(
+    await page.locator('[data-page="1"] .ps-organize-number').textContent(),
+    "1",
+  );
+  await page.getByRole("button", { name: "Reset to original" }).click();
   await page
     .locator(".ps-organize-grid")
     .evaluate((e) => (e.scrollTop = e.scrollHeight));
   await page.waitForFunction(
     () => document.querySelector('img[alt="Page 40"]')?.naturalWidth > 0,
   );
+  await page.getByRole("button", { name: "Tap order", exact: true }).click();
   await page
-    .getByRole("button", { name: "Select page 40", exact: true })
+    .getByRole("button", { name: "Pick page 40", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Select page 2", exact: true })
+    .getByRole("button", { name: "Pick page 2", exact: true })
     .click();
   assert.equal(
     await page.locator('[data-page="39"] .ps-organize-number').textContent(),
@@ -69,24 +99,31 @@ try {
     await page.locator('[data-page="1"] .ps-organize-number').textContent(),
     "2",
   );
-  await page.getByRole("button", { name: "Clear selection" }).click();
+  for (const n of [40, 2])
+    await page
+      .getByRole("button", { name: `Unpick page ${n}`, exact: true })
+      .click();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByRole("button", { name: "Tap order", exact: true }).click();
   await page
-    .getByRole("button", { name: "Select page 3", exact: true })
+    .getByRole("button", { name: "Pick page 3", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Select page 1", exact: true })
+    .getByRole("button", { name: "Pick page 1", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Deselect page 3", exact: true })
+    .getByRole("button", { name: "Unpick page 3", exact: true })
     .click();
   assert.deepEqual(
     await page.locator(".ps-organize-number").allTextContents(),
     ["1"],
   );
   await page
-    .getByRole("button", { name: "Select page 3", exact: true })
+    .getByRole("button", { name: "Pick page 3", exact: true })
     .click();
-  await page.getByRole("button", { name: "Reverse selected order" }).click();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  assert.equal(await page.locator(".ps-organize-number").count(), 2);
+  await page.getByRole("button", { name: "Reverse order" }).click();
   await page.getByRole("button", { name: "Rotate page 3 clockwise" }).click();
   await page.getByRole("button", { name: "Rotate all 90°" }).click();
   await page.getByRole("button", { name: "Rotate all 90°" }).click();
@@ -150,11 +187,9 @@ try {
     { name: "blue.png", mimeType: "application/octet-stream", buffer: blue },
   ]);
   await page
-    .getByRole("button", { name: "Select page 2", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: "Select page 1", exact: true })
-    .click();
+    .getByRole("button", { name: "Leave out page 2", exact: true })
+    .waitFor();
+  await page.getByRole("button", { name: "Reverse order" }).click();
   const previous = await page.locator(".ps-organize-number").allTextContents();
   await choose([payload, { name: "red.png", mimeType: "", buffer: red }]);
   await page.getByRole("alert").filter({ hasText: "not mixed" }).waitFor();
@@ -198,8 +233,9 @@ try {
   await page.goto(url);
   await choose(payload);
   await page
-    .getByRole("button", { name: "Select page 3", exact: true })
-    .click();
+    .getByRole("button", { name: "Leave out page 3", exact: true })
+    .waitFor();
+  await tapOnly([3]);
   const encrypted = Buffer.from(
     await page.evaluate(
       async (bytes) => {
@@ -247,9 +283,10 @@ try {
   await page.getByLabel("Document password").fill("fixture-password");
   await page.getByRole("button", { name: "Unlock PDF", exact: true }).click();
   await page
-    .getByRole("button", { name: "Select page 3", exact: true })
+    .getByRole("button", { name: "Leave out page 3", exact: true })
     .waitFor();
-  assert.equal(await page.locator(".ps-organize-number").count(), 0);
+  // A newly unlocked document starts with every page kept.
+  assert.equal(await page.locator(".ps-organize-number").count(), 40);
   // Retained-origin suspension cancels preparation/password and recovers old selection.
   await page.goto(
     "http://127.0.0.1:5173/tests/browser/fixtures/native-camera-presentation.html",
@@ -265,8 +302,9 @@ try {
   await call("mount", "#/tool/organize");
   await choose(payload);
   await page
-    .getByRole("button", { name: "Select page 3", exact: true })
-    .click();
+    .getByRole("button", { name: "Leave out page 3", exact: true })
+    .waitFor();
+  await tapOnly([3]);
   await choose({
     name: "encrypted.pdf",
     mimeType: "application/pdf",
@@ -292,7 +330,7 @@ try {
   );
   await call("unmount");
   console.log(
-    "ORGANIZE_SELECTION_OK actualPDFtext3→1 selected-only source+individual+repeatbulkrotation, imageblue→red,40row3colscroll,passwordwrong/cancel,invalidpreserves,retainedorigincleanup",
+    "ORGANIZE_SELECTION_OK drag,taporder,actualPDFtext3→1 selected-only source+individual+repeatbulkrotation, imageblue→red,40row3colscroll,passwordwrong/cancel,invalidpreserves,retainedorigincleanup",
   );
 } finally {
   await browser.close();

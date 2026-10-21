@@ -1,15 +1,27 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { RotateCw } from "lucide-react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
+import { ListOrdered, RotateCw } from "lucide-react";
+import { useDragReorder } from "../components/useDragReorder";
 import type { PickedFile } from "../lib/types";
 import { engine } from "../pdf";
 import { readableOrganizePdf } from "../store/organizeInput";
 type Props = {
   file: PickedFile;
+  /** Every page, in display order. */
+  arrangement: number[];
+  /** Kept pages in output order. */
   order: number[];
   rotations: Record<number, number>;
   disabled: boolean;
   active: boolean;
   onSelect: (page: number) => void;
+  onMove: (from: number, to: number) => void;
+  onTapOrder: (pages: number[]) => void;
   onRotate: (page: number) => void;
   onReady: (file: PickedFile, count: number) => void;
   onError: (message: string) => void;
@@ -34,9 +46,13 @@ export function OrganizeGrid(props: Props) {
   const cancelUnlock = useRef<() => void>(() => {});
   const stopOwner = useRef<() => void>(() => {});
   const cache = useRef(new Map<number, string>());
+  const cardRefs = useRef(new Map<string, HTMLElement>());
+  const focusAfterMove = useRef<number | null>(null);
+  const [tapSeq, setTapSeq] = useState<number[] | null>(null);
   useLayoutEffect(() => {
     const urls = new Map<number, string>();
     cache.current = urls;
+    setTapSeq(null);
     setCount(0);
     setThumbs({});
     setLoading(true);
@@ -205,6 +221,59 @@ export function OrganizeGrid(props: Props) {
       .forEach((node) => observer.observe(node));
     return () => observer.disconnect();
   }, [count, props.active]);
+  const arrangement =
+    props.arrangement.length === count
+      ? props.arrangement
+      : Array.from({ length: count }, (_, page) => page);
+  const tapping = tapSeq !== null;
+  const canDrag = count > 1 && !props.disabled && !tapping;
+  const reorder = useDragReorder({
+    keys: arrangement.map(String),
+    enabled: canDrag,
+    nodes: cardRefs,
+    container: scroll,
+    scroller: scroll,
+    ignore: ".ps-organize-rotate",
+    onMove: (from, to) => props.onMove(from, to),
+  });
+  useLayoutEffect(() => {
+    const page = focusAfterMove.current;
+    if (page === null) return;
+    focusAfterMove.current = null;
+    cardRefs.current
+      .get(String(page))
+      ?.querySelector<HTMLElement>(".ps-organize-select")
+      ?.focus();
+  });
+  function pick(page: number): void {
+    if (!tapSeq) return;
+    const next = tapSeq.includes(page)
+      ? tapSeq.filter((value) => value !== page)
+      : [...tapSeq, page];
+    if (next.length === count) {
+      props.onTapOrder(next);
+      setTapSeq(null);
+      return;
+    }
+    setTapSeq(next);
+  }
+  function onKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ): void {
+    if (!canDrag) return;
+    const direction =
+      event.key === "ArrowLeft" || event.key === "ArrowUp"
+        ? -1
+        : event.key === "ArrowRight" || event.key === "ArrowDown"
+          ? 1
+          : 0;
+    const to = index + direction;
+    if (!direction || to < 0 || to >= arrangement.length) return;
+    event.preventDefault();
+    focusAfterMove.current = arrangement[index]!;
+    props.onMove(index, to);
+  }
   return (
     <>
       {prompt ? (
@@ -252,32 +321,97 @@ export function OrganizeGrid(props: Props) {
       ) : null}
       {loading && !prompt ? <p role="status">Loading page previews…</p> : null}
       {count ? (
-        <p className="ps-muted">
-          {count} pages · {props.order.length} selected. Tap in the order you
-          want.
-        </p>
+        <div className="order__bar">
+          <div className="order__meta">
+            <p className="order__count">
+              {count} pages ·{" "}
+              {tapping ? `${tapSeq.length} picked` : `${props.order.length} kept`}
+            </p>
+            <p className="order__status">
+              {tapping
+                ? "Tap pages in the order you want"
+                : canDrag
+                  ? "Hold and drag to reorder · Tap to leave a page out"
+                  : "Tap to leave a page out"}
+            </p>
+          </div>
+          {count > 1 ? (
+            tapping ? (
+              <button
+                type="button"
+                className="order__chip is-active"
+                disabled={props.disabled}
+                onClick={() => {
+                  if (tapSeq.length) props.onTapOrder(tapSeq);
+                  setTapSeq(null);
+                }}
+              >
+                {tapSeq.length ? "Done" : "Cancel"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="order__chip"
+                disabled={props.disabled}
+                onClick={() => setTapSeq([])}
+              >
+                <ListOrdered size={16} strokeWidth={2.1} aria-hidden="true" />
+                Tap order
+              </button>
+            )
+          ) : null}
+        </div>
       ) : null}
       <div
         ref={scroll}
-        className="ps-organize-grid"
+        className={`ps-organize-grid${reorder.dragging ? " is-dragging" : ""}${
+          reorder.settling ? " is-settling" : ""
+        }`}
         role="region"
         aria-label="Page previews"
         tabIndex={0}
       >
-        {Array.from({ length: count }, (_, page) => {
-          const position = props.order.indexOf(page);
+        {arrangement.map((page, index) => {
+          const kept = !tapping && props.order.includes(page);
+          const position = tapping
+            ? tapSeq.indexOf(page)
+            : props.order.indexOf(page);
+          const action = tapping
+            ? `${position >= 0 ? "Unpick" : "Pick"} page ${page + 1}`
+            : `${kept ? "Leave out" : "Keep"} page ${page + 1}`;
+          const state = tapping
+            ? position >= 0
+              ? " is-selected"
+              : ""
+            : kept
+              ? ""
+              : " is-removed";
           return (
             <article
-              className={`ps-organize-card${position >= 0 ? " is-selected" : ""}`}
+              className={`ps-organize-card${state}${
+                reorder.dragIndex === index ? " is-lifted" : ""
+              }`}
               key={page}
               data-page={page}
+              ref={(node) => {
+                if (node) cardRefs.current.set(String(page), node);
+                else cardRefs.current.delete(String(page));
+              }}
+              style={reorder.style(index)}
+              {...reorder.bind(index)}
             >
               <button
                 className="ps-organize-select"
                 disabled={props.disabled}
-                aria-label={`${position >= 0 ? "Deselect" : "Select"} page ${page + 1}`}
-                aria-pressed={position >= 0}
-                onClick={() => props.onSelect(page)}
+                aria-label={action}
+                aria-pressed={tapping ? position >= 0 : kept}
+                aria-describedby={canDrag ? "organize-help" : undefined}
+                onClick={() => {
+                  if (reorder.clickSuppressed()) return;
+                  if (tapping) pick(page);
+                  else props.onSelect(page);
+                }}
+                onKeyDown={(event) => onKeyDown(event, index)}
               >
                 <span className="ps-organize-card__header">
                   <span>Page {page + 1}</span>
@@ -285,6 +419,8 @@ export function OrganizeGrid(props: Props) {
                     <strong className="ps-organize-number">
                       {position + 1}
                     </strong>
+                  ) : !tapping ? (
+                    <span className="ps-organize-out">Out</span>
                   ) : null}
                 </span>
                 <span className="ps-organize-preview">
@@ -292,6 +428,7 @@ export function OrganizeGrid(props: Props) {
                     <img
                       src={thumbs[page]}
                       alt={`Page ${page + 1}`}
+                      draggable={false}
                       style={{
                         transform: `rotate(${props.rotations[page] ?? 0}deg)`,
                       }}
@@ -302,17 +439,25 @@ export function OrganizeGrid(props: Props) {
                 </span>
               </button>
               <button
-                className="btn btn--ghost ps-organize-rotate"
+                type="button"
+                className="ps-organize-rotate"
                 disabled={props.disabled}
                 aria-label={`Rotate page ${page + 1} clockwise`}
+                title="Rotate"
                 onClick={() => props.onRotate(page)}
               >
-                <RotateCw size={15} aria-hidden="true" /> Rotate
+                <RotateCw size={16} strokeWidth={2.3} aria-hidden="true" />
               </button>
             </article>
           );
         })}
       </div>
+      {canDrag ? (
+        <p id="organize-help" className="sr-only">
+          Use arrow keys to move this page.
+        </p>
+      ) : null}
     </>
   );
 }
+

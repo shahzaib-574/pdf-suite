@@ -1,6 +1,6 @@
 import { PAPER_SIZES } from "../lib/paperSizes";
 import { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { ArrowDownUp, Eye, EyeOff, RotateCw, Undo2 } from "lucide-react";
 import { createPortal } from 'react-dom';
 import {
   AnimatedButton,
@@ -9,6 +9,7 @@ import {
   ProgressHud,
   SelectField,
 } from "../components";
+import { movedOrder } from "../components/useDragReorder";
 import { ScanCamera, type NativeScanAdapter } from "./ScanCamera";
 import { OCR_LANGUAGES, type OcrLanguage } from '../lib/ocrLanguages';
 import { loadScanDraft, saveScanDraft, clearScanDraft, type ScanPageDraft } from '../store/scanDraft';
@@ -139,6 +140,18 @@ function takeInitialScan(id: ToolId): {
   };
 }
 
+const pickedFileIds = new WeakMap<PickedFile, string>();
+let nextPickedFileId = 0;
+/** Stable per-object key so reordered files keep their preview and focus. */
+function pickedFileId(file: PickedFile): string {
+  let id = pickedFileIds.get(file);
+  if (!id) {
+    id = `picked-${++nextPickedFileId}`;
+    pickedFileIds.set(file, id);
+  }
+  return id;
+}
+
 export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, onNativePresentation, onEmptyScanClose, presentationActive = true }: ToolFlowProps) {
   const tool = TOOL_BY_ID[id];
   const pro = usePro();
@@ -228,7 +241,13 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
   const [organizeReady,setOrganizeReady]=useState<{source:PickedFile;file:PickedFile}|null>(null);
   const [organizeInputBusy,setOrganizeInputBusy]=useState(false);
   const organizeRequest=useRef<AbortController|null>(null);
-  const [pageOrder, setPageOrder] = useState<number[]>([]);
+  // Organize: every page in display order, plus the pages left out of the output.
+  const [pageArrangement, setPageArrangement] = useState<number[]>([]);
+  const [pageExcluded, setPageExcluded] = useState<number[]>([]);
+  const pageOrder = useMemo(() => {
+    const excluded = new Set(pageExcluded);
+    return pageArrangement.filter((page) => !excluded.has(page));
+  }, [pageArrangement, pageExcluded]);
   const [pageRotations, setPageRotations] = useState<Record<number, number>>(
     {},
   );
@@ -295,6 +314,11 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
     cancelPendingJobs();
     setJobLabel("Cancelling…");
   }
+  function reorderFiles(order: number[]) {
+    setPicked((files) =>
+      order.length === files.length ? order.map((from) => files[from]!) : files,
+    );
+  }
   function moveFile(index: number, direction: -1 | 1) {
     setPicked((files) => {
       const next = [...files];
@@ -310,9 +334,15 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
   const scanMaxPages = Number.isFinite(maxFiles) ? Math.max(1, maxFiles) : 20;
   const multiple = tool.id === "organize" || tool.accept === "pdfs" || tool.accept === "images";
   const copy = wellCopy(tool.id, tool.minFiles);
+  const reorderable = tool.accept === "pdfs" || tool.accept === "images";
   const wellItems = useMemo(
     () =>
-      picked.map((file) => ({ name: file.name, size: file.bytes.byteLength })),
+      picked.map((file) => ({
+        name: file.name,
+        size: file.bytes.byteLength,
+        id: pickedFileId(file),
+        source: file,
+      })),
     [picked],
   );
 
@@ -327,7 +357,8 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
         setPageCount(count);
         setStartPage(1);
         setEndPage(Math.max(1, count));
-        setPageOrder(Array.from({ length: count }, (_, index) => index));
+        setPageArrangement(Array.from({ length: count }, (_, index) => index));
+        setPageExcluded([]);
         setPageRotations({});
 
         setReverse(false);
@@ -413,7 +444,8 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
     setSelection("");
     setStartPage(1);
     setEndPage(1);
-    setPageOrder([]);
+    setPageArrangement([]);
+    setPageExcluded([]);
     setPageRotations({});
 
     setReverse(false);
@@ -516,7 +548,36 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
 
   function reversePages(): void {
     setReverse((value) => !value);
-    setPageOrder((current) => [...current].reverse());
+    // Kept pages swap places among their own slots; left-out pages stay put.
+    setPageArrangement((current) => {
+      const excluded = new Set(pageExcluded);
+      const kept = current.filter((page) => !excluded.has(page)).reverse();
+      let next = 0;
+      return current.map((page) => (excluded.has(page) ? page : kept[next++]!));
+    });
+  }
+
+  function togglePage(page: number): void {
+    setPageExcluded((current) =>
+      current.includes(page)
+        ? current.filter((value) => value !== page)
+        : [...current, page],
+    );
+    setReverse(false);
+  }
+
+  function applyTapOrder(sequence: number[]): void {
+    const chosen = new Set(sequence);
+    const rest = pageArrangement.filter((page) => !chosen.has(page));
+    setPageArrangement([...sequence, ...rest]);
+    setPageExcluded(rest);
+    setReverse(false);
+  }
+
+  function resetPageArrangement(): void {
+    setPageArrangement(Array.from({ length: pageCount }, (_, index) => index));
+    setPageExcluded([]);
+    setReverse(false);
   }
 
   async function run(exportAction?: "save" | "share"): Promise<void> {
@@ -703,7 +764,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
       pageCount > 0 &&
       pageOrder.length === 0
     ) {
-      return "Select at least one page before organizing.";
+      return "Keep at least one page before organizing.";
     }
     return null;
   }
@@ -798,6 +859,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
             }}
             onRemove={onRemove}
             onMove={multiple ? moveFile : undefined}
+            onReorder={reorderable ? reorderFiles : undefined}
             label={tool.id === "organize" ? "Choose PDF or images" : copy.label}
             hint={tool.id === "organize" ? "One PDF OR up to 200 supported images · 128 MB total" : copy.hint}
           />
@@ -1147,16 +1209,23 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
         ) : null}
 
         {tool.id === "organize" && picked[0] ? <>
-          <OrganizeGrid active={presentationActive} file={picked[0]} order={pageOrder} rotations={pageRotations} disabled={busy || organizeInputBusy}
-            onSelect={index=>{setPageOrder(order=>order.includes(index)?order.filter(i=>i!==index):[...order,index]);setReverse(false);}}
+          <OrganizeGrid active={presentationActive} file={picked[0]} arrangement={pageArrangement} order={pageOrder} rotations={pageRotations} disabled={busy || organizeInputBusy}
+            onSelect={togglePage}
+            onMove={(from,to)=>{setPageArrangement(current=>movedOrder(current,from,to));setReverse(false);}}
+            onTapOrder={applyTapOrder}
             onRotate={rotatePage}
-            onReady={(file,count)=>{setPageCount(count);setOrganizeReady({source:picked[0]!,file});}}
+            onReady={(file,count)=>{
+              setPageCount(count);
+              setOrganizeReady({source:picked[0]!,file});
+              // A re-ready of the same document keeps the user's arrangement.
+              setPageArrangement(current=>current.length===count?current:Array.from({length:count},(_,i)=>i));
+              setPageExcluded(current=>current.every(page=>page<count)?current:[]);
+            }}
             onError={setError}/>
-          <div className="ps-row" role="group" aria-label="Page selection and rotation">
-            <AnimatedButton variant="ghost" disabled={busy||!pageCount} onClick={()=>{setPageOrder(Array.from({length:pageCount},(_,i)=>i));setReverse(false);}}>Select all in original order</AnimatedButton>
-            <AnimatedButton variant="ghost" disabled={busy||!pageOrder.length} onClick={()=>{setPageOrder([]);setReverse(false);}}>Clear selection</AnimatedButton>
-            <AnimatedButton variant="ghost" disabled={busy||!pageCount} onClick={rotateEveryPage}>Rotate all 90°</AnimatedButton>
-            <AnimatedButton variant="ghost" aria-pressed={reverse} disabled={busy||!pageOrder.length} onClick={reversePages}>Reverse selected order</AnimatedButton>
+          <div className="ps-organize-actions" role="group" aria-label="Page order and rotation">
+            <AnimatedButton variant="ghost" icon={Undo2} aria-label="Reset to original" disabled={busy||!pageCount} onClick={resetPageArrangement}>Reset</AnimatedButton>
+            <AnimatedButton variant="ghost" icon={RotateCw} aria-label="Rotate all 90°" disabled={busy||!pageCount} onClick={rotateEveryPage}>Rotate all</AnimatedButton>
+            <AnimatedButton variant="ghost" icon={ArrowDownUp} aria-label="Reverse order" aria-pressed={reverse} disabled={busy||!pageOrder.length} onClick={reversePages}>Reverse</AnimatedButton>
           </div>
         </> : null}
 
