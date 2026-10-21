@@ -513,4 +513,6 @@ if (typeof self !== "undefined") {
       }
     })();
   });
+  // Lets the main thread tell a worker that never loaded from one that crashed.
+  self.postMessage({ ready: true });
 }
