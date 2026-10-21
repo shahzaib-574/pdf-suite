@@ -3005,3 +3005,23 @@
   width: 16px;
   height: 16px;
 }
+
+/* Result: follow-up tools as one row of icon tiles. */
+.ps-next-tools {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.ps-next-tools .ps-next-tool {
+  flex-direction: column;
+  gap: 4px;
+  min-height: 64px;
+  padding: 8px 4px;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.ps-next-tools .ps-next-tool svg {
+  flex-shrink: 0;
+  color: var(--brass);
+}

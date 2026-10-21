@@ -12,6 +12,7 @@ import { lastJob, setCurrentViewer } from "../store/lastJob";
 import { saveRecent, renameRecent } from "../store/recents";
 import { queueToolFiles } from "../store/toolInput";
 import { navigate } from "./nav";
+import { TOOL_ICONS } from "./icons";
 
 const retained = new WeakMap<JobOk, Promise<string>>();
 function retain(job: JobOk): Promise<string> {
@@ -397,24 +398,29 @@ export function Result() {
         {canContinue ? (
           <section>
             <h3>Use this PDF in another tool</h3>
-            <div className="ps-row">
+            <div className="ps-next-tools">
               {(["compress", "organize", "protect", "pdf-docx"] as const).map(
-                (tool) => (
-                  <AnimatedButton
-                    key={tool}
-                    variant="ghost"
-                    onClick={() => continueWith(tool)}
-                  >
-                    {
-                      {
-                        compress: "Compress",
-                        organize: "Organize",
-                        protect: "Protect",
-                        "pdf-docx": "Convert to Word",
-                      }[tool]
-                    }
-                  </AnimatedButton>
-                ),
+                (tool) => {
+                  const Icon = TOOL_ICONS[tool];
+                  const [label, name] = {
+                    compress: ["Compress", "Compress"],
+                    organize: ["Organize", "Organize"],
+                    protect: ["Protect", "Protect"],
+                    "pdf-docx": ["Word", "Convert to Word"],
+                  }[tool];
+                  return (
+                    <AnimatedButton
+                      key={tool}
+                      variant="ghost"
+                      className="ps-next-tool"
+                      aria-label={name}
+                      onClick={() => continueWith(tool)}
+                    >
+                      <Icon size={20} strokeWidth={2} aria-hidden="true" />
+                      <span>{label}</span>
+                    </AnimatedButton>
+                  );
+                },
               )}
             </div>
           </section>
