@@ -58,7 +58,7 @@ const tools = [
   ["images", "Create PDF"],
   ["scan", "Save PDF"],
   ["compress", "Compress PDF"],
-  ["organize", "Apply page changes"],
+  ["organize", "Organize"],
   ["watermark", "Add watermark"],
   ["numbers", "Add page numbers"],
   ["protect", "Protect PDF"],
@@ -114,6 +114,9 @@ try {
         results.push({ id, status: "PASS" });
         console.log("PASS", id);
         continue;
+      }
+      if (id === "organize") {
+        await page.getByRole("button", { name: "Select all in original order", exact: true }).click();
       }
       await page.getByRole("button", { name: action, exact: true }).click();
       await page

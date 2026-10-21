@@ -79,6 +79,7 @@ export function ScanEditor({
   onDrafts,
   onFiles,
   onRetake,
+  importError,
 }: {
   files: PickedFile[];
   onDone?: () => void;
@@ -90,6 +91,7 @@ export function ScanEditor({
   onDrafts?: (edits: (ScanPageDraft | null)[]) => void;
   onFiles: (files: PickedFile[]) => void;
   onRetake: (index: number) => void;
+  importError?:string|null;
   onChange: (original: PickedFile, file: PickedFile) => void;
   onBusyChange: (busy: boolean) => void;
 }) {
@@ -495,7 +497,7 @@ export function ScanEditor({
           />
         </div>
       </div>
-      {error ? <p role="alert">{error}</p> : null}
+      {error||importError ? <p role="alert">{error||importError}</p> : null}
       {file ? (
       <div className="scan-edit__options" aria-label="Page adjustments">
         <div className="scan-edit__filters" role="radiogroup" aria-label="Scan cleanup">

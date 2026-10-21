@@ -9,12 +9,14 @@ import {
 import { createPortal } from "react-dom";
 import { Check, Images, X } from "lucide-react";
 import type { PickedFile } from "../lib/types";
-import { fileListToPicked, toArrayBuffer } from "../store/files";
+import { fileListToScanImages, toArrayBuffer } from "../store/files";
 import { pickGalleryImages } from "../store/incoming";
 import { useBackHandler, useOverlayBack } from "./back";
 import { replaceWith } from "./nav";
 import { nativeDocumentCameraAvailable } from '../store/documentCamera';
 import { NativeScanCamera } from './NativeScanCamera';
+import { NativeScanCameraView, type CameraFlowFactory } from './NativeScanCamera';
+import { appendScanPages } from '../store/scanInputPolicy';
 
 export type ScanCameraProps = {
   pages: PickedFile[];
@@ -22,7 +24,11 @@ export type ScanCameraProps = {
   onPages: (pages: PickedFile[]) => void;
   onClose: () => void;
   onUse: () => void;
+  onPresentation?: (phase: 'pending' | 'explicit') => void;
 };
+
+/** Internal adapter used by the native route presentation and isolated React fixtures. */
+export type NativeScanAdapter = { createFlow?: CameraFlowFactory };
 
 type CameraStatus = "starting" | "live" | "blocked" | "missing";
 
@@ -117,7 +123,9 @@ async function captureFrame(
   }
 }
 
-export function ScanCamera(props: ScanCameraProps) {
+export function ScanCamera({nativeScan, ...props}: ScanCameraProps & {nativeScan?: NativeScanAdapter}) {
+  if (nativeScan?.createFlow) return <NativeScanCameraView {...props} createFlow={nativeScan.createFlow} />;
+  if (nativeScan) return <NativeScanCamera {...props} />;
   return nativeDocumentCameraAvailable() ? <NativeScanCamera {...props} /> : <BrowserScanCamera {...props} />;
 }
 
@@ -286,15 +294,11 @@ function BrowserScanCamera({
     setBusy(true);
     setMessage(null);
     try {
-      const incoming = await fileListToPicked(files, true);
-      const combined = [...pagesRef.current, ...incoming];
-      const next =
-        combined.length > maxPages ? combined.slice(0, maxPages) : combined;
-      pagesRef.current = next;
+      const incoming = await fileListToScanImages(files);
+      if(!mounted.current)return;
+      const next=appendScanPages(pagesRef.current,incoming,maxPages);
       onPages(next);
-      if (combined.length > maxPages) {
-        setMessage(`This scan can take ${maxPages} pages.`);
-      }
+      pagesRef.current = next;
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Could not add that photo.",
@@ -315,9 +319,9 @@ function BrowserScanCamera({
     try {
       const page = await captureFrame(video, frameRef.current);
       if (!mounted.current) return;
-      const next = [...pagesRef.current, page].slice(0, maxPages);
-      pagesRef.current = next;
+      const next=appendScanPages(pagesRef.current,[page],maxPages);
       onPages(next);
+      pagesRef.current = next;
     } catch (error) {
       if (!mounted.current) return;
       setMessage(
