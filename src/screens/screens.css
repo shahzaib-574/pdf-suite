@@ -1388,6 +1388,28 @@
   }
 }
 
+/* Phone widths: tighten spacing so Save PDF stays on screen without the
+   toolbar scrolling sideways. */
+@media (max-width: 420px) {
+  .ps-reader-toolbar {
+    gap: 0;
+    padding-inline: 2px;
+  }
+
+  .ps-reader-toolbar__group {
+    gap: 0;
+  }
+
+  .ps-reader-zoom__value {
+    min-width: 44px;
+    padding-inline: 2px;
+  }
+
+  .ps-reader-page-input {
+    gap: 4px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ps-reader-loader {
     animation: none;
