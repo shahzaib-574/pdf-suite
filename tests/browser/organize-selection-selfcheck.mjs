@@ -282,11 +282,11 @@ try {
   await page.getByText("That password was incorrect. Try again.").waitFor();
   await page.getByLabel("Document password").fill("fixture-password");
   await page.getByRole("button", { name: "Unlock PDF", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Leave out page 3", exact: true })
-    .waitFor();
-  // A newly unlocked document starts with every page kept.
-  assert.equal(await page.locator(".ps-organize-number").count(), 40);
+  // A newly unlocked document starts with every page kept. The previous
+  // document stays on screen until the unlocked one is ready, so wait for it.
+  await page.waitForFunction(
+    () => document.querySelectorAll(".ps-organize-number").length === 40,
+  );
   // Retained-origin suspension cancels preparation/password and recovers old selection.
   await page.goto(
     "http://127.0.0.1:5173/tests/browser/fixtures/native-camera-presentation.html",

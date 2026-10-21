@@ -32,7 +32,7 @@ try {
  await openLockedInViewer();
  await page.locator('.ps-reader-dock').getByRole('button',{name:'Organize',exact:true}).click();
  await page.waitForSelector('.ps-organize-card');
- await page.getByRole('button',{name:'Apply page changes',exact:true}).click();
+ await page.locator('.ps-organize-number').first().waitFor();await page.getByRole('button',{name:'Organize',exact:true}).click();
  await page.waitForURL(/#\/result/);
  await openLockedInViewer();
  await page.locator('.ps-reader-dock').getByRole('button',{name:'Add',exact:true}).click();

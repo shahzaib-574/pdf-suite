@@ -116,7 +116,8 @@ try {
         continue;
       }
       if (id === "organize") {
-        await page.getByRole("button", { name: "Select all in original order", exact: true }).click();
+        // Every page starts kept; wait for the page cards before organizing.
+        await page.locator(".ps-organize-number").first().waitFor();
       }
       await page.getByRole("button", { name: action, exact: true }).click();
       await page
