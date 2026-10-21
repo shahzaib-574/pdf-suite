@@ -98,6 +98,7 @@ function packFile(file: PickedFile): TransferFile {
     name: file.name,
     mime: file.mime,
     bytes: copyBuffer(file.bytes),
+    password: file.password,
   };
 }
 

@@ -204,6 +204,73 @@ if (loadedWithoutPassword) {
   throw new Error('encrypted PDF loaded in pdf-lib without a password');
 }
 
+function lockedTransfer(password: string): TransferFile {
+  return { ...transfer('locked.pdf', 'application/pdf', encryptedBytes), password };
+}
+
+const lockedCount = await invoke({ id: 30, op: 'pageCount', file: lockedTransfer('ream-test') });
+if (lockedCount.pageCount !== 2) throw new Error('page count ignored the unlock password');
+
+const lockedOutputs = [
+  await invoke({ id: 31, op: 'split', file: lockedTransfer('ream-test'), range: { start: 2, end: 2 } }),
+  await invoke({
+    id: 32,
+    op: 'merge',
+    files: [lockedTransfer('ream-test'), transfer('second.pdf', 'application/pdf', second)],
+  }),
+  await invoke({
+    id: 33,
+    op: 'watermark',
+    file: lockedTransfer('ream-test'),
+    input: { text: 'LOCKED', opacity: 0.2, angle: -35 },
+  }),
+  await invoke({ id: 34, op: 'pageNumbers', file: lockedTransfer('ream-test') }),
+  await invoke({
+    id: 35,
+    op: 'protect',
+    file: lockedTransfer('ream-test'),
+    input: { userPassword: 'new-pass' },
+  }),
+];
+const [lockedSplit, lockedMerge, lockedWatermark, lockedNumbers, reprotected] = lockedOutputs;
+for (const [label, output, pages] of [
+  ['split', lockedSplit, 1],
+  ['merge', lockedMerge, 3],
+  ['watermark', lockedWatermark, 2],
+  ['numbers', lockedNumbers, 2],
+] as const) {
+  if (!output?.bytes) throw new Error(`${label} returned no bytes for an unlocked PDF`);
+  const loaded = await PDFDocument.load(new Uint8Array(output.bytes));
+  if (loaded.getPageCount() !== pages) {
+    throw new Error(`${label} of an unlocked PDF produced ${loaded.getPageCount()} pages`);
+  }
+}
+if (!reprotected?.bytes) throw new Error('protect returned no bytes for an unlocked PDF');
+const reprotectedBytes = new Uint8Array(reprotected.bytes);
+await invoke({ id: 36, op: 'pageCount', file: { ...transfer('re.pdf', 'application/pdf', reprotectedBytes), password: 'new-pass' } });
+let oldPasswordRejected = false;
+try {
+  await invoke({ id: 37, op: 'pageCount', file: { ...transfer('re.pdf', 'application/pdf', reprotectedBytes), password: 'ream-test' } });
+} catch (err) {
+  oldPasswordRejected = err instanceof Error && /wrong password|incorrect/i.test(err.message);
+}
+if (!oldPasswordRejected) throw new Error('re-protected PDF still opened with the old password');
+
+let rejectedWrongUnlockPassword = false;
+try {
+  await invoke({ id: 38, op: 'split', file: lockedTransfer('nope'), range: { start: 1, end: 1 } });
+} catch (err) {
+  rejectedWrongUnlockPassword = err instanceof Error && /wrong password|incorrect/i.test(err.message);
+}
+if (!rejectedWrongUnlockPassword) throw new Error('worker accepted a wrong unlock password');
+
+const plainWithPassword = await invoke({
+  id: 39,
+  op: 'pageCount',
+  file: { ...transfer('first.pdf', 'application/pdf', first), password: 'unused' },
+});
+if (plainWithPassword.pageCount !== 2) throw new Error('a stray password broke an unencrypted PDF');
+
 let rejectedEmptyPassword = false;
 try {
   await invoke({
@@ -334,5 +401,5 @@ if (!rejectedBadDocx) {
 }
 
 console.log(
-  'PDF_TOOLS_SELF_CHECK_OK fixture merge split images watermark numbers organize count protect docx',
+  'PDF_TOOLS_SELF_CHECK_OK fixture merge split images watermark numbers organize count protect unlock docx',
 );

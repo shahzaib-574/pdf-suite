@@ -12,6 +12,8 @@ export type TransferFile = {
   name: string;
   mime: string;
   bytes: ArrayBuffer;
+  /** Opens an encrypted PDF before pdf-lib reads it. */
+  password?: string;
 };
 
 export type WorkerOp =
