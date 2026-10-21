@@ -2262,6 +2262,15 @@
 .well__meta {
   flex: 1 1 130px;
 }
+/* Disabled reorder/remove buttons recede instead of gaining the generic
+   disabled border and fill, which made them louder than enabled ones. */
+.well__item .btn--icon.btn--ghost:disabled {
+  background: var(--surface);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  opacity: 0.4;
+}
 .ps-screen,
 .ps-body,
 .ps-field {
