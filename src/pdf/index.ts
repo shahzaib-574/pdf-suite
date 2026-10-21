@@ -82,6 +82,7 @@ type Pending = {
 };
 
 let worker: Worker | undefined;
+let workerStarted = false;
 let nextId = 1;
 const pending = new Map<number, Pending>();
 
@@ -98,6 +99,7 @@ function packFile(file: PickedFile): TransferFile {
     name: file.name,
     mime: file.mime,
     bytes: copyBuffer(file.bytes),
+    password: file.password,
   };
 }
 
@@ -107,16 +109,23 @@ function transferOf(files: TransferFile | TransferFile[]): ArrayBuffer[] {
 
 function getWorker(): Worker {
   if (!worker) {
-    worker = new Worker(new URL("./worker.ts", import.meta.url), {
+    const created = new Worker(new URL("./worker.ts", import.meta.url), {
       type: "module",
     });
-    worker.addEventListener("message", onWorkerMessage);
-    worker.addEventListener("error", onWorkerError);
+    created.addEventListener("message", onWorkerMessage);
+    created.addEventListener("error", (event) => onWorkerError(created, event));
+    created.addEventListener("messageerror", () =>
+      failWorker(created, "PDF processing returned a result that could not be read. Try again."),
+    );
+    worker = created;
+    workerStarted = false;
   }
   return worker;
 }
 
 function onWorkerMessage(event: MessageEvent<unknown>): void {
+  // Any message, including the worker's ready signal, means it loaded.
+  if (event.target === worker) workerStarted = true;
   const data = event.data;
   if (
     typeof data !== "object" ||
@@ -134,11 +143,26 @@ function onWorkerMessage(event: MessageEvent<unknown>): void {
   else job.reject(new Error(response.message));
 }
 
-function onWorkerError(): void {
-  const err = new Error("PDF worker failed to start.");
+// A crashed worker never answers its pending jobs, so stop it and fail them
+// all; the next job starts a fresh worker.
+function failWorker(target: Worker, message: string): void {
+  target.terminate();
+  if (target !== worker) return;
+  worker = undefined;
+  const err = new Error(message);
   for (const job of pending.values()) job.reject(err);
   pending.clear();
-  worker = undefined;
+}
+
+function onWorkerError(target: Worker, event: Event): void {
+  const detail =
+    typeof ErrorEvent !== "undefined" && event instanceof ErrorEvent
+      ? (event.message ?? "").trim()
+      : "";
+  const what = workerStarted
+    ? "PDF processing stopped unexpectedly"
+    : "PDF processing could not start";
+  failWorker(target, detail ? `${what} (${detail}). Try again.` : `${what}. Try again.`);
 }
 
 function callWorker(

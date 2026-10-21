@@ -23,7 +23,7 @@ import type {
   WorkerResponse,
   WorkerSuccess,
 } from "./protocol";
-import { protectPdf } from "./protectPdf";
+import { decryptedPdfBytes, protectPdf } from "./protectPdf";
 import { documentFonts, supportsText } from "./fonts";
 import { clamp, copyBuffer, humanError } from "./util";
 
@@ -46,8 +46,12 @@ function bytesOf(file: TransferFile): Uint8Array {
   return new Uint8Array(file.bytes);
 }
 
+function plainPdfBytes(file: TransferFile): Promise<Uint8Array> {
+  return decryptedPdfBytes(bytesOf(file), file.password);
+}
+
 async function loadPdf(file: TransferFile): Promise<PDFDocument> {
-  return PDFDocument.load(bytesOf(file));
+  return PDFDocument.load(await plainPdfBytes(file));
 }
 
 async function saved(
@@ -337,8 +341,9 @@ async function protect(
   if (!password.trim()) {
     throw new Error("Enter a password to protect this PDF.");
   }
-  const src = await loadPdf(file);
-  const encrypted = await protectPdf(bytesOf(file), password);
+  const plain = await plainPdfBytes(file);
+  const src = await PDFDocument.load(plain);
+  const encrypted = await protectPdf(plain, password);
   const copy = new Uint8Array(encrypted.byteLength);
   copy.set(encrypted);
   return {
@@ -508,4 +513,6 @@ if (typeof self !== "undefined") {
       }
     })();
   });
+  // Lets the main thread tell a worker that never loaded from one that crashed.
+  self.postMessage({ ready: true });
 }

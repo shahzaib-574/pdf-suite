@@ -1440,6 +1440,28 @@
   }
 }
 
+/* Phone widths: tighten spacing so Save PDF stays on screen without the
+   toolbar scrolling sideways. */
+@media (max-width: 420px) {
+  .ps-reader-toolbar {
+    gap: 0;
+    padding-inline: 2px;
+  }
+
+  .ps-reader-toolbar__group {
+    gap: 0;
+  }
+
+  .ps-reader-zoom__value {
+    min-width: 44px;
+    padding-inline: 2px;
+  }
+
+  .ps-reader-page-input {
+    gap: 4px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ps-reader-loader {
     animation: none;
@@ -2291,6 +2313,15 @@
 }
 .well__meta {
   flex: 1 1 130px;
+}
+/* Disabled reorder/remove buttons recede instead of gaining the generic
+   disabled border and fill, which made them louder than enabled ones. */
+.well__item .btn--icon.btn--ghost:disabled {
+  background: var(--surface);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  opacity: 0.4;
 }
 .ps-screen,
 .ps-body,
