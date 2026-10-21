@@ -78,11 +78,14 @@ export type JobOk = {
     images?: Blob[];
     pdfToDocx?: PdfToDocxReport;
     wordToPdf?: WordToPdfReport;
+    /** Worker count of embedded images it re-encoded. */
+    imagesRecompressed?: number;
     compression?: {
       originalBytes: number;
       outputBytes: number;
-      mode: "lossless" | "raster";
+      mode: "lossless" | "images" | "raster";
       originalRetained: boolean;
+      imagesRecompressed?: number;
     };
   };
 };

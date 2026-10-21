@@ -236,7 +236,9 @@ export function Result() {
                 ? "The attempted optimization did not produce a smaller safe file."
                 : compression.mode === "lossless"
                   ? "Text, links, and forms are retained."
-                  : "Pages are images. Selectable text, interactive links, forms, and digital signatures are not retained."}
+                  : compression.mode === "images"
+                    ? `Text, links, and forms are retained. ${compression.imagesRecompressed} ${compression.imagesRecompressed === 1 ? "image was" : "images were"} resized and recompressed.`
+                    : "Pages are images. Selectable text, interactive links, forms, and digital signatures are not retained."}
             </p>
           </section>
         ) : null}

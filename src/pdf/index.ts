@@ -81,6 +81,13 @@ type Pending = {
   reject: (err: Error) => void;
 };
 
+// Effective DPI for a full-page image, and JPEG quality. 200 DPI keeps fine
+// print (maps, forms, small type) readable when zoomed; 150 DPI is still sharp.
+const IMAGE_COMPRESSION = {
+  keep: { dpi: 200, quality: 0.8 },
+  balanced: { dpi: 150, quality: 0.7 },
+} as const;
+
 let worker: Worker | undefined;
 let workerStarted = false;
 let nextId = 1;
@@ -240,22 +247,26 @@ export const engine: PdfEngine = {
     return pdfToImages(file, options, control);
   },
   async compress(file, level, control) {
-    if (level === "keep") {
+    if (level !== "strong") {
+      // Recommended / Strong: shrink embedded images, keep text and forms.
+      const images = IMAGE_COMPRESSION[level];
       const packed = packFile(file);
       const result = await workerJob(
-        { op: "optimize", file: packed },
+        { op: "optimize", file: packed, images },
         transferOf(packed),
-        "optimized.pdf",
+        "compressed.pdf",
       );
       if (result.ok) {
+        const recompressed = result.extra?.imagesRecompressed ?? 0;
         const originalRetained = result.bytes.length >= file.bytes.length;
         if (originalRetained) result.bytes = file.bytes;
         result.extra = {
           compression: {
             originalBytes: file.bytes.length,
             outputBytes: result.bytes.length,
-            mode: "lossless",
+            mode: recompressed > 0 ? "images" : "lossless",
             originalRetained,
+            imagesRecompressed: recompressed,
           },
         };
       }

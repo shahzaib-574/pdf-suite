@@ -108,7 +108,8 @@ class ViteBinaryDataFactory {
 }
 
 const COMPRESS: Record<CompressLevel, { scale: number; quality: number }> = {
-  strong: { scale: 1.2, quality: 0.55 },
+  // Extreme: pages become ~120 DPI images.
+  strong: { scale: 120 / 72, quality: 0.6 },
   balanced: { scale: 2, quality: 0.78 },
   keep: { scale: 1, quality: 0.92 },
 };

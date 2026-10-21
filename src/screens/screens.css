@@ -3025,3 +3025,17 @@
   flex-shrink: 0;
   color: var(--brass);
 }
+
+/* One-line segmented choice (e.g. Compress level). */
+.ps-segmented {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 8px;
+}
+.ps-segmented .btn {
+  min-height: 44px;
+  padding: 0 6px;
+  font-size: 13px;
+  white-space: nowrap;
+}

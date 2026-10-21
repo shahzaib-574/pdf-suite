@@ -62,10 +62,22 @@ const TOOL_BY_ID = Object.fromEntries(TOOLS.map((t) => [t.id, t])) as Record<
   ToolDef
 >;
 
-const LEVELS: { id: CompressLevel; label: string }[] = [
-  { id: "keep", label: "Preserve text" },
-  { id: "balanced", label: "Smaller scan" },
-  { id: "strong", label: "Smallest scan" },
+const LEVELS: { id: CompressLevel; label: string; note: string }[] = [
+  {
+    id: "keep",
+    label: "Recommended",
+    note: "Resizes photos, scans and maps to 200 DPI, sharp enough to zoom into fine print. Text, links and forms stay as they are.",
+  },
+  {
+    id: "balanced",
+    label: "Strong",
+    note: "Resizes images to 150 DPI. Smaller files; very fine print gets softer when zoomed. Text, links and forms stay as they are.",
+  },
+  {
+    id: "strong",
+    label: "Extreme",
+    note: "Turns every page into a 120 DPI image. Loses zoom detail on large maps and posters, plus selectable text, links, forms and signatures.",
+  },
 ];
 
 const TOOLS_WITH_OPTIONS = new Set<ToolId>([
@@ -981,7 +993,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
 
         {tool.id === "compress" && hasFile ? (
           <>
-            <div className="ps-row" role="group" aria-label="Compression level">
+            <div className="ps-segmented" role="group" aria-label="Compression level">
               {LEVELS.map((level) => (
                 <AnimatedButton
                   key={level.id}
@@ -994,10 +1006,8 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
               ))}
             </div>
             <p className="ps-note">
-              {compressLevel === "keep"
-                ? "Optimizes PDF structure while keeping text, links and forms. Signed documents are returned unchanged. Some PDFs are already optimized."
-                : "For scanned pages: rebuilds pages as images. Selectable text, links, forms and digital signatures are lost. Balanced scans use 144 DPI; smallest scans use about 86 DPI."}{" "}
-              Ream keeps the original if it is smaller.
+              {LEVELS.find((level) => level.id === compressLevel)?.note}{" "}
+              Signed PDFs are returned unchanged. Ream keeps the original if it is smaller.
             </p>
           </>
         ) : null}

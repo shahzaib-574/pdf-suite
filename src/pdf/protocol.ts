@@ -7,6 +7,7 @@ import type {
   ImagePdfOptions,
   PageNumberOptions,
 } from "../lib/types";
+import type { ImageCompressOptions } from "./compressImages";
 
 export type TransferFile = {
   name: string;
@@ -22,7 +23,7 @@ export type WorkerOp =
   | { op: "imagesToPdf"; files: TransferFile[]; options?: ImagePdfOptions }
   | { op: "watermark"; file: TransferFile; input: WatermarkInput }
   | { op: "pageNumbers"; file: TransferFile; options?: PageNumberOptions }
-  | { op: "optimize"; file: TransferFile }
+  | { op: "optimize"; file: TransferFile; images?: ImageCompressOptions }
   | { op: "protect"; file: TransferFile; input: ProtectInput }
   | { op: "organize"; file: TransferFile; ops: OrganizeOp[] }
   | { op: "pageCount"; file: TransferFile }
@@ -38,6 +39,7 @@ export type WorkerSuccess = {
   pageCount: number;
   extra?: {
     wordToPdf?: WordToPdfReport;
+    imagesRecompressed?: number;
   };
 };
 

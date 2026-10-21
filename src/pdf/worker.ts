@@ -26,6 +26,7 @@ import type {
 import { decryptedPdfBytes, protectPdf } from "./protectPdf";
 import { documentFonts, supportsText } from "./fonts";
 import { clamp, copyBuffer, humanError } from "./util";
+import { recompressImages } from "./compressImages";
 
 const IMAGE_MARGIN = 24;
 const WATERMARK_ANGLE = -35;
@@ -465,7 +466,13 @@ export async function runWorkerOperation(
           pageCount: pdf.getPageCount(),
         };
       }
-      return saved(pdf, "optimized.pdf");
+      const images = req.images
+        ? await recompressImages(pdf, req.images)
+        : { recompressed: 0 };
+      return {
+        ...(await saved(pdf, "optimized.pdf")),
+        extra: { imagesRecompressed: images.recompressed },
+      };
     }
     case "protect":
       return protect(req.file, req.input);
