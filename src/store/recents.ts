@@ -98,18 +98,28 @@ export async function saveRecent(input: {
 }): Promise<RecentItem> {
   return serialize(async () => {
     await ready();
-    const rows = (await get<Metadata[]>(KEY)) ?? [];
-    const total = rows.reduce(
+    if (input.bytes.length > MAX_TOTAL_BYTES) {
+      throw new Error(
+        "This file exceeds the 512 MB local library limit. Save this result directly to your device.",
+      );
+    }
+    const rows = [ ...((await get<Metadata[]>(KEY)) ?? []) ].sort(
+      (a, b) => b.createdAt - a.createdAt,
+    );
+    let total = rows.reduce(
       (sum, row) => sum + (row.stored ? row.size : 0),
       0,
     );
-    if (
-      rows.length >= MAX_ITEMS ||
-      total + input.bytes.length > MAX_TOTAL_BYTES
+    const evictedKeys: IDBValidKey[] = [];
+    while (
+      rows.length > 0 &&
+      (rows.length >= MAX_ITEMS || total + input.bytes.length > MAX_TOTAL_BYTES)
     ) {
-      throw new Error(
-        "Your local library is full. Save this result to your device, then remove files from Recents to make space.",
-      );
+      const oldest = rows.pop()!;
+      if (oldest.stored) {
+        total = Math.max(0, total - oldest.size);
+        evictedKeys.push(byteKey(oldest.id));
+      }
     }
     const meta: Metadata = {
       id: crypto.randomUUID(),
@@ -124,6 +134,9 @@ export async function saveRecent(input: {
       [byteKey(meta.id), input.bytes],
       [KEY, [meta, ...rows]],
     ]);
+    if (evictedKeys.length > 0) {
+      await delMany(evictedKeys);
+    }
     if (typeof window !== "undefined")
       window.dispatchEvent(new Event("ream-library-changed"));
     return { ...meta, bytes: input.bytes };

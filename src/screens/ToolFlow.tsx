@@ -92,6 +92,17 @@ const TOOLS_WITH_OPTIONS = new Set<ToolId>([
   "numbers",
 ]);
 
+const PDF_INPUT_TOOLS = new Set<ToolId>([
+  "merge",
+  "split",
+  "pdf-images",
+  "compress",
+  "watermark",
+  "numbers",
+  "protect",
+  "pdf-docx",
+]);
+
 const ACTION_LABELS: Record<Exclude<ToolId, "view">, string> = {
   merge: "Merge PDFs",
   split: "Extract pages",
@@ -184,33 +195,65 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
   const [draftReady, setDraftReady] = useState(id !== 'scan' || initialScan.files.length > 0);
   const [scanEdits, setScanEdits] = useState<(ScanPageDraft | null)[]>([]);
   const [ocrLanguage, setOcrLanguage] = useState<OcrLanguage>('eng');
-  const [pdfAccess, setPdfAccess] = useState<{file:PickedFile;password?:string} | null>(null);
+  const [unlockedPdfs, setUnlockedPdfs] = useState<Set<PickedFile>>(() => new Set());
   const [pdfFailedFile, setPdfFailedFile] = useState<PickedFile | null>(null);
   const [passwordPrompt, setPasswordPrompt] = useState<{file:PickedFile;incorrect:boolean} | null>(null);
   const [inputPassword, setInputPassword] = useState('');
   const passwordReply = useRef<((password:string)=>void) | null>(null);
-  const inputPdf = picked[0];
-  const checkingPdf = id === 'pdf-docx' && !!inputPdf && pdfAccess?.file !== inputPdf;
+  const pendingPdf = PDF_INPUT_TOOLS.has(id)
+    ? picked.find((file) => !file.password && !unlockedPdfs.has(file) && file !== pdfFailedFile)
+    : undefined;
+  const checkingPdf = !!pendingPdf;
   useEffect(() => {
-    if(!presentationActive || id !== 'pdf-docx' || !inputPdf)return;
-    const controller=new AbortController();
-    let enteredPassword=inputPdf.password;
-    let rejectReply:((reason:Error)=>void) | undefined;
-    void engine.openViewer(inputPdf,undefined,{
-      indexText:false,
-      signal:controller.signal,
-      onPassword:incorrect => new Promise<string>((resolve,reject)=>{
-        if(controller.signal.aborted){reject(new Error('Cancelled'));return;}
-        rejectReply=reject;
-        passwordReply.current=value=>{enteredPassword=value;passwordReply.current=null;setPasswordPrompt(null);resolve(value);};
-        setInputPassword('');setPasswordPrompt({file:inputPdf,incorrect});
+    if (!presentationActive || !pendingPdf) return;
+    const controller = new AbortController();
+    let enteredPassword = pendingPdf.password;
+    let rejectReply: ((reason: Error) => void) | undefined;
+    void engine.openViewer(pendingPdf, undefined, {
+      indexText: false,
+      signal: controller.signal,
+      onPassword: (incorrect) => new Promise<string>((resolve, reject) => {
+        if (controller.signal.aborted) { reject(new Error('Cancelled')); return; }
+        rejectReply = reject;
+        passwordReply.current = (value) => {
+          enteredPassword = value;
+          passwordReply.current = null;
+          setPasswordPrompt(null);
+          resolve(value);
+        };
+        setInputPassword('');
+        setPasswordPrompt({ file: pendingPdf, incorrect });
       }),
-    }).then(async session=>{
+    }).then(async (session) => {
       await session.destroy();
-      if(!controller.signal.aborted){setPdfAccess({file:inputPdf,password:enteredPassword});setPasswordPrompt(null);setInputPassword('');}
-    }).catch(error=>{if(!controller.signal.aborted){setPdfFailedFile(inputPdf);setError(error instanceof Error ? error.message : 'Could not open this PDF.');}});
-    return()=>{controller.abort();rejectReply?.(new Error('Cancelled'));passwordReply.current=null;};
-  }, [id,inputPdf,presentationActive]);
+      if (!controller.signal.aborted) {
+        const updated = enteredPassword ? { ...pendingPdf, password: enteredPassword } : pendingPdf;
+        if (enteredPassword) {
+          const existingId = pickedFileIds.get(pendingPdf);
+          if (existingId) pickedFileIds.set(updated, existingId);
+          setPicked((prev) => prev.map((file) => (file === pendingPdf ? updated : file)));
+        }
+        setUnlockedPdfs((prev) => {
+          const next = new Set(prev);
+          next.add(pendingPdf);
+          next.add(updated);
+          return next;
+        });
+        setPasswordPrompt(null);
+        setInputPassword('');
+      }
+    }).catch((err) => {
+      if (!controller.signal.aborted) {
+        setPdfFailedFile(pendingPdf);
+        setError(err instanceof Error ? err.message : 'Could not open this PDF.');
+      }
+    });
+    return () => {
+      controller.abort();
+      rejectReply?.(new Error('Cancelled'));
+      passwordReply.current = null;
+    };
+  }, [pendingPdf, presentationActive]);
   const [docxInspection, setDocxInspection] = useState<{file:PickedFile;warnings:string[]} | null>(null);
   const docxChecking = id === 'docx-pdf' && !!picked[0] && docxInspection?.file !== picked[0];
   const docxWarnings = docxInspection?.file === picked[0] ? docxInspection?.warnings ?? [] : [];
@@ -238,7 +281,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
   });
 
   const [jobProgress, setJobProgress] = useState<number | undefined>();
-  const [jobLabel, setJobLabel] = useState("Working on-device…");
+  const [jobLabel, setJobLabel] = useState("Working on-device\u2026");
   const [pageCount, setPageCount] = useState(0);
   const [startPage, setStartPage] = useState(1);
   const [endPage, setEndPage] = useState(1);
@@ -324,7 +367,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
   function cancelJob() {
     jobController.current?.abort();
     cancelPendingJobs();
-    setJobLabel("Cancelling…");
+    setJobLabel("Cancelling\u2026");
   }
   function reorderFiles(order: number[]) {
     setPicked((files) =>
@@ -360,7 +403,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
 
   useEffect(() => {
     const file = picked[0];
-    if (!file || !["split", "pdf-images"].includes(tool.id)) return;
+    if (!file || checkingPdf || pdfFailedFile === file || !["split", "pdf-images"].includes(tool.id)) return;
     let cancelled = false;
     void engine
       .pageCount(file)
@@ -386,7 +429,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
     return () => {
       cancelled = true;
     };
-  }, [picked, tool.id]);
+  }, [picked, tool.id, checkingPdf, pdfFailedFile]);
 
   async function onPick(fileList: FileList): Promise<void> {
     setError(null);
@@ -608,8 +651,8 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
       setError("Fill in the options first.");
       return;
     }
-    if(checkingPdf)return;
-    const first = tool.id === 'pdf-docx' && pdfAccess?.file === picked[0] ? {...picked[0]!,password:pdfAccess.password} : picked[0];
+    if (checkingPdf) return;
+    const first = picked[0];
     if (!first) return;
     const controller = new AbortController();
     jobController.current = controller;
@@ -623,8 +666,8 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
       },
     };
     setBusy(true);
-    setJobProgress(tool.id === "pdf-docx" ? 0 : undefined);
-    setJobLabel(tool.id === "pdf-docx" ? "Reading PDF" : "Working on-device…");
+    setJobProgress(tool.id === "pdf-docx" || tool.id === "compress" ? 0 : undefined);
+    setJobLabel(tool.id === "pdf-docx" ? "Reading PDF" : tool.id === "compress" ? "Optimizing PDF" : "Working on-device\u2026");
     setError(null);
     try {
       let result: JobResult;
@@ -746,7 +789,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
 
   function blockedReason(): string | null {
     if (scanBusy) return "Finish or cancel the page adjustment first.";
-    if (tool.id === 'organize' && organizeInputBusy) return 'Preparing PDF or images…';
+    if (tool.id === 'organize' && organizeInputBusy) return 'Preparing PDF or images\u2026';
     if (locked) return "This tool is not available right now.";
     if (tool.id === "view") return null;
     if (picked.length < tool.minFiles) {
@@ -817,7 +860,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
     {nativeScan && tool.id === 'scan' && !draftReady ? createPortal(
       <button autoFocus className="btn native-capture-cancel" onClick={onEmptyScanClose ?? (() => goBack())}>Cancel scan</button>, document.body,
     ) : null}
-    {tool.id === 'scan' && !draftReady ? <p role="status">Restoring your scan…</p> : null}
+    {tool.id === 'scan' && !draftReady ? <p role="status">Restoring your scan\u2026</p> : null}
     {scanCamera}
     <div
       style={tool.id === "scan" && cameraOpen && (!nativeScan || nativePresentation === 'explicit') ? {display: "none"} : undefined}
@@ -873,7 +916,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
             onMove={multiple ? moveFile : undefined}
             onReorder={reorderable ? reorderFiles : undefined}
             label={tool.id === "organize" ? "Choose PDF or images" : copy.label}
-            hint={tool.id === "organize" ? "One PDF OR up to 200 supported images · 128 MB total" : copy.hint}
+            hint={tool.id === "organize" ? "One PDF OR up to 200 supported images \u00b7 128 MB total" : copy.hint}
           />
         ) : null}
 
@@ -885,22 +928,24 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
             fonts preserve Latin, Greek and Cyrillic text. Files with
             unsupported characters are rejected instead of changing the text.
           </p>
-          {docxChecking ? <p role="status">Checking document compatibility…</p> : null}
+          {docxChecking ? <p role="status">Checking document compatibility\u2026</p> : null}
           {docxWarnings.length ? <div className="ps-banner" role="status"><strong>Before you convert</strong>{docxWarnings.map(warning=><p key={warning}>{warning}</p>)}</div> : null}
           </>
         ) : null}
-        {tool.id === "organize" && organizeInputBusy ? <p role="status">Preparing organizer input…</p> : null}
-        {tool.id === "pdf-docx" || tool.id === "organize" ? (
+        {tool.id === "organize" && organizeInputBusy ? <p role="status">Preparing organizer input\u2026</p> : null}
+        {PDF_INPUT_TOOLS.has(tool.id) || tool.id === "organize" ? (
           <>
-          {passwordPrompt && (tool.id === "organize" || passwordPrompt.file === inputPdf) ? (
+          {passwordPrompt && (tool.id === "organize" || passwordPrompt.file === pendingPdf) ? (
             <form className="ps-banner" aria-label="Unlock PDF" onSubmit={event=>{event.preventDefault();passwordReply.current?.(inputPassword);}}>
               <p>This PDF is password protected. Enter its password to continue.</p>
               {passwordPrompt.incorrect ? <p role="alert">That password was incorrect. Try again.</p> : null}
               <label className="ps-field">Document password<input autoFocus type="password" autoComplete="off" value={inputPassword} onChange={event=>setInputPassword(event.target.value)} /></label>
-              <button type="submit" className="btn">Unlock PDF</button>
-              <button type="button" className="btn" onClick={()=>{if(tool.id === "organize")organizeRequest.current?.abort();else setPicked([]);setPasswordPrompt(null);setInputPassword('');}}>Cancel</button>
+              <div className="ps-row">
+                <button type="submit" className="btn">Unlock PDF</button>
+                <button type="button" className="btn btn--ghost" onClick={()=>{if(tool.id === "organize")organizeRequest.current?.abort();else setPicked(prev=>prev.filter(file=>file!==passwordPrompt.file));setPasswordPrompt(null);setInputPassword('');}}>Cancel</button>
+              </div>
             </form>
-          ) : checkingPdf && pdfFailedFile !== inputPdf ? <p role="status">Checking PDF access…</p> : null}
+          ) : checkingPdf ? <p role="status">Checking PDF access\u2026</p> : null}
           {tool.id === "pdf-docx" ? <><label className="ps-field">Scanned text language<select aria-label="Scanned text language" value={ocrLanguage} disabled={busy} onChange={event=>setOcrLanguage(event.target.value as OcrLanguage)}>{OCR_LANGUAGES.map(language=><option key={language.id} value={language.id}>{language.label}</option>)}</select></label>
           <p className="ps-note">
             Rebuilds styled text, detected tables, and two-column layouts.
@@ -1132,7 +1177,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
                 <option value="right">Bottom right</option>
               </select>
             </label>
-            <label>
+            <label className="ps-switch">
               <input
                 type="checkbox"
                 checked={numberOptions.total}

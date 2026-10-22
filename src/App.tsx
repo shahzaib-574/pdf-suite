@@ -240,12 +240,15 @@ export function AppView({nativeScan, loadNativeScanDraft}: {
           event.stopPropagation();
       }} className={`app-frame${(visibleRoute.name === "tool" && visibleRoute.id === "scan") || visibleRoute.name === "viewer" ? " app-frame--scan" : ""}`}>
         {importError ? (
-          <p className="ps-banner" role="alert">
-            {importError}
-            <button type="button" onClick={() => setImportError("")}>
+          <div className="ps-banner ps-banner--error ps-row" role="alert">
+            <span>{importError}</span>
+            <AnimatedButton
+              variant="ghost"
+              onClick={() => setImportError("")}
+            >
               Dismiss
-            </button>
-          </p>
+            </AnimatedButton>
+          </div>
         ) : null}
         {incoming.length ? (
           <section className="ps-incoming" aria-label="Received files">

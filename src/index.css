@@ -306,7 +306,7 @@ ol {
 
 .btn--danger {
   background: var(--danger);
-  color: #fff8f6;
+  color: var(--brass-ink);
 }
 
 .btn--brass {
@@ -578,10 +578,6 @@ html.is-scan-camera .skip-to-nav,
 }
 
 .tile__icon svg {
-  width: 15px;
-  height: 15px;
-}
-.tile .tile__icon svg {
   width: 22px;
   height: 22px;
   stroke-width: 1.8;

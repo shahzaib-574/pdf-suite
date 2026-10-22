@@ -85,7 +85,7 @@ export function FileWell({
     if (disabled) return;
     setPickerError(null);
     try {
-      const native = await pickGalleryImages(multiple ? 100 : 1);
+      const native = await pickGalleryImages(multiple ? 200 : 1);
       if (native === null) {
         inputRef.current?.click();
         return;

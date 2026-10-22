@@ -10,11 +10,11 @@ import type {
 import type { ImageCompressOptions } from "./compressImages";
 
 export type TransferFile = {
-  name: string;
-  mime: string;
-  bytes: ArrayBuffer;
+  name: string,
+  mime: string,
+  bytes: ArrayBuffer,
   /** Opens an encrypted PDF before pdf-lib reads it. */
-  password?: string;
+  password?: string,
 };
 
 export type WorkerOp =
@@ -30,6 +30,12 @@ export type WorkerOp =
   | { op: "docxToPdf"; file: TransferFile };
 
 export type WorkerRequest = WorkerOp & { id: number };
+
+export type WorkerProgress = {
+  id: number;
+  progress: number;
+  label: string;
+};
 
 export type WorkerSuccess = {
   id: number;
@@ -50,3 +56,4 @@ export type WorkerFailure = {
 };
 
 export type WorkerResponse = WorkerSuccess | WorkerFailure;
+export type WorkerMessage = WorkerResponse | WorkerProgress;

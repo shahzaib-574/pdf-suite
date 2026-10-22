@@ -401,29 +401,42 @@ export function Result() {
           <section>
             <h3>Use this PDF in another tool</h3>
             <div className="ps-next-tools">
-              {(["compress", "organize", "protect", "pdf-docx"] as const).map(
-                (tool) => {
-                  const Icon = TOOL_ICONS[tool];
-                  const [label, name] = {
-                    compress: ["Compress", "Compress"],
-                    organize: ["Organize", "Organize"],
-                    protect: ["Protect", "Protect"],
-                    "pdf-docx": ["Word", "Convert to Word"],
-                  }[tool];
-                  return (
-                    <AnimatedButton
-                      key={tool}
-                      variant="ghost"
-                      className="ps-next-tool"
-                      aria-label={name}
-                      onClick={() => continueWith(tool)}
-                    >
-                      <Icon size={20} strokeWidth={2} aria-hidden="true" />
-                      <span>{label}</span>
-                    </AnimatedButton>
-                  );
-                },
-              )}
+              {(
+                [
+                  "compress",
+                  "organize",
+                  "split",
+                  "merge",
+                  "watermark",
+                  "numbers",
+                  "protect",
+                  "pdf-docx",
+                ] as const
+              ).map((tool) => {
+                const Icon = TOOL_ICONS[tool];
+                const [label, name] = {
+                  compress: ["Compress", "Compress"],
+                  organize: ["Organize", "Organize"],
+                  split: ["Split", "Split PDF"],
+                  merge: ["Merge", "Merge PDFs"],
+                  watermark: ["Watermark", "Watermark"],
+                  numbers: ["Numbers", "Page numbers"],
+                  protect: ["Protect", "Protect"],
+                  "pdf-docx": ["Word", "Convert to Word"],
+                }[tool];
+                return (
+                  <AnimatedButton
+                    key={tool}
+                    variant="ghost"
+                    className="ps-next-tool"
+                    aria-label={name}
+                    onClick={() => continueWith(tool)}
+                  >
+                    <Icon size={20} strokeWidth={2} aria-hidden="true" />
+                    <span>{label}</span>
+                  </AnimatedButton>
+                );
+              })}
             </div>
           </section>
         ) : null}

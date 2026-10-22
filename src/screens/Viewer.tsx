@@ -17,6 +17,8 @@ import {
   FilePlus,
   FileText,
   FolderOpen,
+  Hash,
+  Images,
   List,
   ListOrdered,
   Lock,
@@ -25,8 +27,10 @@ import {
   MoreVertical,
   PanelLeft,
   Plus,
+  Scissors,
   Search,
   Share2,
+  Stamp,
   Unlock,
   X,
 } from "lucide-react";
@@ -877,12 +881,14 @@ export function Viewer({ recentId }: ViewerProps) {
               onChange={(e) => setPassword(e.target.value)}
             />
           </label>
-          <AnimatedButton type="submit" disabled={!password}>
-            Open PDF
-          </AnimatedButton>
-          <AnimatedButton variant="ghost" onClick={() => navigate(backHash)}>
-            Cancel
-          </AnimatedButton>
+          <div className="ps-row">
+            <AnimatedButton type="submit" disabled={!password}>
+              Open PDF
+            </AnimatedButton>
+            <AnimatedButton variant="ghost" onClick={() => navigate(backHash)}>
+              Cancel
+            </AnimatedButton>
+          </div>
         </form>
       ) : error ? (
         <div className="ps-body">
@@ -1194,6 +1200,38 @@ export function Viewer({ recentId }: ViewerProps) {
                   >
                     <Combine size={16} strokeWidth={2.1} aria-hidden="true" />
                     Merge PDFs
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openTool("split")}
+                  >
+                    <Scissors size={16} strokeWidth={2.1} aria-hidden="true" />
+                    Split PDF
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openTool("watermark")}
+                  >
+                    <Stamp size={16} strokeWidth={2.1} aria-hidden="true" />
+                    Watermark
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openTool("numbers")}
+                  >
+                    <Hash size={16} strokeWidth={2.1} aria-hidden="true" />
+                    Page numbers
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openTool("pdf-images")}
+                  >
+                    <Images size={16} strokeWidth={2.1} aria-hidden="true" />
+                    PDF to Images
                   </button>
                 </div>
               ) : null}

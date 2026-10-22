@@ -299,24 +299,26 @@ export function OrganizeGrid(props: Props) {
               onChange={(event) => setPassword(event.target.value)}
             />
           </label>
-          <button className="btn" type="submit">
-            Unlock PDF
-          </button>
-          <button
-            className="btn"
-            type="button"
-            onClick={() => {
-              cancelUnlock.current();
-              setPrompt(null);
-              setPassword("");
-              setLoading(false);
-              current.current.onError(
-                "PDF unlock cancelled. Choose another file.",
-              );
-            }}
-          >
-            Cancel
-          </button>
+          <div className="ps-row">
+            <button className="btn" type="submit">
+              Unlock PDF
+            </button>
+            <button
+              className="btn btn--ghost"
+              type="button"
+              onClick={() => {
+                cancelUnlock.current();
+                setPrompt(null);
+                setPassword("");
+                setLoading(false);
+                current.current.onError(
+                  "PDF unlock cancelled. Choose another file.",
+                );
+              }}
+            >
+              Cancel
+            </button>
+          </div>
         </form>
       ) : null}
       {loading && !prompt ? <p role="status">Loading page previews…</p> : null}
@@ -460,4 +462,3 @@ export function OrganizeGrid(props: Props) {
     </>
   );
 }
-

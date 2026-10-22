@@ -16,13 +16,13 @@ Implemented against the existing 13 tools. The focus is dependable output, reduc
 | Protect | Preserves intentional spaces in passwords; generated encrypted documents can be reopened with the reader password prompt. |
 | PDF to images | JPEG/PNG, resolution and selected pages; packages the output before declaring success. A 41-image job no longer fails at Save because of the former 40-image limit. |
 | Word to PDF | Bundled Latin/Greek/Cyrillic fonts; explicit unsupported-character/image errors; archive expansion checks before loading DOCX parts. Layout remains simplified. |
-| PDF to Word | Dominant scanned-page images trigger English OCR even when a selectable header exists; removes former image-placement exclusions; records OCR and image-fallback warnings. |
+| PDF to Word | Dominant scanned-page images trigger bundled English, Urdu + English, or Arabic + English OCR even when a selectable header exists; removes former image-placement exclusions; records OCR and image-fallback warnings. |
 
 ## Shared flow and efficiency
 
 - Results have filename editing, image previews, an optional Word text preview, explicit local-copy status, Save/Share, and PDF follow-on tools.
 - Recents stores metadata separately from document bytes; listing the library no longer loads every saved document. Legacy copies migrate. Files above the old 8 MB threshold are actually retained. Writes are serialized within an app session; the byte/metadata save is one IndexedDB transaction.
-- Local limits: 200 library entries / 512 MB, subject to quota. No automatic deletion of existing documents to make room. Inputs: 200 files / 128 MB. Image exports: 200 selected pages / 64 MB. Camera capture has its existing 20-page session limit.
+- Local limits: 200 library entries / 512 MB, subject to quota, with automatic LRU eviction of the oldest stored entries when full. Inputs: 200 files / 128 MB. Image exports: 200 selected pages / 64 MB. Camera capture has its existing 20-page session limit.
 - Images normalize to a maximum 3200-pixel side; edited scans to 2200. PDF rendering is bounded to approximately 12 megapixels and 8192 pixels per side.
 - Long jobs expose cancellation; PDF workers can be terminated and recreated. Page-based operations yield between pages. This is not a resumable background job system.
 - Android incoming PDF/DOCX/image sharing uses content URIs, bounded cache staging, chunked bridge reads and cleanup, without broad storage permissions. New shares wait in an inbox instead of replacing an active operation.
@@ -45,8 +45,8 @@ Commands: `npm run quality-selfcheck`, `npm run pdf-selfcheck`, `npm run docx-se
 - Browser verification subsequently passed using an isolated Playwright/Chrome runner. See [browser QA](browser-qa.md) for the 25 checks, synthetic timings and remaining device limits.
 - Local Gradle verification cannot start: JAVA_HOME is unset and Java is absent from PATH. Android incoming intents, cancellation, camera capture, low-memory behavior and min-SDK WebView compatibility require Android device/CI testing before release.
 - Device timing, battery usage, peak memory, OCR accuracy and store conversion/retention have not been benchmarked. Build success is not a performance measurement.
-- OCR remains English only; blurry/handwritten/multilingual pages and diagrams need review. Accepted OCR is not guaranteed to preserve every visual element. Low-confidence pages fall back to full-page images.
+- OCR bundles English, Urdu + English, and Arabic + English; blurry/handwritten/multilingual pages and diagrams need review. Accepted OCR is not guaranteed to preserve every visual element. Low-confidence pages fall back to full-page images.
 - Word layouts remain approximate (especially nested tables, text boxes, complex scripts and unsupported image types). Word result preview shows extracted text, not a full fidelity layout.
-- Password entry currently supports reading. Editing encrypted PDFs is still unsupported by the PDF editing engine.
-- Annotation, signing workflows, true redaction, cloud synchronization, additional OCR languages and Play Billing are outside this implementation. This is an improvement of the existing toolkit, not feature parity with Acrobat or dedicated scanning products.
+- Encrypted PDFs prompt for a password and unlock before processing across all PDF tools (Split, Merge, Compress, Organize, Watermark, Page Numbers, Protect, PDF to Images, PDF to Word, and Reader).
+- Annotation, signing workflows, true redaction, cloud synchronization, and Play Billing are outside this implementation. This is an improvement of the existing toolkit, not feature parity with Acrobat or dedicated scanning products.
 - Production dependencies have no known npm-audit findings at verification time. Three moderate findings remain in the development-only Capacitor CLI dependency chain; the suggested forced downgrade was not applied.

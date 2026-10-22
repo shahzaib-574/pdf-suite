@@ -4,11 +4,12 @@ import {
   Download,
   FolderOpen,
   Pencil,
+  Share2,
   Trash2,
 } from "lucide-react";
 import { AnimatedButton, AppShell, FileThumb } from "../components";
 import type { RecentItem } from "../lib/types";
-import { formatBytes, saveBytes } from "../store/files";
+import { formatBytes, saveBytes, shareOrDownload } from "../store/files";
 import { listRecents, renameRecent, deleteRecent } from "../store/recents";
 import { recentFile } from "../store/toolInput";
 import { navigate } from "./nav";
@@ -59,16 +60,24 @@ export function Recents() {
     };
   }, []);
 
-  async function saveRecentFile(item: RecentItem): Promise<void> {
+  async function exportRecentFile(
+    item: RecentItem,
+    action: "save" | "share",
+  ): Promise<void> {
     setExportError(null);
     setSavingId(item.id);
     try {
       const file = await recentFile(item.id);
-      const result = await saveBytes(file.bytes, item.name, item.mime);
+      const result =
+        action === "save"
+          ? await saveBytes(file.bytes, item.name, item.mime)
+          : await shareOrDownload(file.bytes, item.name, item.mime);
       if (result.status === "cancelled") return;
     } catch (error) {
       setExportError(
-        error instanceof Error ? error.message : `Could not save ${item.name}`,
+        error instanceof Error
+          ? error.message
+          : `Could not ${action} ${item.name}`,
       );
     } finally {
       setSavingId(null);
@@ -141,7 +150,7 @@ export function Recents() {
                             navigate(
                               `#/viewer?id=${encodeURIComponent(item.id)}`,
                             );
-                          else void saveRecentFile(item);
+                          else void exportRecentFile(item, "save");
                         }}
                       >
                         <span className="ps-library-item__name" dir="auto">
@@ -165,7 +174,17 @@ export function Recents() {
                           }
                           disabled={!canOpen || savingId !== null}
                           onClick={() => {
-                            void saveRecentFile(item);
+                            void exportRecentFile(item, "save");
+                          }}
+                        />
+                        <AnimatedButton
+                          variant="ghost"
+                          className="btn--icon"
+                          icon={Share2}
+                          aria-label={`Share ${item.name}`}
+                          disabled={!canOpen || savingId !== null}
+                          onClick={() => {
+                            void exportRecentFile(item, "share");
                           }}
                         />
                         <AnimatedButton

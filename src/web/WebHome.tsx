@@ -199,7 +199,7 @@ export function WebHome() {
         <details>
           <summary>Will Word conversions look exactly the same?</summary>
           <p>
-            PDF to Word rebuilds editable text, tables and images, with English OCR for scanned pages. Complex layouts can change. Word to PDF supports simplified DOCX conversion; review the output before sharing.
+            PDF to Word rebuilds editable text, tables and images, with English, Urdu, and Arabic OCR for scanned pages. Complex layouts can change. Word to PDF supports simplified DOCX conversion; review the output before sharing.
           </p>
         </details>
       </section>

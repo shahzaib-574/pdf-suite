@@ -23,6 +23,7 @@ import type { PdfViewerSession } from "./render";
 import type {
   TransferFile,
   WorkerOp,
+  WorkerProgress,
   WorkerRequest,
   WorkerResponse,
 } from "./protocol";
@@ -79,6 +80,8 @@ export type PdfEngine = {
 type Pending = {
   resolve: (value: Extract<WorkerResponse, { ok: true }>) => void;
   reject: (err: Error) => void;
+  onProgress?: (update: PdfToDocxProgress) => void;
+  cleanup?: () => void;
 };
 
 // Effective DPI for a full-page image, and JPEG quality. 200 DPI keeps fine
@@ -96,8 +99,10 @@ const pending = new Map<number, Pending>();
 export function cancelPendingJobs(): void {
   worker?.terminate();
   worker = undefined;
-  for (const job of pending.values())
+  for (const job of pending.values()) {
+    job.cleanup?.();
     job.reject(new Error("Processing cancelled."));
+  }
   pending.clear();
 }
 
@@ -134,18 +139,21 @@ function onWorkerMessage(event: MessageEvent<unknown>): void {
   // Any message, including the worker's ready signal, means it loaded.
   if (event.target === worker) workerStarted = true;
   const data = event.data;
-  if (
-    typeof data !== "object" ||
-    data === null ||
-    !("id" in data) ||
-    !("ok" in data)
-  ) {
+  if (typeof data !== "object" || data === null || !("id" in data)) {
     return;
   }
+  if ("progress" in data && !("ok" in data)) {
+    const progress = data as WorkerProgress;
+    const job = pending.get(progress.id);
+    job?.onProgress?.({ progress: progress.progress, label: progress.label });
+    return;
+  }
+  if (!("ok" in data)) return;
   const response = data as WorkerResponse;
   const job = pending.get(response.id);
   if (!job) return;
   pending.delete(response.id);
+  job.cleanup?.();
   if (response.ok) job.resolve(response);
   else job.reject(new Error(response.message));
 }
@@ -157,7 +165,10 @@ function failWorker(target: Worker, message: string): void {
   if (target !== worker) return;
   worker = undefined;
   const err = new Error(message);
-  for (const job of pending.values()) job.reject(err);
+  for (const job of pending.values()) {
+    job.cleanup?.();
+    job.reject(err);
+  }
   pending.clear();
 }
 
@@ -175,15 +186,32 @@ function onWorkerError(target: Worker, event: Event): void {
 function callWorker(
   op: WorkerOp,
   transfer: ArrayBuffer[],
+  control?: JobControl,
 ): Promise<Extract<WorkerResponse, { ok: true }>> {
+  if (control?.signal?.aborted) {
+    return Promise.reject(new Error("Processing cancelled."));
+  }
   const id = nextId++;
   const request = { ...op, id } as WorkerRequest;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    const onAbort = () => {
+      cancelPendingJobs();
+    };
+    const cleanup = () => {
+      control?.signal?.removeEventListener("abort", onAbort);
+    };
+    control?.signal?.addEventListener("abort", onAbort, { once: true });
+    pending.set(id, {
+      resolve,
+      reject,
+      onProgress: control?.onProgress,
+      cleanup,
+    });
     try {
       getWorker().postMessage(request, { transfer });
     } catch (err) {
       pending.delete(id);
+      cleanup();
       reject(err instanceof Error ? err : new Error(humanError(err)));
     }
   });
@@ -209,9 +237,10 @@ async function workerJob(
   op: WorkerOp,
   transfer: ArrayBuffer[],
   fallbackName: string,
+  control?: JobControl,
 ): Promise<JobResult> {
   try {
-    return toJobOk(await callWorker(op, transfer), fallbackName);
+    return toJobOk(await callWorker(op, transfer, control), fallbackName);
   } catch (err) {
     return { ok: false, message: humanError(err) };
   }
@@ -255,6 +284,7 @@ export const engine: PdfEngine = {
         { op: "optimize", file: packed, images },
         transferOf(packed),
         "compressed.pdf",
+        control,
       );
       if (result.ok) {
         const recompressed = result.extra?.imagesRecompressed ?? 0;

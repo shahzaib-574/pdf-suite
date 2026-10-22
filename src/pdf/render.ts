@@ -413,26 +413,40 @@ export async function openPdfViewer(
           try {
             for (let i = 0; i < pdf.numPages; i++) {
               if (destroyed || options?.signal?.aborted) return;
-              const page = await pdf.getPage(i + 1);
-              const viewport = page.getViewport({ scale: 1 });
-              const content = await page.getTextContent();
-              pages[i] = {
-                width: viewport.width,
-                height: viewport.height,
-                text: textOf(content),
-              };
+              try {
+                const page = await pdf.getPage(i + 1);
+                const viewport = page.getViewport({ scale: 1 });
+                let text = "";
+                try {
+                  const content = await page.getTextContent();
+                  text = textOf(content);
+                } catch {
+                  /* Keep page dimensions even if text content is malformed. */
+                }
+                pages[i] = {
+                  width: viewport.width,
+                  height: viewport.height,
+                  text,
+                };
+              } catch {
+                /* Skip malformed page and continue indexing remaining pages. */
+              }
               onProgress?.(i + 1, pdf.numPages);
               await new Promise((resolve) => setTimeout(resolve, 0));
             }
-            if (!destroyed) {
-              viewerDocument.outline = await flattenOutline(
-                pdf,
-                await pdf.getOutline(),
-              );
+            if (!destroyed && !options?.signal?.aborted) {
+              try {
+                viewerDocument.outline = await flattenOutline(
+                  pdf,
+                  await pdf.getOutline(),
+                );
+              } catch {
+                /* Ignore malformed outline trees. */
+              }
               onProgress?.(pdf.numPages, pdf.numPages);
             }
           } catch {
-            /* Visible pages remain readable if a malformed page cannot be indexed. */
+            /* Visible pages remain readable if background indexing stops. */
           }
         })();
       }, 0);

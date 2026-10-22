@@ -195,6 +195,7 @@ async function flateBitmap(
 export async function recompressImages(
   pdf: PDFDocument,
   options: ImageCompressOptions,
+  onProgress?: (current: number, total: number) => void,
 ): Promise<ImageCompressReport> {
   const report: ImageCompressReport = { recompressed: 0, savedBytes: 0 };
   if (!canRecompressImages()) return report;
@@ -212,18 +213,25 @@ export async function recompressImages(
 
   // Soft masks and stencil masks carry transparency; JPEG would blur edges.
   const masks = new Set<string>();
-  for (const [, object] of context.enumerateIndirectObjects()) {
+  const candidates: Array<[PDFRef, PDFRawStream]> = [];
+  for (const [ref, object] of context.enumerateIndirectObjects()) {
     if (!(object instanceof PDFStream)) continue;
     for (const key of [N.SMask, N.Mask]) {
-      const ref = object.dict.get(key);
-      if (ref instanceof PDFRef) masks.add(ref.toString());
+      const maskRef = object.dict.get(key);
+      if (maskRef instanceof PDFRef) masks.add(maskRef.toString());
+    }
+    if (object instanceof PDFRawStream && object.dict.lookup(N.Subtype) === N.Image) {
+      candidates.push([ref, object]);
     }
   }
 
-  for (const [ref, object] of context.enumerateIndirectObjects()) {
-    if (!(object instanceof PDFRawStream) || masks.has(ref.toString())) continue;
+  let processed = 0;
+  const total = candidates.length;
+  for (const [ref, object] of candidates) {
+    processed++;
+    onProgress?.(processed, total);
+    if (masks.has(ref.toString())) continue;
     const dict = object.dict;
-    if (dict.lookup(N.Subtype) !== N.Image) continue;
     if (dict.lookup(N.ImageMask) === PDFBool.True || dict.has(N.Decode)) continue;
     const width = num(dict.lookup(N.Width));
     const height = num(dict.lookup(N.Height));
