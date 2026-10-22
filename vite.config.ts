@@ -1,6 +1,11 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { readFileSync } from 'node:fs'
 import monetization from './monetization.config.json' with { type: 'json' }
+
+// Android's variables.gradle is the single source of the user-facing version.
+const appVersion = /appVersionName\s*=\s*'([^']+)'/.exec(readFileSync('android/variables.gradle', 'utf8'))?.[1]
+if (!appVersion) throw new Error('appVersionName not found in android/variables.gradle')
 
 const googleAndroidTestBannerId = 'ca-app-pub-3940256099942544/9214589741'
 
@@ -22,6 +27,7 @@ export default defineConfig(({ mode }) => {
   return {
   base: './',
   define: {
+    __REAM_VERSION__: JSON.stringify(appVersion),
     __REAM_AD_CONFIG__: JSON.stringify({
       bannerId: mode === 'android-debug' ? googleAndroidTestBannerId : monetization.admobBannerUnitId,
       testMode: mode === 'android-debug',

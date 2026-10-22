@@ -11,24 +11,45 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Uses the existing chunked FileImporter transport; never sends a full photo over the bridge. */
 @CapacitorPlugin(name = "DocumentCamera")
 public class DocumentCameraPlugin extends Plugin {
-    private final AtomicBoolean active = new AtomicBoolean(false);
+    private static final class Request {
+        final String id;final PluginCall call;final NativeCameraSession session=new NativeCameraSession();
+        Request(String id,PluginCall call){this.id=id;this.call=call;}
+    }
+    private static final AtomicReference<Request> active=new AtomicReference<>();
+    private Request owned;
+    static NativeCameraSession session(String id){Request request=active.get();return request!=null&&request.id.equals(id)?request.session:null;}
 
     @PluginMethod public void capture(PluginCall call) {
-        if (!active.compareAndSet(false, true)) { call.reject("Camera is already open."); return; }
+        String id=call.getString("requestId",UUID.randomUUID().toString());
+        if(id==null||!id.matches("[A-Za-z0-9_-]{1,80}")){call.reject("Invalid camera request.");return;}
+        Request request=new Request(id,call);
+        if (!active.compareAndSet(null, request)) { call.reject("Camera is already open or closing."); return; }
+        owned=request;
         try {
-            startActivityForResult(call, new Intent(getContext(), DocumentCameraActivity.class), "captureResult");
-        } catch (RuntimeException error) { active.set(false); call.reject("Could not open the document camera.", error); }
+            startActivityForResult(call, new Intent(getContext(), DocumentCameraActivity.class).putExtra("requestId",id), "captureResult");
+        } catch (RuntimeException error) { active.compareAndSet(request,null);owned=null;request.session.finish();call.reject("Could not open the document camera."); }
     }
+    @PluginMethod public void cancelCapture(PluginCall call){Request request=owned;if(request!=null&&request.id.equals(call.getString("requestId")))request.session.cancel("");call.resolve();}
 
     @ActivityCallback private void captureResult(PluginCall call, ActivityResult result) {
-        active.set(false);
-        if (call == null) return;
+        Request request=owned;if(request==null)return;
+        if(call!=null&&!call.getCallbackId().equals(request.call.getCallbackId()))return;
         Intent data = result.getData();
+        if(data!=null&&data.hasExtra("requestId")&&!request.id.equals(data.getStringExtra("requestId")))return;
+        active.compareAndSet(request,null);owned=null;
+        call=request.call;
+        if(request.session.isCancelled()){
+            if(data!=null){String photo=data.getStringExtra("id");if(photo!=null&&photo.matches("[a-f0-9-]{36}"))new File(new File(getContext().getCacheDir(),"ream-incoming"),photo).delete();}
+            String reason=request.session.reason();request.session.finish();
+            if(!reason.isEmpty())call.reject(reason);else{JSObject cancelled=new JSObject();cancelled.put("cancelled",true);call.resolve(cancelled);}return;
+        }
+        request.session.finish();
         JSObject response = new JSObject();
         if (data != null && data.hasExtra("error")) { call.reject(data.getStringExtra("error")); return; }
         response.put("gallery", data != null && data.getBooleanExtra("gallery", false));
@@ -50,4 +71,5 @@ public class DocumentCameraPlugin extends Plugin {
         catch (org.json.JSONException error) { response.put("corners", new JSArray()); }
         call.resolve(response);
     }
+    @Override protected void handleOnDestroy(){Request request=owned;owned=null;if(request!=null){request.session.cancel("Camera operation was interrupted.");active.compareAndSet(request,null);request.call.reject("Camera operation was interrupted.");}}
 }

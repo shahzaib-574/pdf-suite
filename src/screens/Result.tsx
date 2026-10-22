@@ -12,6 +12,7 @@ import { lastJob, setCurrentViewer } from "../store/lastJob";
 import { saveRecent, renameRecent } from "../store/recents";
 import { queueToolFiles } from "../store/toolInput";
 import { navigate } from "./nav";
+import { TOOL_ICONS } from "./icons";
 
 const retained = new WeakMap<JobOk, Promise<string>>();
 function retain(job: JobOk): Promise<string> {
@@ -235,7 +236,9 @@ export function Result() {
                 ? "The attempted optimization did not produce a smaller safe file."
                 : compression.mode === "lossless"
                   ? "Text, links, and forms are retained."
-                  : "Pages are images. Selectable text, interactive links, forms, and digital signatures are not retained."}
+                  : compression.mode === "images"
+                    ? `Text, links, and forms are retained. ${compression.imagesRecompressed} ${compression.imagesRecompressed === 1 ? "image was" : "images were"} resized and recompressed.`
+                    : "Pages are images. Selectable text, interactive links, forms, and digital signatures are not retained."}
             </p>
           </section>
         ) : null}
@@ -397,25 +400,43 @@ export function Result() {
         {canContinue ? (
           <section>
             <h3>Use this PDF in another tool</h3>
-            <div className="ps-row">
-              {(["compress", "organize", "protect", "pdf-docx"] as const).map(
-                (tool) => (
+            <div className="ps-next-tools">
+              {(
+                [
+                  "compress",
+                  "organize",
+                  "split",
+                  "merge",
+                  "watermark",
+                  "numbers",
+                  "protect",
+                  "pdf-docx",
+                ] as const
+              ).map((tool) => {
+                const Icon = TOOL_ICONS[tool];
+                const [label, name] = {
+                  compress: ["Compress", "Compress"],
+                  organize: ["Organize", "Organize"],
+                  split: ["Split", "Split PDF"],
+                  merge: ["Merge", "Merge PDFs"],
+                  watermark: ["Watermark", "Watermark"],
+                  numbers: ["Numbers", "Page numbers"],
+                  protect: ["Protect", "Protect"],
+                  "pdf-docx": ["Word", "Convert to Word"],
+                }[tool];
+                return (
                   <AnimatedButton
                     key={tool}
                     variant="ghost"
+                    className="ps-next-tool"
+                    aria-label={name}
                     onClick={() => continueWith(tool)}
                   >
-                    {
-                      {
-                        compress: "Compress",
-                        organize: "Organize",
-                        protect: "Protect",
-                        "pdf-docx": "Convert to Word",
-                      }[tool]
-                    }
+                    <Icon size={20} strokeWidth={2} aria-hidden="true" />
+                    <span>{label}</span>
                   </AnimatedButton>
-                ),
-              )}
+                );
+              })}
             </div>
           </section>
         ) : null}

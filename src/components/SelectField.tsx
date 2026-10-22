@@ -41,6 +41,8 @@ export function SelectField({
   const [open, setOpen] = useState(false);
   const [dropUp, setDropUp] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLUListElement>(null);
   const listId = useId();
   const selected = options.find((option) => option.value === value) ?? options[0];
 
@@ -64,11 +66,52 @@ export function SelectField({
     if (!open) return;
     const root = rootRef.current;
     const count = options.length;
+    const activeOption =
+      menuRef.current?.querySelector<HTMLButtonElement>(
+        ".ps-select__option.is-selected",
+      ) ?? menuRef.current?.querySelector<HTMLButtonElement>(".ps-select__option");
+    activeOption?.focus();
     function onPointerDown(event: PointerEvent) {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     }
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        buttonRef.current?.focus();
+        return;
+      }
+      if (
+        event.key !== "ArrowDown" &&
+        event.key !== "ArrowUp" &&
+        event.key !== "Home" &&
+        event.key !== "End"
+      ) {
+        return;
+      }
+      const items = Array.from(
+        menuRef.current?.querySelectorAll<HTMLButtonElement>(
+          ".ps-select__option",
+        ) ?? [],
+      );
+      if (items.length === 0) return;
+      event.preventDefault();
+      const currentIndex = items.indexOf(
+        document.activeElement as HTMLButtonElement,
+      );
+      let nextIndex = 0;
+      if (event.key === "Home") {
+        nextIndex = 0;
+      } else if (event.key === "End") {
+        nextIndex = items.length - 1;
+      } else if (event.key === "ArrowDown") {
+        nextIndex =
+          currentIndex >= 0 ? (currentIndex + 1) % items.length : 0;
+      } else {
+        nextIndex =
+          currentIndex > 0 ? currentIndex - 1 : items.length - 1;
+      }
+      items[nextIndex]?.focus();
     }
     function onResize() {
       if (!root) return;
@@ -92,6 +135,7 @@ export function SelectField({
       <span>{label}</span>
       <div ref={rootRef} className={`ps-select${open ? " is-open" : ""}`}>
         <button
+          ref={buttonRef}
           type="button"
           className="ps-select__button"
           aria-haspopup="listbox"
@@ -106,6 +150,7 @@ export function SelectField({
         </button>
         {open ? (
           <ul
+            ref={menuRef}
             id={listId}
             className={`ps-select__menu${dropUp ? " is-up" : ""}`}
             role="listbox"
@@ -123,6 +168,7 @@ export function SelectField({
                     onClick={() => {
                       onChange(option.value);
                       setOpen(false);
+                      buttonRef.current?.focus();
                     }}
                   >
                     {option.label}

@@ -19,13 +19,14 @@ import type {
 } from "../lib/types";
 import type {
   TransferFile,
+  WorkerMessage,
   WorkerRequest,
-  WorkerResponse,
   WorkerSuccess,
 } from "./protocol";
-import { protectPdf } from "./protectPdf";
+import { decryptedPdfBytes, protectPdf } from "./protectPdf";
 import { documentFonts, supportsText } from "./fonts";
 import { clamp, copyBuffer, humanError } from "./util";
+import { recompressImages } from "./compressImages";
 
 const IMAGE_MARGIN = 24;
 const WATERMARK_ANGLE = -35;
@@ -46,8 +47,19 @@ function bytesOf(file: TransferFile): Uint8Array {
   return new Uint8Array(file.bytes);
 }
 
+function ownBuffer(bytes: Uint8Array): ArrayBuffer {
+  if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength) {
+    return bytes.buffer as ArrayBuffer;
+  }
+  return copyBuffer(bytes);
+}
+
+function plainPdfBytes(file: TransferFile): Promise<Uint8Array> {
+  return decryptedPdfBytes(bytesOf(file), file.password);
+}
+
 async function loadPdf(file: TransferFile): Promise<PDFDocument> {
-  return PDFDocument.load(bytesOf(file));
+  return PDFDocument.load(await plainPdfBytes(file));
 }
 
 async function saved(
@@ -55,10 +67,8 @@ async function saved(
   filename: string,
 ): Promise<Pick<WorkerSuccess, "bytes" | "filename" | "pageCount">> {
   const written = await pdf.save();
-  const copy = new Uint8Array(written.byteLength);
-  copy.set(written);
   return {
-    bytes: copy.buffer as ArrayBuffer,
+    bytes: ownBuffer(written),
     filename,
     pageCount: pdf.getPageCount(),
   };
@@ -337,12 +347,11 @@ async function protect(
   if (!password.trim()) {
     throw new Error("Enter a password to protect this PDF.");
   }
-  const src = await loadPdf(file);
-  const encrypted = await protectPdf(bytesOf(file), password);
-  const copy = new Uint8Array(encrypted.byteLength);
-  copy.set(encrypted);
+  const plain = await plainPdfBytes(file);
+  const src = await PDFDocument.load(plain);
+  const encrypted = await protectPdf(plain, password);
   return {
-    bytes: copy.buffer as ArrayBuffer,
+    bytes: ownBuffer(encrypted),
     filename: "protected.pdf",
     pageCount: src.getPageCount(),
   };
@@ -420,10 +429,8 @@ async function docxToPdfOp(
   if (!result.ok) {
     throw new Error(result.message);
   }
-  const copy = new Uint8Array(result.bytes.byteLength);
-  copy.set(result.bytes);
   return {
-    bytes: copy.buffer as ArrayBuffer,
+    bytes: ownBuffer(result.bytes),
     filename: result.filename,
     pageCount: result.pageCount ?? 0,
     extra: result.extra?.wordToPdf
@@ -434,6 +441,7 @@ async function docxToPdfOp(
 
 export async function runWorkerOperation(
   req: WorkerRequest,
+  onProgress?: (progress: number, label: string) => void,
 ): Promise<Pick<WorkerSuccess, "bytes" | "filename" | "pageCount" | "extra">> {
   switch (req.op) {
     case "merge":
@@ -460,7 +468,21 @@ export async function runWorkerOperation(
           pageCount: pdf.getPageCount(),
         };
       }
-      return saved(pdf, "optimized.pdf");
+      const images = req.images
+        ? await recompressImages(pdf, req.images, (current, total) => {
+            onProgress?.(
+              total > 0 ? Math.min(0.95, current / total) : 0.5,
+              total > 0
+                ? `Optimizing image ${current} of ${total}`
+                : "Optimizing PDF",
+            );
+          })
+        : { recompressed: 0 };
+      onProgress?.(0.98, "Saving compressed PDF");
+      return {
+        ...(await saved(pdf, "optimized.pdf")),
+        extra: { imagesRecompressed: images.recompressed },
+      };
     }
     case "protect":
       return protect(req.file, req.input);
@@ -479,8 +501,8 @@ export async function runWorkerOperation(
   }
 }
 
-function post(response: WorkerResponse, transfer: ArrayBuffer[] = []): void {
-  self.postMessage(response, { transfer });
+function post(message: WorkerMessage, transfer: ArrayBuffer[] = []): void {
+  self.postMessage(message, { transfer });
 }
 
 if (typeof self !== "undefined") {
@@ -489,7 +511,9 @@ if (typeof self !== "undefined") {
     if (!isRequest(data)) return;
     void (async () => {
       try {
-        const result = await runWorkerOperation(data);
+        const result = await runWorkerOperation(data, (progress, label) => {
+          post({ id: data.id, progress, label });
+        });
         const transfer: ArrayBuffer[] = [];
         if (result.bytes) transfer.push(result.bytes);
         post(
@@ -508,4 +532,6 @@ if (typeof self !== "undefined") {
       }
     })();
   });
+  // Lets the main thread tell a worker that never loaded from one that crashed.
+  self.postMessage({ ready: true });
 }

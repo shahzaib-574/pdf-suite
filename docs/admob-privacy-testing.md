@@ -4,7 +4,7 @@ Version 1.2.0 uses `@capacitor-community/admob` 8.1.0. Every app launch asks Goo
 
 ## Test builds only
 
-`npm run android:debug` uses Google's anchored adaptive banner test unit `ca-app-pub-3940256099942544/9214589741`, `isTesting: true`, and optional UMP debug geography/device IDs from `.env.android-debug` or ignored `.env.android-debug.local`. Never click a live ad. Never use the production banner unit in a debug build.
+`npm run android:debug` uses the existing Google banner test unit with inline-adaptive sizing (maximum 100 dp) `ca-app-pub-3940256099942544/9214589741`, `isTesting: true`, and optional UMP debug geography/device IDs from `.env.android-debug` or ignored `.env.android-debug.local`. Never click a live ad. Never use the production banner unit in a debug build.
 
 ```dotenv
 VITE_ADMOB_TEST_MODE=true
@@ -39,9 +39,11 @@ For EEA, US, and OTHER test geographies, clear app data before each first-launch
 - relaunch with a stored decision and verify UMP is refreshed;
 - Settings privacy action appears only when UMP reports REQUIRED;
 - airplane mode, request error, denied consent, and no-fill do not block tools;
-- no blank banner gap exists before both a real Load and nonzero SizeChanged event; reserved height matches the reported logical height;
-- banners appear only on Tools and Recents, never Settings, reader, scan, any tool/result, incoming-file overlay, camera, save, share, or download controls;
+- no blank banner gap exists before a native measured creative event; reserved creative height matches the native validated CSS height and full reserved slot geometry is acknowledged before display;
+- banners appear only on Tools after the whole Recent files section, never Recents, search, Settings, reader, scan, any tool/result, incoming-file overlay, camera, save, share, or download controls;
 - rapid navigation cannot let a stale callback restore a banner or spacing on a disallowed route;
 - rotation, background/foreground, dark mode, large text, and TalkBack keep the banner clear of navigation and actions.
 
 Official references: [Google UMP](https://developers.google.com/admob/android/privacy), [test ads](https://developers.google.com/admob/android/test-ads), and [Capacitor Community AdMob](https://github.com/capacitor-community/admob/tree/8.1.0).
+
+The synchronized native overlay production gate remains disabled. Execute this matrix on an explicitly authorized Android test device before enabling production; local React fixtures/JVM tests or instrumentation compilation do not substitute for SDK compositing, touch handoff, consent, accessibility or publisher acceptance.

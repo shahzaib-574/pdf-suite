@@ -3,7 +3,8 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  gap: 28px;
+  --home-gap: 28px;
+  gap: var(--home-gap);
   padding-bottom: calc(24px);
 }
 
@@ -319,12 +320,12 @@
   /* Nastaliq hangs past the Latin em box on every side. */
   flex: 1;
   min-width: 0;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
-  line-height: 2.8;
+  line-height: 2.2;
   letter-spacing: 0;
-  padding-block: 0.35em;
-  padding-inline: 0.5em;
+  padding-block: 0.25em;
+  padding-inline: 0.35em;
   overflow: hidden;
   text-align: start;
   text-overflow: ellipsis;
@@ -334,7 +335,7 @@
 .ps-recent__action {
   flex-shrink: 0;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11.5px;
   font-weight: 650;
 }
 
@@ -421,6 +422,9 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--muted);
 }
 
 .ps-field label {
@@ -437,6 +441,9 @@
   width: 100%;
   min-height: 48px;
   padding: 0 12px;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 400;
   background: var(--surface);
   border: 1px solid var(--control-line);
   border-radius: var(--radius);
@@ -521,9 +528,9 @@
 
 .ps-organize-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  max-height: 56dvh;
+  max-height: min(56dvh, 520px);
   overflow-y: auto;
   padding: 1px 2px 4px;
   scrollbar-width: thin;
@@ -545,6 +552,57 @@
   border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
 }
 
+.ps-organize-card.is-selected { border-color: var(--primary); background: var(--primary-soft); }
+.ps-organize-card {
+  position: relative;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+.ps-organize-grid.is-dragging .ps-organize-card {
+  transition:
+    transform 180ms ease,
+    opacity 160ms ease,
+    border-color 160ms ease;
+}
+.ps-organize-grid.is-dragging .ps-organize-card.is-lifted {
+  z-index: 2;
+  cursor: grabbing;
+  transition: none;
+  border-color: var(--primary);
+  box-shadow: var(--shadow);
+}
+.ps-organize-grid.is-settling .ps-organize-card { transition: none; }
+.ps-organize-preview img { pointer-events: none; }
+.ps-organize-out { color: var(--danger); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.ps-organize-select { display: block; width: 100%; padding: 0; color: inherit; font: inherit; text-align: left; border: 0; background: transparent; cursor: pointer; }
+.ps-organize-number { display: grid; place-items: center; min-width: 24px; height: 24px; border-radius: 50%; background: var(--primary); color: var(--brass-ink); font-weight: 750; }
+.ps-organize-rotate {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 130ms ease;
+}
+/* Keeps a 44px touch target around the smaller circle. */
+.ps-organize-rotate::before { content: ""; position: absolute; inset: -5px; border-radius: 999px; }
+.ps-organize-rotate:active { transform: scale(0.92); }
+.ps-organize-rotate:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.ps-organize-rotate:disabled { opacity: 0.45; cursor: default; }
+
 .ps-organize-card__header {
   display: flex;
   justify-content: space-between;
@@ -558,7 +616,7 @@
 .ps-organize-preview {
   display: grid;
   place-items: center;
-  aspect-ratio: 4 / 5;
+  aspect-ratio: 1 / 1;
   overflow: hidden;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -1365,10 +1423,6 @@
     border-inline: 0;
   }
 
-  .ps-reader-search__count {
-    display: none;
-  }
-
   .ps-reader-workspace {
     border-inline: 0;
     border-radius: 0;
@@ -1385,6 +1439,28 @@
   .ps-reader-pages {
     gap: 21px;
     padding: 12px;
+  }
+}
+
+/* Phone widths: tighten spacing so Save PDF stays on screen without the
+   toolbar scrolling sideways. */
+@media (max-width: 420px) {
+  .ps-reader-toolbar {
+    gap: 0;
+    padding-inline: 2px;
+  }
+
+  .ps-reader-toolbar__group {
+    gap: 0;
+  }
+
+  .ps-reader-zoom__value {
+    min-width: 44px;
+    padding-inline: 2px;
+  }
+
+  .ps-reader-page-input {
+    gap: 4px;
   }
 }
 
@@ -1533,7 +1609,6 @@
   line-height: 2.8;
   letter-spacing: 0;
   padding-block: 0.45em;
-  padding-inline: 0.55em;
   text-align: start;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1803,6 +1878,12 @@
     max-width: none;
     min-height: calc(100dvh - 40px);
     padding: 0 32px 34px;
+  }
+
+  .ps-screen--viewer {
+    height: calc(100dvh - 40px);
+    min-height: 0;
+    padding-bottom: 0;
   }
 
   .ps-home,
@@ -2224,6 +2305,8 @@
 .ps-field select {
   color: var(--ink);
   font: inherit;
+  font-size: 16px;
+  font-weight: 400;
   min-height: 48px;
   width: 100%;
   padding: 10px;
@@ -2239,6 +2322,15 @@
 }
 .well__meta {
   flex: 1 1 130px;
+}
+/* Disabled reorder/remove buttons recede instead of gaining the generic
+   disabled border and fill, which made them louder than enabled ones. */
+.well__item .btn--icon.btn--ghost:disabled {
+  background: var(--surface);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  opacity: 0.4;
 }
 .ps-screen,
 .ps-body,
@@ -2265,8 +2357,15 @@
   height: 100%;
   pointer-events: none;
 }
+.native-capture-cancel {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  right: 12px;
+  z-index: 1000;
+}
+
 .ps-scan-editor__image polygon {
-  fill: color-mix(in srgb, var(--primary) 10%, transparent);
+  fill: none;
   stroke: var(--primary);
   stroke-width: 0.5;
 }
@@ -2458,6 +2557,8 @@
   padding: 10px 12px;
   color: var(--ink);
   font: inherit;
+  font-size: 16px;
+  font-weight: 400;
   text-align: left;
   background: var(--surface);
   border: 1px solid var(--control-line);
@@ -2547,6 +2648,8 @@
   padding: 0 10px;
   color: var(--ink);
   font: inherit;
+  font-size: 15px;
+  font-weight: 500;
   text-align: left;
   border-radius: 8px;
 }
@@ -2889,3 +2992,63 @@
 .scan-edit .ps-scan-editor__image { transition: none; }
 .scan-edit .ps-scan-editor__image.is-rotating { transition: transform 280ms cubic-bezier(.22, 1, .36, 1), width 280ms cubic-bezier(.22, 1, .36, 1); }
 @media (prefers-reduced-motion: reduce) { .scan-edit .ps-scan-editor__image.is-rotating { transition: none; } }
+/* A reserved measured native slot, never a clickable HTML imitation of the ad. */
+.tools-banner-slot { width:100%; height:0; overflow:hidden; pointer-events:none; }
+/* The inert zero-height width probe must not create a second parent flex gap. */
+.ps-home > .tools-banner-slot:not(.is-loaded) { margin-top:calc(-1 * var(--home-gap)); }
+.tools-banner-slot.is-loaded { height:auto; padding-block:12px; display:flex; flex-direction:column; align-items:center; gap:6px; }
+.tools-banner-label { font-size:11px; line-height:16px; color:var(--muted); }
+.tools-banner-preview { margin-block:12px; min-height:100px; display:flex; align-items:center; justify-content:center; padding:16px; border:1px dashed var(--muted); color:var(--muted); font-size:12px; text-align:center; pointer-events:none; }
+
+/* Organize: page-order actions on one line at phone widths. */
+.ps-organize-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.ps-organize-actions .btn {
+  min-height: 44px;
+  padding: 0 6px;
+  gap: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.ps-organize-actions .btn svg {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+}
+
+/* Result: follow-up tools as one row of icon tiles. */
+.ps-next-tools {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.ps-next-tools .ps-next-tool {
+  flex-direction: column;
+  gap: 4px;
+  min-height: 64px;
+  padding: 8px 4px;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.ps-next-tools .ps-next-tool svg {
+  flex-shrink: 0;
+  color: var(--brass);
+}
+
+/* One-line segmented choice (e.g. Compress level). */
+.ps-segmented {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 8px;
+}
+.ps-segmented .btn {
+  min-height: 44px;
+  padding: 0 6px;
+  font-size: 13px;
+  white-space: nowrap;
+}

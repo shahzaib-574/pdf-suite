@@ -1,18 +1,18 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import type { PluginListenerHandle } from "@capacitor/core";
 import type { PickedFile } from "../lib/types";
-import { ensureJpegOrPng, MAX_INPUT_BYTES, toArrayBuffer } from "./files";
+import { ensureJpegOrPng, MAX_INPUT_BYTES } from "./files";
+import { abortCheck,createGalleryImporter,type GalleryOptions,type GalleryBridge } from './galleryImport';
 type Incoming = { id: string; name: string; mime: string; size: number };
 const importer = registerPlugin<{
   takeFiles(): Promise<{ files: Incoming[]; error: string }>;
-  pickImages(options: {
-    max: number;
-  }): Promise<{ files: Incoming[]; cancelled?: boolean; error: string }>;
+  pickImages:GalleryBridge['pickImages'];
+  cancelPickImages:GalleryBridge['cancelPickImages'];
   readChunk(options: { id: string; offset: number }): Promise<{ data: string }>;
   release(options: { id: string }): Promise<void>;
   addListener(
-    event: "incoming",
-    callback: (event?: {openingPdf?:boolean}) => void,
+    event: "incoming"|"importProgress",
+    callback: (event?: {openingPdf?:boolean;requestId:string;phase:string;bytes:number;files:number}) => void,
   ): Promise<PluginListenerHandle>;
 }>("FileImporter");
 
@@ -21,10 +21,12 @@ function isUnimplementedPluginError(error: unknown): boolean {
   return /not implemented|unimplemented|is not available/i.test(message);
 }
 
-async function readIncomingBytes(file: Incoming): Promise<Uint8Array> {
+async function readIncomingBytes(file: Incoming,options:GalleryOptions={}): Promise<Uint8Array> {
+  if(!Number.isSafeInteger(file.size)||file.size<=0||file.size>MAX_INPUT_BYTES)throw new Error('The selected file is empty or exceeds 128 MB.');
   const bytes = new Uint8Array(file.size);
   let offset = 0;
   while (offset < bytes.length) {
+    abortCheck(options.signal);
     const { data } = await importer.readChunk({
       id: file.id,
       offset,
@@ -35,16 +37,17 @@ async function readIncomingBytes(file: Incoming): Promise<Uint8Array> {
     for (let i = 0; i < binary.length; i++)
       bytes[offset + i] = binary.charCodeAt(i);
     offset += binary.length;
+    options.onProgress?.({phase:'reading',bytes:offset,files:0});
   }
   return bytes;
 }
 
 /** Keep native still-photo bytes intact; no gallery downsampling or re-encoding. */
-export async function readNativeCameraPhoto(file: Incoming): Promise<PickedFile> {
+export async function readNativeCameraPhoto(file: Incoming,options:GalleryOptions={}): Promise<PickedFile> {
   try {
     if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > MAX_INPUT_BYTES)
       throw new Error('The captured photo exceeds 128 MB or is unavailable.');
-    return { name: file.name, mime: file.mime, bytes: await readIncomingBytes(file) };
+    return { name: file.name, mime: file.mime, bytes: await readIncomingBytes(file,options) };
   } finally { await importer.release({ id: file.id }).catch(() => undefined); }
 }
 
@@ -59,37 +62,16 @@ export function fileArrayToFileList(files: File[]): FileList {
 }
 
 /** Native Android photo picker. `null` means fall back to `<input type="file">`. */
-export async function pickGalleryImages(max: number): Promise<File[] | null> {
+const galleryImport=createGalleryImporter(importer as GalleryBridge,readIncomingBytes);
+export async function pickGalleryImages(max: number,options:GalleryOptions={}): Promise<File[] | null> {
   if (!androidGalleryPickerAvailable()) return null;
-  const limit = Math.max(1, Math.min(200, Math.floor(max) || 1));
-  let batch: { files: Incoming[]; cancelled?: boolean; error: string };
   try {
-    batch = await importer.pickImages({ max: limit });
+    return await galleryImport(max,options);
   } catch (error) {
     if (isUnimplementedPluginError(error)) return null;
     throw error instanceof Error
       ? error
       : new Error("Could not open the gallery.");
-  }
-  if (batch.error) throw new Error(batch.error);
-  if (batch.cancelled || batch.files.length === 0) return [];
-  try {
-    if (batch.files.reduce((sum, file) => sum + file.size, 0) > MAX_INPUT_BYTES)
-      throw new Error("Those photos exceed 128 MB. Choose a smaller group.");
-    const files: File[] = [];
-    for (const file of batch.files) {
-      const bytes = await readIncomingBytes(file);
-      files.push(
-        new File([toArrayBuffer(bytes)], file.name, {
-          type: file.mime || "image/jpeg",
-        }),
-      );
-    }
-    return files;
-  } finally {
-    await Promise.allSettled(
-      batch.files.map((file) => importer.release({ id: file.id })),
-    );
   }
 }
 export function subscribeIncoming(

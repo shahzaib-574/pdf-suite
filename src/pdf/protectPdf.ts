@@ -26,3 +26,21 @@ export async function unprotectPdf(
   const saved = await doc.save();
   return saved instanceof Uint8Array ? saved : new Uint8Array(saved);
 }
+
+/**
+ * Plain bytes for pdf-lib: decrypts with `password` when the PDF is
+ * encrypted, otherwise returns the input untouched.
+ */
+export async function decryptedPdfBytes(
+  pdfBytes: Uint8Array,
+  password: string | undefined,
+): Promise<Uint8Array> {
+  if (password === undefined) return pdfBytes;
+  const doc = await pdfLib.PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  if (!doc.isEncrypted) return pdfBytes;
+  if (!(await unlockInPlace(doc, password))) {
+    throw new Error("That password was incorrect.");
+  }
+  const saved = await doc.save();
+  return saved instanceof Uint8Array ? saved : new Uint8Array(saved);
+}

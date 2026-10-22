@@ -2,6 +2,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import type { PickedFile } from "../lib/types";
+import { retainedScanBytes } from './scanInputPolicy';
 
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -353,6 +354,88 @@ export async function ensureJpegOrPng(file: PickedFile): Promise<PickedFile> {
   };
 }
 
+/** Scan-only normalization keeps supported originals; generic image-tool policy is unchanged. */
+export async function fileListToScanImages(
+  files: FileList | File[],
+  options: {
+    signal?: AbortSignal;
+    onProgress?: (state: { phase: "normalizing"; files: number }) => void;
+  } = {},
+): Promise<PickedFile[]> {
+  const check = () => {
+    if (options.signal?.aborted)
+      throw new DOMException("Operation cancelled", "AbortError");
+  };
+  check();
+  const list = Array.from(files);
+  if (
+    list.length > 200 ||
+    list.some((file) => file.size <= 0) ||
+    list.reduce((sum, file) => sum + file.size, 0) > MAX_INPUT_BYTES
+  )
+    throw new Error(
+      "Choose readable photos, at most 200 files totaling 128 MB.",
+    );
+  const picked: PickedFile[] = [];
+  for (const file of list) {
+    check();
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    check();
+    const item = { name: file.name, mime: mimeOf(file), bytes };
+    const bitmap = await createImageBitmap(
+      new Blob([toArrayBuffer(bytes)], { type: item.mime || "image/*" }),
+    );
+    try {
+      check();
+      if (bitmap.width * bitmap.height > 32_000_000)
+        throw new Error(
+          "This photo exceeds the 32 megapixel scan-editing limit. Choose a smaller photo.",
+        );
+      if (hasJpegMagic(bytes) || hasPngMagic(bytes))
+        picked.push({
+          ...item,
+          mime: hasJpegMagic(bytes) ? "image/jpeg" : "image/png",
+        });
+      else {
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height),
+          context = canvas.getContext("2d", { alpha: false });
+        if (!context)
+          throw new Error("Could not convert this photo on-device.");
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(bitmap, 0, 0);
+        const blob = await canvas.convertToBlob({ type: "image/png" });
+        check();
+        const converted = new Uint8Array(await blob.arrayBuffer());
+        check();
+        if (
+          converted.length > MAX_INPUT_BYTES ||
+          picked.reduce((n, p) => n + p.bytes.length, 0) + converted.length >
+            MAX_INPUT_BYTES
+        )
+          throw new Error(
+            "Converted scan exceeds 128 MB. Choose fewer photos.",
+          );
+        picked.push({
+          name: file.name.replace(/\.[^.]+$/, ".png"),
+          mime: "image/png",
+          bytes: converted,
+          scanSource: item,
+        });
+      }
+    } finally {
+      bitmap.close();
+    }
+    options.onProgress?.({ phase: "normalizing", files: picked.length });
+    const retained = retainedScanBytes(picked);
+    if (retained > MAX_INPUT_BYTES)
+      throw new Error(
+        "Scan photos and retained originals exceed 128 MB. Choose fewer photos.",
+      );
+  }
+  check();
+  return picked;
+}
 export async function fileListToPicked(
   files: FileList | File[],
   asPdfImages = false,

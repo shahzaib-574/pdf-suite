@@ -23,6 +23,7 @@ import type { PdfViewerSession } from "./render";
 import type {
   TransferFile,
   WorkerOp,
+  WorkerProgress,
   WorkerRequest,
   WorkerResponse,
 } from "./protocol";
@@ -79,17 +80,29 @@ export type PdfEngine = {
 type Pending = {
   resolve: (value: Extract<WorkerResponse, { ok: true }>) => void;
   reject: (err: Error) => void;
+  onProgress?: (update: PdfToDocxProgress) => void;
+  cleanup?: () => void;
 };
 
+// Effective DPI for a full-page image, and JPEG quality. 200 DPI keeps fine
+// print (maps, forms, small type) readable when zoomed; 150 DPI is still sharp.
+const IMAGE_COMPRESSION = {
+  keep: { dpi: 200, quality: 0.8 },
+  balanced: { dpi: 150, quality: 0.7 },
+} as const;
+
 let worker: Worker | undefined;
+let workerStarted = false;
 let nextId = 1;
 const pending = new Map<number, Pending>();
 
 export function cancelPendingJobs(): void {
   worker?.terminate();
   worker = undefined;
-  for (const job of pending.values())
+  for (const job of pending.values()) {
+    job.cleanup?.();
     job.reject(new Error("Processing cancelled."));
+  }
   pending.clear();
 }
 
@@ -98,6 +111,7 @@ function packFile(file: PickedFile): TransferFile {
     name: file.name,
     mime: file.mime,
     bytes: copyBuffer(file.bytes),
+    password: file.password,
   };
 }
 
@@ -107,52 +121,97 @@ function transferOf(files: TransferFile | TransferFile[]): ArrayBuffer[] {
 
 function getWorker(): Worker {
   if (!worker) {
-    worker = new Worker(new URL("./worker.ts", import.meta.url), {
+    const created = new Worker(new URL("./worker.ts", import.meta.url), {
       type: "module",
     });
-    worker.addEventListener("message", onWorkerMessage);
-    worker.addEventListener("error", onWorkerError);
+    created.addEventListener("message", onWorkerMessage);
+    created.addEventListener("error", (event) => onWorkerError(created, event));
+    created.addEventListener("messageerror", () =>
+      failWorker(created, "PDF processing returned a result that could not be read. Try again."),
+    );
+    worker = created;
+    workerStarted = false;
   }
   return worker;
 }
 
 function onWorkerMessage(event: MessageEvent<unknown>): void {
+  // Any message, including the worker's ready signal, means it loaded.
+  if (event.target === worker) workerStarted = true;
   const data = event.data;
-  if (
-    typeof data !== "object" ||
-    data === null ||
-    !("id" in data) ||
-    !("ok" in data)
-  ) {
+  if (typeof data !== "object" || data === null || !("id" in data)) {
     return;
   }
+  if ("progress" in data && !("ok" in data)) {
+    const progress = data as WorkerProgress;
+    const job = pending.get(progress.id);
+    job?.onProgress?.({ progress: progress.progress, label: progress.label });
+    return;
+  }
+  if (!("ok" in data)) return;
   const response = data as WorkerResponse;
   const job = pending.get(response.id);
   if (!job) return;
   pending.delete(response.id);
+  job.cleanup?.();
   if (response.ok) job.resolve(response);
   else job.reject(new Error(response.message));
 }
 
-function onWorkerError(): void {
-  const err = new Error("PDF worker failed to start.");
-  for (const job of pending.values()) job.reject(err);
-  pending.clear();
+// A crashed worker never answers its pending jobs, so stop it and fail them
+// all; the next job starts a fresh worker.
+function failWorker(target: Worker, message: string): void {
+  target.terminate();
+  if (target !== worker) return;
   worker = undefined;
+  const err = new Error(message);
+  for (const job of pending.values()) {
+    job.cleanup?.();
+    job.reject(err);
+  }
+  pending.clear();
+}
+
+function onWorkerError(target: Worker, event: Event): void {
+  const detail =
+    typeof ErrorEvent !== "undefined" && event instanceof ErrorEvent
+      ? (event.message ?? "").trim()
+      : "";
+  const what = workerStarted
+    ? "PDF processing stopped unexpectedly"
+    : "PDF processing could not start";
+  failWorker(target, detail ? `${what} (${detail}). Try again.` : `${what}. Try again.`);
 }
 
 function callWorker(
   op: WorkerOp,
   transfer: ArrayBuffer[],
+  control?: JobControl,
 ): Promise<Extract<WorkerResponse, { ok: true }>> {
+  if (control?.signal?.aborted) {
+    return Promise.reject(new Error("Processing cancelled."));
+  }
   const id = nextId++;
   const request = { ...op, id } as WorkerRequest;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    const onAbort = () => {
+      cancelPendingJobs();
+    };
+    const cleanup = () => {
+      control?.signal?.removeEventListener("abort", onAbort);
+    };
+    control?.signal?.addEventListener("abort", onAbort, { once: true });
+    pending.set(id, {
+      resolve,
+      reject,
+      onProgress: control?.onProgress,
+      cleanup,
+    });
     try {
       getWorker().postMessage(request, { transfer });
     } catch (err) {
       pending.delete(id);
+      cleanup();
       reject(err instanceof Error ? err : new Error(humanError(err)));
     }
   });
@@ -178,9 +237,10 @@ async function workerJob(
   op: WorkerOp,
   transfer: ArrayBuffer[],
   fallbackName: string,
+  control?: JobControl,
 ): Promise<JobResult> {
   try {
-    return toJobOk(await callWorker(op, transfer), fallbackName);
+    return toJobOk(await callWorker(op, transfer, control), fallbackName);
   } catch (err) {
     return { ok: false, message: humanError(err) };
   }
@@ -216,22 +276,27 @@ export const engine: PdfEngine = {
     return pdfToImages(file, options, control);
   },
   async compress(file, level, control) {
-    if (level === "keep") {
+    if (level !== "strong") {
+      // Recommended / Strong: shrink embedded images, keep text and forms.
+      const images = IMAGE_COMPRESSION[level];
       const packed = packFile(file);
       const result = await workerJob(
-        { op: "optimize", file: packed },
+        { op: "optimize", file: packed, images },
         transferOf(packed),
-        "optimized.pdf",
+        "compressed.pdf",
+        control,
       );
       if (result.ok) {
+        const recompressed = result.extra?.imagesRecompressed ?? 0;
         const originalRetained = result.bytes.length >= file.bytes.length;
         if (originalRetained) result.bytes = file.bytes;
         result.extra = {
           compression: {
             originalBytes: file.bytes.length,
             outputBytes: result.bytes.length,
-            mode: "lossless",
+            mode: recompressed > 0 ? "images" : "lossless",
             originalRetained,
+            imagesRecompressed: recompressed,
           },
         };
       }

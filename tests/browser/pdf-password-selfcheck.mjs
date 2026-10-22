@@ -20,5 +20,24 @@ try {
  await page.getByRole('button',{name:'Cancel',exact:true}).click();assert.equal(await page.getByLabel('Document password',{exact:true}).count(),0);
  await page.locator('input[type=file]').setInputFiles({name:'plain.pdf',mimeType:'application/pdf',buffer:Buffer.from(bytes)});
  await page.getByRole('button',{name:'Convert to Word',exact:true}).click();await page.getByRole('button',{name:'Save Word file',exact:true}).waitFor();
- console.log('PASS detection, wrong-password retry, whitespace-preserving unlock and conversion, cancel, and unprotected PDF');
+ // A PDF unlocked in the Viewer must stay usable in the pdf-lib tools it opens.
+ const twoPages=await PDFDocument.create();twoPages.addPage();twoPages.addPage();
+ const lockedTwo=await page.evaluate(async bytes=>{const {protectPdf}=await import('/src/pdf/protectPdf.ts');return [...await protectPdf(new Uint8Array(bytes),'viewer-pass')];},[...await twoPages.save()]);
+ const openLockedInViewer=async()=>{
+  await page.goto('http://localhost:5173/');
+  await page.evaluate(async bytes=>{const {setCurrentViewer}=await import('/src/store/lastJob.ts');setCurrentViewer(new Uint8Array(bytes),'viewer-locked.pdf');location.hash='/viewer';},lockedTwo);
+  await page.getByLabel('Document password',{exact:true}).fill('viewer-pass');await page.getByRole('button',{name:'Open PDF',exact:true}).click();
+  await page.waitForSelector('.ps-reader-dock');
+ };
+ await openLockedInViewer();
+ await page.locator('.ps-reader-dock').getByRole('button',{name:'Organize',exact:true}).click();
+ await page.waitForSelector('.ps-organize-card');
+ await page.locator('.ps-organize-number').first().waitFor();await page.getByRole('button',{name:'Organize',exact:true}).click();
+ await page.waitForURL(/#\/result/);
+ await openLockedInViewer();
+ await page.locator('.ps-reader-dock').getByRole('button',{name:'Add',exact:true}).click();
+ await page.locator('input[type=file]').first().setInputFiles({name:'plain.pdf',mimeType:'application/pdf',buffer:Buffer.from(bytes)});
+ await page.getByRole('button',{name:'Merge PDFs',exact:true}).click();
+ await page.waitForURL(/#\/result/);
+ console.log('PASS detection, wrong-password retry, whitespace-preserving unlock and conversion, cancel, unprotected PDF, and viewer-unlocked organize/merge');
 }finally{await browser.close();}

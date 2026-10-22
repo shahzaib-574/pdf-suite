@@ -14,10 +14,25 @@ export type FileThumbProps = {
   size?: "sm" | "md";
 };
 
+const MAX_CACHE_ENTRIES = 64;
 const cache = new Map<string, string>();
 const failed = new Set<string>();
 const inflight = new Map<string, Promise<string | null>>();
 let pdfQueue: Promise<unknown> = Promise.resolve();
+
+function setCachedThumb(id: string, url: string): void {
+  if (cache.has(id)) {
+    cache.delete(id);
+  } else if (cache.size >= MAX_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) {
+      const oldUrl = cache.get(oldest);
+      if (oldUrl) URL.revokeObjectURL(oldUrl);
+      cache.delete(oldest);
+    }
+  }
+  cache.set(id, url);
+}
 
 function fileKind(name: string, mime: string): FileKind {
   const n = name.toLowerCase();
@@ -62,7 +77,7 @@ function loadThumb(
             type: file.mime || mime || "image/jpeg",
           }),
         );
-        cache.set(id, url);
+        setCachedThumb(id, url);
         return url;
       }
       const blob = await runPdf(() =>
@@ -73,7 +88,7 @@ function loadThumb(
         ),
       );
       const url = URL.createObjectURL(blob);
-      cache.set(id, url);
+      setCachedThumb(id, url);
       return url;
     } catch {
       failed.add(id);

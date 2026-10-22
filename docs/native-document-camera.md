@@ -85,3 +85,56 @@ contains user documents merely to install a differently signed test APK.
 Reference APIs: [CameraX ImageCapture](https://developer.android.com/media/camera/camerax/take-photo),
 [CameraX transforms](https://developer.android.com/media/camera/camerax/transform-output),
 and [OpenCV Android](https://opencv.org/opencv4android-usage-models/).
+
+## October 2, 2026 local repair candidate
+
+The scan gallery path now preserves the selected JPEG/PNG bytes, including EXIF,
+instead of applying the generic image-tool 3200-pixel/JPEG normalization. The
+native camera original remains byte-preserved. Decodable other scan formats are
+converted at full resolution; generic non-scan image-tool behavior is unchanged.
+Scan-gallery ingestion rejects images over 32 megapixels; the existing native
+edit 32-megapixel guard remains. Scan additions enforce the 128 MB retained
+input budget across additions and retakes, including retained originals. A
+rejected addition/replacement leaves the existing pages unchanged.
+
+Native gallery UI distinguishes selecting, importing, reading and normalizing.
+Provider copying uses a dedicated, bounded worker rather than the shared bridge
+handler. Back cancels the owned request, closes its provider stream/cancellation
+signal where supported, and ignores late results. A canceled external picker or
+uncooperative provider may keep native ownership until it actually returns; the
+app does not start duplicate copies or apply a generic timeout. Existing cached
+files already handed to JavaScript are not deleted by a later cancellation.
+Capture cancellation/recreation is also session-owned; a capture interrupted by
+rotation returns a retry error instead of publishing a stale photo.
+
+This is locally validated repair/diagnostic code, not proof that the reported
+Pixel 8 color-detail problem or provider-specific gallery hang is resolved.
+CameraX resolution selection, camera SDK versions and raw-original processing
+are unchanged. Debug-only `ReamCamera` logs record bound still dimensions, saved
+JPEG dimensions/EXIF and tap-focus outcome. `ReamImport` records phase boundaries;
+progress fields contain bounded byte/file counts, not photo content. Neither
+logger emits document names, URI paths or photo bytes. No persistent diagnostics
+screen or user-photo test artifacts were added.
+
+### Pixel 8 verification (not run locally)
+
+Use the debug APK only on an authorized test installation; do not uninstall an
+existing app containing documents to work around a signing mismatch. Record the
+Android version. With synthetic printed/color samples, compare native capture
+Original/color review, crop and PDF to the untouched original and OEM camera.
+Record actual JPEG dimensions/EXIF and focus outcome; do not equate JPEG quality
+100 or the normal highest-resolution preference with OEM-camera quality.
+
+When a device is connected, collect only the safe diagnostic tags:
+`adb logcat -s ReamCamera ReamImport`. Test local and cloud-provider selection,
+waiting in the external picker, download/copy progress, successful review, picker
+cancel, Back during copying/reading, immediate retry, background/resume, rotation
+during capture and late provider completion. Confirm that canceled work cannot
+replace a newer session's pages and that subsequent bridge actions remain
+responsive. Arbitrary providers are not universally interruptible; note the
+last phase rather than treating an open external picker as a timeout failure.
+Physical Pixel camera and cloud-provider behavior remain NOT RUN. Targeted
+emulator instrumentation attempts/limitations are recorded in the validation report.
+
+Local evidence and APK identity are recorded in
+[native-camera-repair-validation.md](native-camera-repair-validation.md).

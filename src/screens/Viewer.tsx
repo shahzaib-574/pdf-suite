@@ -17,6 +17,8 @@ import {
   FilePlus,
   FileText,
   FolderOpen,
+  Hash,
+  Images,
   List,
   ListOrdered,
   Lock,
@@ -25,8 +27,10 @@ import {
   MoreVertical,
   PanelLeft,
   Plus,
+  Scissors,
   Search,
   Share2,
+  Stamp,
   Unlock,
   X,
 } from "lucide-react";
@@ -51,6 +55,7 @@ import { getRecent, saveRecent } from "../store/recents";
 import { queueToolFiles } from "../store/toolInput";
 import { useTheme } from "../theme/context";
 import { navigate } from "./nav";
+import { viewerImageCaches } from "./viewerImageCache";
 
 type ViewerProps = {
   recentId?: string;
@@ -71,6 +76,7 @@ const TILE_CSS = 768;
 const DETAIL_MAX_PIXELS = 3_000_000;
 const DETAIL_MAX_DIM = 1536;
 const HUGE_PAGE_CSS = 1800;
+const THUMBNAIL_WIDTH = 180;
 
 type ZoomFocal = {
   pageIndex: number;
@@ -875,12 +881,14 @@ export function Viewer({ recentId }: ViewerProps) {
               onChange={(e) => setPassword(e.target.value)}
             />
           </label>
-          <AnimatedButton type="submit" disabled={!password}>
-            Open PDF
-          </AnimatedButton>
-          <AnimatedButton variant="ghost" onClick={() => navigate(backHash)}>
-            Cancel
-          </AnimatedButton>
+          <div className="ps-row">
+            <AnimatedButton type="submit" disabled={!password}>
+              Open PDF
+            </AnimatedButton>
+            <AnimatedButton variant="ghost" onClick={() => navigate(backHash)}>
+              Cancel
+            </AnimatedButton>
+          </div>
         </form>
       ) : error ? (
         <div className="ps-body">
@@ -1193,6 +1201,38 @@ export function Viewer({ recentId }: ViewerProps) {
                     <Combine size={16} strokeWidth={2.1} aria-hidden="true" />
                     Merge PDFs
                   </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openTool("split")}
+                  >
+                    <Scissors size={16} strokeWidth={2.1} aria-hidden="true" />
+                    Split PDF
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openTool("watermark")}
+                  >
+                    <Stamp size={16} strokeWidth={2.1} aria-hidden="true" />
+                    Watermark
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openTool("numbers")}
+                  >
+                    <Hash size={16} strokeWidth={2.1} aria-hidden="true" />
+                    Page numbers
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openTool("pdf-images")}
+                  >
+                    <Images size={16} strokeWidth={2.1} aria-hidden="true" />
+                    PDF to Images
+                  </button>
                 </div>
               ) : null}
             </div>
@@ -1272,8 +1312,8 @@ function ReaderPage({
   const pageRef = useRef<HTMLElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const renderedTextRef = useRef<PdfViewerTextLayer | null>(null);
-  const objectUrlRef = useRef<string | null>(null);
   const queryRef = useRef(query);
+  const imageCache = viewerImageCaches(session).pages;
   const [tiles, setTiles] = useState<PageDetail[]>([]);
   const tileUrlsRef = useRef<Map<string, string>>(new Map());
   const detailGen = useRef(0);
@@ -1298,8 +1338,17 @@ function ReaderPage({
     return () => observer.disconnect();
   }, [highZoom, viewportRef]);
 
+  // Off-screen pages stay cached until the bounded cache needs room, then
+  // drop their image so long documents don't keep every page decoded.
+  useEffect(() => {
+    imageCache.setVisible(pageIndex, visible);
+  }, [imageCache, pageIndex, visible]);
+
+  useEffect(() => () => imageCache.remove(pageIndex), [imageCache, pageIndex]);
+
   useEffect(() => {
     if (!visible) return;
+    if (src && imageCache.lookup(pageIndex, renderWidth) === src) return;
     let cancelled = false;
     void session
       .renderPage(pageIndex, renderWidth)
@@ -1309,8 +1358,9 @@ function ReaderPage({
           URL.revokeObjectURL(url);
           return;
         }
-        if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = url;
+        imageCache.set(pageIndex, url, renderWidth, () =>
+          setSrc((current) => (current === url ? null : current)),
+        );
         setSrc(url);
       })
       .catch((err: unknown) => {
@@ -1323,14 +1373,7 @@ function ReaderPage({
     return () => {
       cancelled = true;
     };
-  }, [pageIndex, renderWidth, session, visible]);
-
-  useEffect(
-    () => () => {
-      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-    },
-    [],
-  );
+  }, [imageCache, pageIndex, renderWidth, session, src, visible]);
 
   useEffect(() => {
     if (!visible || !textLayerRef.current || !page.text) return;
@@ -1423,7 +1466,7 @@ function ReaderPage({
       }
       if (jobs.length === 0) return;
       const generation = ++detailGen.current;
-      void Promise.all(
+      void Promise.allSettled(
         jobs.map(async (job) => {
           const cached = tileUrlsRef.current.get(job.key);
           if (cached) return { ...job, src: cached };
@@ -1460,8 +1503,16 @@ function ReaderPage({
           return { ...job, src: url };
         }),
       )
-        .then((next) => {
-          if (generation !== detailGen.current) {
+        .then((results) => {
+          const next = results.flatMap((result) =>
+            result.status === "fulfilled" ? [result.value] : [],
+          );
+          // A failed tile drops the whole batch; revoke the tiles it already
+          // rendered so they don't leak.
+          if (
+            generation !== detailGen.current ||
+            next.length !== results.length
+          ) {
             next.forEach((tile) => {
               if (!tileUrlsRef.current.has(tile.key))
                 URL.revokeObjectURL(tile.src);
@@ -1617,14 +1668,14 @@ function ReaderThumbnail({
   const [visible, setVisible] = useState(false);
   const [src, setSrc] = useState<string | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const objectUrlRef = useRef<string | null>(null);
+  const imageCache = viewerImageCaches(session).thumbnails;
 
   useEffect(() => {
     const element = buttonRef.current;
     if (!element) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry?.isIntersecting) setVisible(true);
+        setVisible(entry?.isIntersecting === true);
       },
       { rootMargin: "500px 0px" },
     );
@@ -1633,31 +1684,33 @@ function ReaderThumbnail({
   }, []);
 
   useEffect(() => {
-    if (!visible || src) return;
+    imageCache.setVisible(pageIndex, visible);
+  }, [imageCache, pageIndex, visible]);
+
+  useEffect(() => () => imageCache.remove(pageIndex), [imageCache, pageIndex]);
+
+  useEffect(() => {
+    if (!visible) return;
+    if (src && imageCache.lookup(pageIndex, THUMBNAIL_WIDTH) === src) return;
     let cancelled = false;
     void session
-      .renderPage(pageIndex, 180)
+      .renderPage(pageIndex, THUMBNAIL_WIDTH)
       .then((blob) => {
         const url = URL.createObjectURL(blob);
         if (cancelled) {
           URL.revokeObjectURL(url);
           return;
         }
-        objectUrlRef.current = url;
+        imageCache.set(pageIndex, url, THUMBNAIL_WIDTH, () =>
+          setSrc((current) => (current === url ? null : current)),
+        );
         setSrc(url);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [pageIndex, session, src, visible]);
-
-  useEffect(
-    () => () => {
-      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-    },
-    [],
-  );
+  }, [imageCache, pageIndex, session, src, visible]);
 
   return (
     <button

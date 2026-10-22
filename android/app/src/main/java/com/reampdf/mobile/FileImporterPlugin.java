@@ -8,6 +8,8 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.CancellationSignal;
+import android.content.res.AssetFileDescriptor;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.util.Base64;
@@ -28,6 +30,7 @@ import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Imports user-chosen content URIs without broad storage permissions. Share intents and the
@@ -40,7 +43,62 @@ public class FileImporterPlugin extends Plugin {
     private static final long MAX_BYTES = 128L * 1024 * 1024;
     private static final int MAX_FILES = 200;
     private static final int DEFAULT_PICK_MAX = 100;
-    private final AtomicBoolean pickerInFlight = new AtomicBoolean(false);
+    private final NativeImportWorker imports = new NativeImportWorker();
+    private final AtomicReference<PickerRequest> picker = new AtomicReference<>();
+    private static final class ImportValidationException extends IllegalArgumentException {
+        ImportValidationException(String message) { super(message); }
+    }
+    private String safeImportError(Exception error, String fallback) {
+        return error instanceof ImportValidationException ? error.getMessage() : fallback;
+    }
+    private static final class PickerRequest {
+        final String id;
+        final PluginCall call;
+        final NativeImportWorker.Job job = new NativeImportWorker.Job();
+        private boolean settled;
+        String phase = "";
+        long progressBytes;
+        PickerRequest(String id, PluginCall call) { this.id = id; this.call = call; }
+        synchronized void respond(JSArray files, boolean cancelled, String error) {
+            if (settled) return;
+            settled = true;
+            JSObject result = new JSObject();
+            result.put("files", files);
+            result.put("cancelled", cancelled);
+            result.put("error", error);
+            call.resolve(result);
+        }
+        synchronized void complete(JSArray files) {
+            if (settled) return;
+            if (job.publish()) respond(files, false, "");
+            else respond(new JSArray(), true, "");
+        }
+        synchronized void cancel(NativeImportWorker worker) {
+            // Publication and cancellation share this lock: delivered files now belong to JS.
+            if (settled) return;
+            worker.cancel(job);
+            respond(new JSArray(), true, "");
+        }
+    }
+    private void progress(PickerRequest request, String phase, long bytes, int count) {
+        if (request == null || request.job.isCancelled()) return;
+        boolean phaseChanged;
+        synchronized (request) {
+            phaseChanged = !phase.equals(request.phase);
+            // At most128 byte-progress events for the128MB cap, plus phase boundaries.
+            if (!phaseChanged && bytes - request.progressBytes < 1024 * 1024) return;
+            request.phase = phase;
+            request.progressBytes = bytes;
+        }
+        JSObject event = new JSObject();
+        event.put("requestId", request.id);
+        event.put("phase", phase);
+        event.put("bytes", bytes);
+        event.put("files", count);
+        notifyListeners("importProgress", event);
+        if (BuildConfig.DEBUG && phaseChanged)
+            android.util.Log.d("ReamImport", "phase=" + phase + " bytes=" + bytes + " files=" + count);
+    }
 
     @Override public void load() {
         File root = new File(getContext().getCacheDir(), "ream-incoming");
@@ -65,90 +123,89 @@ public class FileImporterPlugin extends Plugin {
             JSObject opening = new JSObject(); opening.put("openingPdf", true);
             notifyListeners("incoming", opening, true);
         }
-        execute(() -> {
+        NativeImportWorker.Job job=new NativeImportWorker.Job();
+        if(!imports.submit(job,() -> {
             try {
-                JSArray imported = copyUris(uris, false, "Share up to 200 files at a time.", "The shared file is unavailable.", "Shared files exceed 128 MB. Send a smaller group.");
+                JSArray imported = copyUris(uris, false, "Share up to 200 files at a time.", "The shared file is unavailable.", "Shared files exceed 128 MB. Send a smaller group.",job,null);
                 synchronized(this) {
-                    if(pending.length()>0) throw new IllegalStateException("Finish importing the previous shared files, then share this group again.");
+                    if(pending.length()>0) throw new ImportValidationException("Finish importing the previous shared files, then share this group again.");
+                    if(!job.publish())throw new java.io.InterruptedIOException("Import cancelled");
                     pending=imported;pendingError="";
                 }
             } catch(Exception error) {
-                synchronized(this) { pendingError=error.getMessage()==null?"Could not import shared files.":error.getMessage(); }
+                synchronized(this) { pendingError=safeImportError(error,"Could not import shared files."); }
             }
             notifyListeners("incoming",new JSObject(),true);
-        });
+        })){synchronized(this){pendingError="Finish the current import before sharing another group.";}notifyListeners("incoming",new JSObject(),true);}
     }
 
     @PluginMethod
     public void pickImages(PluginCall call) {
         Integer requested = call.getInt("max", DEFAULT_PICK_MAX);
         int max = Math.min(Math.max(requested == null ? DEFAULT_PICK_MAX : requested, 1), pickImagesMaxLimit());
-        if (!pickerInFlight.compareAndSet(false, true)) {
+        String id=call.getString("requestId",UUID.randomUUID().toString());
+        if(id==null||!id.matches("[A-Za-z0-9_-]{1,80}")){call.reject("Invalid gallery request.");return;}
+        PickerRequest request=new PickerRequest(id,call);
+        if (imports.isBusy()||!picker.compareAndSet(null,request)) {
             call.reject("Finish the current gallery selection first.");
             return;
         }
-        Intent picker = photoPickerIntent(max);
+        Intent intent = photoPickerIntent(max);progress(request,"selecting",0,0);
         try {
-            startActivityForResult(call, picker, "pickImagesResult");
+            startActivityForResult(call, intent, "pickImagesResult");
         } catch (ActivityNotFoundException photoPickerMissing) {
             try {
                 startActivityForResult(call, openDocumentIntent(max > 1), "pickImagesResult");
-            } catch (ActivityNotFoundException documentsMissing) {
-                pickerInFlight.set(false);
-                call.reject("No gallery picker is available on this device.");
+            } catch (RuntimeException documentsMissing) {
+                picker.compareAndSet(request,null);
+                request.respond(new JSArray(),false,"No gallery picker is available on this device.");
             }
         } catch (RuntimeException error) {
-            pickerInFlight.set(false);
-            call.reject("Could not open the gallery.", error);
+            picker.compareAndSet(request,null);
+            request.respond(new JSArray(),false,"Could not open the gallery.");
         }
     }
+    @PluginMethod public void cancelPickImages(PluginCall call){PickerRequest request=picker.get();if(request!=null&&request.id.equals(call.getString("requestId"))){request.cancel(imports);}call.resolve();}
 
     @ActivityCallback
     private void pickImagesResult(PluginCall call, ActivityResult result) {
-        pickerInFlight.set(false);
-        if (call == null) return;
+        PickerRequest request=picker.get();
+        if(request==null)return;
+        if(call!=null && !call.getCallbackId().equals(request.call.getCallbackId()))return;
+        if(request.job.isCancelled()){picker.compareAndSet(request,null);request.respond(new JSArray(),true,"");return;}
         if (result.getResultCode() == Activity.RESULT_CANCELED) {
-            JSObject response = new JSObject();
-            response.put("files", new JSArray());
-            response.put("cancelled", true);
-            response.put("error", "");
-            call.resolve(response);
+            picker.compareAndSet(request,null);request.respond(new JSArray(),true,"");
             return;
         }
         if (result.getResultCode() != Activity.RESULT_OK) {
-            call.reject("Could not complete the gallery selection.");
+            picker.compareAndSet(request,null);request.respond(new JSArray(),false,"Could not complete the gallery selection.");
             return;
         }
         LinkedHashSet<Uri> uris = new LinkedHashSet<>();
-        collectResultUris(result.getData(), uris);
+        try{collectResultUris(result.getData(), uris);}catch(RuntimeException error){picker.compareAndSet(request,null);request.respond(new JSArray(),false,"Could not read the gallery result.");return;}
         if (uris.isEmpty()) {
-            JSObject response = new JSObject();
-            response.put("files", new JSArray());
-            response.put("cancelled", true);
-            response.put("error", "");
-            call.resolve(response);
+            picker.compareAndSet(request,null);request.respond(new JSArray(),true,"");
             return;
         }
-        execute(() -> {
+        progress(request,"importing",0,0);
+        if(!imports.submit(request.job,() -> {
             try {
                 JSArray imported = copyUris(
                     uris,
                     true,
                     "Choose up to 200 photos at a time.",
                     "Could not read one of the selected photos.",
-                    "Those photos exceed 128 MB. Choose a smaller group."
+                    "Those photos exceed 128 MB. Choose a smaller group.",request.job,request
                 );
-                JSObject response = new JSObject();
-                response.put("files", imported);
-                response.put("cancelled", false);
-                response.put("error", "");
-                call.resolve(response);
+                progress(request,"reading",0,imported.length());
+                request.complete(imported);
             } catch (SecurityException error) {
-                call.reject("Could not read those photos. Choose them again from the gallery.");
+                request.respond(new JSArray(),false,"Could not read those photos. Choose them again from the gallery.");
             } catch (Exception error) {
-                call.reject(error.getMessage() == null ? "Could not import those photos." : error.getMessage());
+                request.respond(new JSArray(),request.job.isCancelled(),request.job.isCancelled()?"":safeImportError(error,"Could not import those photos. Choose them again from the gallery."));
             }
-        });
+            finally{picker.compareAndSet(request,null);}
+        })){picker.compareAndSet(request,null);request.respond(new JSArray(),false,"Another import is still finishing. Try again.");}
     }
 
     @PluginMethod public synchronized void takeFiles(PluginCall call) {
@@ -225,21 +282,22 @@ public class FileImporterPlugin extends Plugin {
         boolean imagesOnly,
         String tooManyMessage,
         String unavailableMessage,
-        String tooLargeMessage
+        String tooLargeMessage,NativeImportWorker.Job job,PickerRequest request
     ) throws Exception {
         JSArray imported = new JSArray();
         ArrayList<File> staged = new ArrayList<>();
         try {
-            if (uris.size() > MAX_FILES) throw new IllegalArgumentException(tooManyMessage);
+            if (uris.size() > MAX_FILES) throw new ImportValidationException(tooManyMessage);
             File root = new File(getContext().getCacheDir(), "ream-incoming");
             if (!root.isDirectory() && !root.mkdirs()) throw new IllegalStateException("Could not prepare local import storage.");
             long total = 0;
             for (Uri uri : uris) {
-                if (!"content".equals(uri.getScheme())) throw new IllegalArgumentException("Choose files from an Android document provider.");
+                job.check();CancellationSignal signal=new CancellationSignal();job.onCancel(signal::cancel);
+                if (!"content".equals(uri.getScheme())) throw new ImportValidationException("Choose files from an Android document provider.");
                 tryPersistRead(uri);
                 String mime = getContext().getContentResolver().getType(uri);
                 String name = "document";
-                try (Cursor cursor = getContext().getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                try (Cursor cursor = getContext().getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null,signal)) {
                     if (cursor != null && cursor.moveToFirst()) name = cursor.getString(0);
                 } catch (SecurityException error) {
                     throw new SecurityException(unavailableMessage, error);
@@ -258,24 +316,30 @@ public class FileImporterPlugin extends Plugin {
                         : "";
                 }
                 if (imagesOnly) {
-                    if (!mime.startsWith("image/")) throw new IllegalArgumentException("Choose photos from the gallery.");
+                    if (!mime.startsWith("image/")) throw new ImportValidationException("Choose photos from the gallery.");
                 } else if (!mime.equals("application/pdf") && !mime.equals("application/vnd.openxmlformats-officedocument.wordprocessingml.document") && !mime.startsWith("image/")) {
-                    throw new IllegalArgumentException("Ream accepts PDF, DOCX and image files.");
+                    throw new ImportValidationException("Ream accepts PDF, DOCX and image files.");
                 }
                 String id = UUID.randomUUID().toString();
                 File destination = new File(root, id);
-                staged.add(destination);
+                staged.add(destination);job.stage(destination);
                 long size = 0;
-                try (InputStream input = getContext().getContentResolver().openInputStream(uri); FileOutputStream output = new FileOutputStream(destination)) {
-                    if (input == null) throw new IllegalArgumentException(unavailableMessage);
+                try (AssetFileDescriptor descriptor=getContext().getContentResolver().openAssetFileDescriptor(uri,"r",signal)) {
+                    if(descriptor==null)throw new ImportValidationException(unavailableMessage);job.own(descriptor);
+                    try(InputStream input=descriptor.createInputStream();FileOutputStream output=new FileOutputStream(destination)){
+                    job.own(input);
+                    if (input == null) throw new ImportValidationException(unavailableMessage);
                     byte[] buffer = new byte[64 * 1024];
                     int length;
                     while ((length = input.read(buffer)) != -1) {
+                        job.check();
                         size += length;
                         total += length;
-                        if (total > MAX_BYTES) throw new IllegalArgumentException(tooLargeMessage);
+                        if (total > MAX_BYTES) throw new ImportValidationException(tooLargeMessage);
                         output.write(buffer, 0, length);
+                        progress(request,"importing",total,imported.length());
                     }
+                    job.check();if(size==0)throw new ImportValidationException(unavailableMessage);}
                 } catch (SecurityException error) {
                     throw new SecurityException(unavailableMessage, error);
                 }
@@ -300,4 +364,5 @@ public class FileImporterPlugin extends Plugin {
             // Photo-picker grants are temporary; the copy below uses the grant from the result intent.
         }
     }
+    @Override protected void handleOnDestroy(){PickerRequest request=picker.getAndSet(null);if(request!=null){request.cancel(imports);}imports.close();}
 }

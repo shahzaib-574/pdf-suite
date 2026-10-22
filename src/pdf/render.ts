@@ -108,7 +108,8 @@ class ViteBinaryDataFactory {
 }
 
 const COMPRESS: Record<CompressLevel, { scale: number; quality: number }> = {
-  strong: { scale: 1.2, quality: 0.55 },
+  // Extreme: pages become ~120 DPI images.
+  strong: { scale: 120 / 72, quality: 0.6 },
   balanced: { scale: 2, quality: 0.78 },
   keep: { scale: 1, quality: 0.92 },
 };
@@ -262,8 +263,9 @@ function canvasToJpeg(
 async function withPdfjs<T>(
   file: PickedFile,
   fn: (pdf: PDFDocumentProxy) => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<T> {
-  const task = createPdfTask(file);
+  const task = createPdfTask(file, { signal });
   let pdf: PDFDocumentProxy | undefined;
   try {
     pdf = await task.promise;
@@ -412,26 +414,40 @@ export async function openPdfViewer(
           try {
             for (let i = 0; i < pdf.numPages; i++) {
               if (destroyed || options?.signal?.aborted) return;
-              const page = await pdf.getPage(i + 1);
-              const viewport = page.getViewport({ scale: 1 });
-              const content = await page.getTextContent();
-              pages[i] = {
-                width: viewport.width,
-                height: viewport.height,
-                text: textOf(content),
-              };
+              try {
+                const page = await pdf.getPage(i + 1);
+                const viewport = page.getViewport({ scale: 1 });
+                let text = "";
+                try {
+                  const content = await page.getTextContent();
+                  text = textOf(content);
+                } catch {
+                  /* Keep page dimensions even if text content is malformed. */
+                }
+                pages[i] = {
+                  width: viewport.width,
+                  height: viewport.height,
+                  text,
+                };
+              } catch {
+                /* Skip malformed page and continue indexing remaining pages. */
+              }
               onProgress?.(i + 1, pdf.numPages);
               await new Promise((resolve) => setTimeout(resolve, 0));
             }
-            if (!destroyed) {
-              viewerDocument.outline = await flattenOutline(
-                pdf,
-                await pdf.getOutline(),
-              );
+            if (!destroyed && !options?.signal?.aborted) {
+              try {
+                viewerDocument.outline = await flattenOutline(
+                  pdf,
+                  await pdf.getOutline(),
+                );
+              } catch {
+                /* Ignore malformed outline trees. */
+              }
               onProgress?.(pdf.numPages, pdf.numPages);
             }
           } catch {
-            /* Visible pages remain readable if a malformed page cannot be indexed. */
+            /* Visible pages remain readable if background indexing stops. */
           }
         })();
       }, 0);
@@ -691,7 +707,7 @@ export async function pdfToImages(
         pageCount: pages.length,
         extra: { images },
       };
-    });
+    }, control?.signal);
   } catch (err) {
     return { ok: false, message: humanError(err) };
   }
@@ -750,7 +766,7 @@ export async function compress(
           },
         },
       };
-    });
+    }, control?.signal);
   } catch (err) {
     return { ok: false, message: humanError(err) };
   }
@@ -1127,5 +1143,5 @@ export async function extractPdfText(
     }
     onProgress?.({ progress: 0.96, label: "Building Word document" });
     return pages;
-  });
+  }, signal);
 }

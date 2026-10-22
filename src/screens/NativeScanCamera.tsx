@@ -1,51 +1,112 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { ScanCameraProps } from './ScanCamera';
-import { captureNativeDocument } from '../store/documentCamera';
-import { fileListToPicked, MAX_INPUT_BYTES } from '../store/files';
-import { pickGalleryImages } from '../store/incoming';
-
-export function NativeScanCamera(props: ScanCameraProps) {
+import { useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from 'react-dom';
+import { useBackHandler } from './back';
+import type { ScanCameraProps } from "./ScanCamera";
+import { captureNativeDocument } from "../store/documentCamera";
+import { fileListToScanImages } from "../store/files";
+import { pickGalleryImages } from "../store/incoming";
+import {
+  createCameraFlow,
+  type CameraFlow,
+  type CameraFlowDeps,
+  type CameraProgress,
+} from "../store/cameraFlow";
+export type CameraFlowFactory = (
+  deps: Pick<CameraFlowDeps, "context" | "receive" | "close" | "state">,
+) => CameraFlow;
+const nativeFactory: CameraFlowFactory = (deps) =>
+  createCameraFlow({
+    ...deps,
+    capture: (signal) => captureNativeDocument({ signal }),
+    gallery: (max, signal, onProgress) =>
+      pickGalleryImages(max, { signal, onProgress }),
+    normalize: (files, signal, onProgress) =>
+      fileListToScanImages(files, { signal, onProgress }),
+  });
+const phaseCopy = {
+  selecting: "Choose photos in the Android gallery\u2026",
+  importing: "Importing selected photos\u2026",
+  reading: "Reading selected photos\u2026",
+  normalizing: "Preparing scan photos\u2026",
+  error: "",
+};
+/** Real lifecycle/view shared with isolated typed fixtures; the product wrapper injects native only. */
+export function NativeScanCameraView(
+  props: ScanCameraProps & { createFlow: CameraFlowFactory },
+) {
+  const { createFlow, onPresentation } = props;
   const current = useRef(props);
-  useLayoutEffect(() => { current.current = props; }, [props]);
-  const [attempt, setAttempt] = useState(0);
-  const [error, setError] = useState('');
-  const [galleryBusy, setGalleryBusy] = useState(false);
-  const mounted = useRef(false);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  async function chooseGallery() {
-    setGalleryBusy(true);
-    try {
-      const { pages, maxPages, onPages } = current.current;
-      const files = await pickGalleryImages(Math.max(1, maxPages - pages.length));
-      if (!mounted.current || !files?.length) return;
-      const next = [...pages, ...await fileListToPicked(files, true)];
-      if (!mounted.current) return;
-      if (next.length > maxPages || next.reduce((sum, file) => sum + file.bytes.length, 0) > MAX_INPUT_BYTES)
-        throw new Error('This scan exceeds the page limit or 128 MB. Finish these pages before adding more.');
-      onPages(next);
-    } catch (reason) { if (mounted.current) setError(reason instanceof Error ? reason.message : 'Could not open these photos.'); }
-    finally { if (mounted.current) setGalleryBusy(false); }
-  }
-  useEffect(() => {
+  useLayoutEffect(() => {
+    current.current = props;
+  }, [props]);
+  const flow = useRef<CameraFlow | undefined>(undefined);
+  const [state, setState] = useState<CameraProgress>({ phase: "camera" });
+  useLayoutEffect(() => {
     let active = true;
-    void captureNativeDocument().then(async result => {
-      if (!active) return;
-      const { pages, maxPages, onPages, onClose } = current.current;
-      if (!result) { onClose(); return; }
-      const added = result === 'gallery'
-        ? await fileListToPicked((await pickGalleryImages(Math.max(1, maxPages - pages.length))) ?? [], true)
-        : [result];
-      if (!active) return;
-      if (!added.length) { onClose(); return; }
-      const next = [...pages, ...added];
-      if (next.length > maxPages || next.reduce((sum, file) => sum + file.bytes.length, 0) > MAX_INPUT_BYTES)
-        throw new Error('This scan exceeds the page limit or 128 MB. Finish these pages before adding more.');
-      onPages(next);
-    }).catch(reason => { if (active) setError(reason instanceof Error ? reason.message : 'Could not take a photo.'); });
-    return () => { active = false; };
-  }, [attempt]);
-  return <section className="ps-screen" aria-label="Document camera"><h1>Document camera</h1>
-    {error ? <><p role="alert">{error}</p><button className="btn" disabled={galleryBusy} onClick={() => { setError(''); setAttempt(value => value + 1); }}>Try camera again</button><button className="btn" disabled={galleryBusy} onClick={() => void chooseGallery()}>{galleryBusy ? 'Loading photos…' : 'Choose from gallery'}</button></> : <p role="status">Opening the native camera…</p>}
-    <button className="btn" onClick={props.onClose}>Back to scan</button>
-  </section>;
+    const owner = createFlow({
+      context: () => ({
+        pages: current.current.pages,
+        maxPages: current.current.maxPages,
+      }),
+      receive: (pages) => current.current.onPages(pages),
+      close: () => current.current.onClose(),
+      state: (next) => {
+        if (active) setState(next);
+      },
+    });
+    flow.current = owner;
+    void owner.start();
+    return () => {
+      active = false;
+      owner.dispose();
+      if (flow.current === owner) flow.current = undefined;
+    };
+  }, [createFlow]);
+  const back = () => {
+    flow.current?.dispose();
+    current.current.onClose();
+  };
+  useBackHandler(() => { back(); return true; });
+  useLayoutEffect(() => {
+    onPresentation?.(state.phase === 'camera' ? 'pending' : 'explicit');
+  }, [state.phase, onPresentation]);
+  if (state.phase === 'camera') return createPortal(
+    <button autoFocus className="btn native-capture-cancel" onClick={back}>Cancel camera</button>,
+    document.body,
+  );
+  return (
+    <section className="ps-screen" aria-label="Document camera">
+      <div className="ps-body">
+        <h1>Document camera</h1>
+        {state.phase === "error" ? (
+          <>
+            <p className="ps-banner ps-banner--error" role="alert">{state.message}</p>
+            <div className="ps-row">
+              <button className="btn" onClick={() => void flow.current?.start()}>
+                Try camera again
+              </button>
+              <button
+                className="btn btn--ghost"
+                onClick={() => void flow.current?.chooseGallery()}
+              >
+                Choose from gallery
+              </button>
+            </div>
+          </>
+        ) : (
+          <p className="ps-note" role="status">
+            {phaseCopy[state.phase]}
+            {state.bytes ? ` ${Math.ceil(state.bytes / 1024)} KB read` : ""}
+            {state.files ? ` \u00b7 ${state.files} photos` : ""}
+          </p>
+        )}
+        <button className="btn btn--ghost" onClick={back}>
+          Back to scan
+        </button>
+      </div>
+    </section>
+  );
+}
+export function NativeScanCamera(props: ScanCameraProps) {
+  return <NativeScanCameraView {...props} createFlow={nativeFactory} />;
 }

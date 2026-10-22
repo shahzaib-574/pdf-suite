@@ -7,11 +7,14 @@ import type {
   ImagePdfOptions,
   PageNumberOptions,
 } from "../lib/types";
+import type { ImageCompressOptions } from "./compressImages";
 
 export type TransferFile = {
-  name: string;
-  mime: string;
-  bytes: ArrayBuffer;
+  name: string,
+  mime: string,
+  bytes: ArrayBuffer,
+  /** Opens an encrypted PDF before pdf-lib reads it. */
+  password?: string,
 };
 
 export type WorkerOp =
@@ -20,13 +23,19 @@ export type WorkerOp =
   | { op: "imagesToPdf"; files: TransferFile[]; options?: ImagePdfOptions }
   | { op: "watermark"; file: TransferFile; input: WatermarkInput }
   | { op: "pageNumbers"; file: TransferFile; options?: PageNumberOptions }
-  | { op: "optimize"; file: TransferFile }
+  | { op: "optimize"; file: TransferFile; images?: ImageCompressOptions }
   | { op: "protect"; file: TransferFile; input: ProtectInput }
   | { op: "organize"; file: TransferFile; ops: OrganizeOp[] }
   | { op: "pageCount"; file: TransferFile }
   | { op: "docxToPdf"; file: TransferFile };
 
 export type WorkerRequest = WorkerOp & { id: number };
+
+export type WorkerProgress = {
+  id: number;
+  progress: number;
+  label: string;
+};
 
 export type WorkerSuccess = {
   id: number;
@@ -36,6 +45,7 @@ export type WorkerSuccess = {
   pageCount: number;
   extra?: {
     wordToPdf?: WordToPdfReport;
+    imagesRecompressed?: number;
   };
 };
 
@@ -46,3 +56,4 @@ export type WorkerFailure = {
 };
 
 export type WorkerResponse = WorkerSuccess | WorkerFailure;
+export type WorkerMessage = WorkerResponse | WorkerProgress;
