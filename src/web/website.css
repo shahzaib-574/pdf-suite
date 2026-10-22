@@ -37,6 +37,9 @@ html[data-website=true][data-theme=light]{--bg:#f6f8fc;--bg-elev:#fff;--surface:
 .web-tool--convert .web-tool-icons>span{background:#e5f2ef;color:#186b57}
 .web-tool--edit .web-tool-icons>span{background:#fff0da;color:#965800}
 .web-tool--capture .web-tool-icons>span{background:#f4eafa;color:#85569f}
+html[data-website=true]:not([data-theme=light]) .web-tool--convert .web-tool-icons>span{background:#183a32;color:#7de2c7}
+html[data-website=true]:not([data-theme=light]) .web-tool--edit .web-tool-icons>span{background:#3d2b14;color:#ffc266}
+html[data-website=true]:not([data-theme=light]) .web-tool--capture .web-tool-icons>span{background:#32223d;color:#d8a8f8}
 .web-tool-mark{position:relative;overflow:hidden}
 .web-tool--docx .web-tool-icons>span.web-tool-mark--docx{width:38px;height:48px;border-radius:8px;background:var(--primary-soft);color:var(--primary);border:1px solid color-mix(in srgb,var(--primary) 28%,var(--line));padding-bottom:12px;box-sizing:border-box}
 .web-tool-mark__strip{position:absolute;left:-1px;right:-1px;bottom:-1px;z-index:1;display:grid;place-items:center;height:14px;background:var(--primary);color:var(--brass-ink);font-size:8px;font-weight:800;letter-spacing:.06em;line-height:1}

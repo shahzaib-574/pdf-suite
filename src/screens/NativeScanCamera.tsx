@@ -24,10 +24,10 @@ const nativeFactory: CameraFlowFactory = (deps) =>
       fileListToScanImages(files, { signal, onProgress }),
   });
 const phaseCopy = {
-  selecting: "Choose photos in the Android gallery…",
-  importing: "Importing selected photos…",
-  reading: "Reading selected photos…",
-  normalizing: "Preparing scan photos…",
+  selecting: "Choose photos in the Android gallery\u2026",
+  importing: "Importing selected photos\u2026",
+  reading: "Reading selected photos\u2026",
+  normalizing: "Preparing scan photos\u2026",
   error: "",
 };
 /** Real lifecycle/view shared with isolated typed fixtures; the product wrapper injects native only. */
@@ -76,30 +76,34 @@ export function NativeScanCameraView(
   );
   return (
     <section className="ps-screen" aria-label="Document camera">
-      <h1>Document camera</h1>
-      {state.phase === "error" ? (
-        <>
-          <p role="alert">{state.message}</p>
-          <button className="btn" onClick={() => void flow.current?.start()}>
-            Try camera again
-          </button>
-          <button
-            className="btn"
-            onClick={() => void flow.current?.chooseGallery()}
-          >
-            Choose from gallery
-          </button>
-        </>
-      ) : (
-        <p role="status">
-          {phaseCopy[state.phase]}
-          {state.bytes ? ` ${Math.ceil(state.bytes / 1024)} KB read` : ""}
-          {state.files ? ` · ${state.files} photos` : ""}
-        </p>
-      )}
-      <button className="btn" onClick={back}>
-        Back to scan
-      </button>
+      <div className="ps-body">
+        <h1>Document camera</h1>
+        {state.phase === "error" ? (
+          <>
+            <p className="ps-banner ps-banner--error" role="alert">{state.message}</p>
+            <div className="ps-row">
+              <button className="btn" onClick={() => void flow.current?.start()}>
+                Try camera again
+              </button>
+              <button
+                className="btn btn--ghost"
+                onClick={() => void flow.current?.chooseGallery()}
+              >
+                Choose from gallery
+              </button>
+            </div>
+          </>
+        ) : (
+          <p className="ps-note" role="status">
+            {phaseCopy[state.phase]}
+            {state.bytes ? ` ${Math.ceil(state.bytes / 1024)} KB read` : ""}
+            {state.files ? ` \u00b7 ${state.files} photos` : ""}
+          </p>
+        )}
+        <button className="btn btn--ghost" onClick={back}>
+          Back to scan
+        </button>
+      </div>
     </section>
   );
 }

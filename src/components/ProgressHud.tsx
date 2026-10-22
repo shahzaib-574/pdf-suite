@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { gsap, prefersReducedMotion, useGSAP } from "../motion/gsapSetup";
+import { useBackHandler } from "../screens/back";
 
 export type ProgressHudProps = {
   open: boolean;
@@ -19,6 +20,13 @@ export function ProgressHud({
   const fill = useRef<HTMLDivElement>(null);
   const determinate = progress != null;
   const cancelRef = useRef<HTMLButtonElement>(null);
+
+  useBackHandler(() => {
+    if (!open || !onCancel) return false;
+    onCancel();
+    return true;
+  });
+
   useEffect(() => {
     if (!open) return;
     const previous =
@@ -73,7 +81,13 @@ export function ProgressHud({
       aria-busy={open}
       aria-hidden={!open}
       onKeyDown={(e) => {
-        if (open && e.key === "Tab") {
+        if (!open) return;
+        if (e.key === "Escape" && onCancel) {
+          e.preventDefault();
+          onCancel();
+          return;
+        }
+        if (e.key === "Tab") {
           e.preventDefault();
           cancelRef.current?.focus();
         }

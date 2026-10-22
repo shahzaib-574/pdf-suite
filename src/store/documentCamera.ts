@@ -2,6 +2,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 import { validCorners, type Point } from "../pdf/scanGeometry";
 import type { PickedFile } from "../lib/types";
 import { abortCheck, abortable } from "./galleryImport";
+import { readNativeCameraPhoto } from "./incoming";
 export type Capture = {
   cancelled?: boolean;
   gallery?: boolean;
@@ -120,10 +121,9 @@ export function createDocumentCapture(
   };
   return acquire;
 }
-const capture = createDocumentCapture(camera, async (photo, signal) => {
-  const { readNativeCameraPhoto } = await import("./incoming");
-  return readNativeCameraPhoto(photo, { signal });
-});
+const capture = createDocumentCapture(camera, (photo, signal) =>
+  readNativeCameraPhoto(photo, { signal }),
+);
 export function captureNativeDocument(
   options: { signal?: AbortSignal } = {},
 ): Promise<PickedFile | "gallery" | null> {

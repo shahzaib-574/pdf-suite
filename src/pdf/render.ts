@@ -263,8 +263,9 @@ function canvasToJpeg(
 async function withPdfjs<T>(
   file: PickedFile,
   fn: (pdf: PDFDocumentProxy) => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<T> {
-  const task = createPdfTask(file);
+  const task = createPdfTask(file, { signal });
   let pdf: PDFDocumentProxy | undefined;
   try {
     pdf = await task.promise;
@@ -706,7 +707,7 @@ export async function pdfToImages(
         pageCount: pages.length,
         extra: { images },
       };
-    });
+    }, control?.signal);
   } catch (err) {
     return { ok: false, message: humanError(err) };
   }
@@ -765,7 +766,7 @@ export async function compress(
           },
         },
       };
-    });
+    }, control?.signal);
   } catch (err) {
     return { ok: false, message: humanError(err) };
   }
@@ -1142,5 +1143,5 @@ export async function extractPdfText(
     }
     onProgress?.({ progress: 0.96, label: "Building Word document" });
     return pages;
-  });
+  }, signal);
 }

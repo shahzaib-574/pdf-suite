@@ -181,7 +181,7 @@ export function AppView({nativeScan, loadNativeScanDraft}: {
 
 
   useLayoutEffect(() => {
-    document.title = isWebsite && visibleRoute.name === 'home' ? 'Ream PDF Suite — Free PDF tools in your browser' : `${routeTitle(visibleRoute)} · Ream`;
+    document.title = isWebsite && visibleRoute.name === 'home' ? 'Ream PDF Suite \u2014 Free PDF tools in your browser' : `${routeTitle(visibleRoute)} \u00b7 Ream`;
     if (pendingOrigin && scanOrigin) {
       window.scrollTo(0, scanOrigin.scroll);
       return;
@@ -196,7 +196,7 @@ export function AppView({nativeScan, loadNativeScanDraft}: {
         : undefined;
       const focus = origin.focus?.isConnected ? origin.focus : fallback ?? document.querySelector<HTMLElement>('.route-stage > div:not([hidden]) h1');
       if (focus) {
-        if (focus.tagName === 'H1') focus.tabIndex = -1;
+        if (focus.tagName === 'H1') focus.setAttribute('tabindex', '-1');
         focus.focus({preventScroll:true});
       }
       return;

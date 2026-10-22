@@ -38,9 +38,6 @@ type Props = {
   onRemove?: (index: number) => void;
 };
 
-
-
-
 type PreviewKind = "pdf" | "image" | "docx" | "other";
 
 function previewKind(item: OrderGridItem): PreviewKind {
@@ -54,7 +51,6 @@ function previewKind(item: OrderGridItem): PreviewKind {
   return "other";
 }
 
-
 // First-page previews are rendered once per input buffer and serially, so a
 // large selection never runs several pdf.js documents at the same time.
 const pdfPreviews = new WeakMap<Uint8Array, Promise<Blob | null>>();
@@ -63,9 +59,12 @@ let previewQueue: Promise<unknown> = Promise.resolve();
 function pdfPreview(file: PickedFile): Promise<Blob | null> {
   const hit = pdfPreviews.get(file.bytes);
   if (hit) return hit;
-  const work = previewQueue.then(() =>
-    engine.renderPage(file, 0, 240).catch(() => null),
-  );
+  const work = previewQueue
+    .then(() => engine.renderPage(file, 0, 240).catch(() => null))
+    .then((blob) => {
+      if (!blob) pdfPreviews.delete(file.bytes);
+      return blob;
+    });
   previewQueue = work;
   pdfPreviews.set(file.bytes, work);
   return work;

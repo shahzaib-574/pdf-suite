@@ -40,7 +40,7 @@ import { takePendingScan, takePendingScanError } from "../store/pendingScan";
 import { goBack, navigate, replaceWith } from "./nav";
 import { useBackHandler } from "./back";
 
-type ToolFlowProps = {
+export type ToolFlowProps = {
   id: ToolId;
   nativeScan?: NativeScanAdapter;
   loadNativeScanDraft?: typeof loadScanDraft;
@@ -196,14 +196,15 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
   const [scanEdits, setScanEdits] = useState<(ScanPageDraft | null)[]>([]);
   const [ocrLanguage, setOcrLanguage] = useState<OcrLanguage>('eng');
   const [unlockedPdfs, setUnlockedPdfs] = useState<Set<PickedFile>>(() => new Set());
-  const [pdfFailedFile, setPdfFailedFile] = useState<PickedFile | null>(null);
+  const [failedPdfs, setFailedPdfs] = useState<Set<PickedFile>>(() => new Set());
   const [passwordPrompt, setPasswordPrompt] = useState<{file:PickedFile;incorrect:boolean} | null>(null);
   const [inputPassword, setInputPassword] = useState('');
   const passwordReply = useRef<((password:string)=>void) | null>(null);
   const pendingPdf = PDF_INPUT_TOOLS.has(id)
-    ? picked.find((file) => !file.password && !unlockedPdfs.has(file) && file !== pdfFailedFile)
+    ? picked.find((file) => !file.password && !unlockedPdfs.has(file) && !failedPdfs.has(file))
     : undefined;
   const checkingPdf = !!pendingPdf;
+  const hasFailedPdf = PDF_INPUT_TOOLS.has(id) && picked.some((file) => failedPdfs.has(file));
   useEffect(() => {
     if (!presentationActive || !pendingPdf) return;
     const controller = new AbortController();
@@ -244,7 +245,11 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
       }
     }).catch((err) => {
       if (!controller.signal.aborted) {
-        setPdfFailedFile(pendingPdf);
+        setFailedPdfs((prev) => {
+          const next = new Set(prev);
+          next.add(pendingPdf);
+          return next;
+        });
         setError(err instanceof Error ? err.message : 'Could not open this PDF.');
       }
     });
@@ -403,7 +408,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
 
   useEffect(() => {
     const file = picked[0];
-    if (!file || checkingPdf || pdfFailedFile === file || !["split", "pdf-images"].includes(tool.id)) return;
+    if (!file || checkingPdf || failedPdfs.has(file) || !["split", "pdf-images"].includes(tool.id)) return;
     let cancelled = false;
     void engine
       .pageCount(file)
@@ -429,7 +434,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
     return () => {
       cancelled = true;
     };
-  }, [picked, tool.id, checkingPdf, pdfFailedFile]);
+  }, [picked, tool.id, checkingPdf, failedPdfs]);
 
   async function onPick(fileList: FileList): Promise<void> {
     setError(null);
@@ -651,7 +656,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
       setError("Fill in the options first.");
       return;
     }
-    if (checkingPdf) return;
+    if (checkingPdf || hasFailedPdf) return;
     const first = picked[0];
     if (!first) return;
     const controller = new AbortController();
@@ -772,6 +777,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
     !scanBusy &&
     !organizeInputBusy &&
     !checkingPdf &&
+    !hasFailedPdf &&
     !(tool.id === 'docx-pdf' && docxChecking) &&
     tool.id !== "view" &&
     picked.length >= tool.minFiles &&
@@ -804,6 +810,9 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
       if (tool.id === "docx-pdf") return "Choose a Word file first.";
       return "Choose a PDF first.";
     }
+    if (passwordPrompt) return "Unlock the password-protected PDF first.";
+    if (checkingPdf) return "Checking PDF access\u2026";
+    if (hasFailedPdf) return "Remove or replace the unreadable PDF first.";
     if (tool.id === "split" || tool.id === "pdf-images")
       return extraValid()
         ? null
