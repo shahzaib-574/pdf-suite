@@ -314,13 +314,18 @@ async function withPdfjs<T>(
 // can take hundreds of MB and crash a phone. The reader caps each image's
 // decoded size by device memory; larger ones are halved per side until they
 // fit. 128 MB lets a 300 DPI 40x28 in map (12000x8400) decode at half size
-// rather than a quarter.
-const VIEWER_IMAGE_BYTES =
-  ((typeof navigator !== "undefined" &&
+// rather than a quarter; 8 GB devices get 448 MB so that map keeps every
+// pixel for deep zoom.
+const DEVICE_MEMORY_GB =
+  (typeof navigator !== "undefined" &&
     (navigator as { deviceMemory?: number }).deviceMemory) ||
-    4) <= 4
-    ? 128_000_000
-    : 256_000_000;
+  4;
+const VIEWER_IMAGE_BYTES =
+  DEVICE_MEMORY_GB >= 8
+    ? 448_000_000
+    : DEVICE_MEMORY_GB > 4
+      ? 256_000_000
+      : 128_000_000;
 // Pages whose parsed content and decoded images stay in memory between
 // renders. Freeing them after every paint meant a big scan or map was decoded
 // again for the next zoom step (seconds on a phone).
