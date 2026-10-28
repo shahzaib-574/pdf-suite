@@ -1,10 +1,10 @@
 {
   "schemaVersion": 2,
-  "sourceCommit": "6b3ead375d7d039b7346452d2043f9d30dd9fcad",
+  "sourceCommit": "d005099a06e905df67311eb18004d9095b1d07ed",
   "artifactMode": "signed-release-google-test-ads",
   "packageName": "com.reampdf.mobile",
-  "versionCode": 7,
-  "versionName": "1.2.1",
+  "versionCode": 9,
+  "versionName": "1.4.0",
   "androidApiLevel": 36,
   "adConfiguration": {
     "provider": "google-admob",
@@ -20,33 +20,38 @@
   },
   "serial": "emulator-5554",
   "signingCertificateSha256": "47AF4BE263F6BFB63065BA344D1C14096320308C75C55CC40ACAEE430C82063A",
-  "installedApkSha256": "7FDACBAAFD1E9F5D9FBA30F996B2923752C275B99F25D9E5C4E4AAA97429112B",
-  "generatedAtUtc": "2026-09-29T12:18:52.117016Z",
+  "installedApkSha256": "3BB6BD2D4B4598BDCB03755683FA08061EEAFDA233B00F9C4A763813E9A19275",
+  "generatedAtUtc": "2026-10-28T21:48:45.045768Z",
   "screenshots": [
     {
       "fileName": "01-tools-home-1080x1920.png",
-      "capturedAtUtc": "2026-09-29T12:18:00.447724Z",
-      "sha256": "08F977CA90FEBB92C8A21389FBF21C88B85289A60D25FCACA16FF98DC57EE826"
+      "capturedAtUtc": "2026-10-28T21:48:01.840954Z",
+      "sha256": "A692267DCF09132432F67625DEF886C7D04DCC764201A8A97011B2ED1D7BDE7D"
     },
     {
-      "fileName": "04-pdf-reader-1080x1920.png",
-      "capturedAtUtc": "2026-09-29T12:18:12.726041Z",
-      "sha256": "C2326ED03FB53A2FEF9D1EB9943A096A3AE151C0623C84A0AEAA75A33ACC9A3B"
-    },
-    {
-      "fileName": "05-organize-pages-1080x1920.png",
-      "capturedAtUtc": "2026-09-29T12:18:19.630407Z",
-      "sha256": "16FA3895C2902C2C2B13CFDEAA4EE16217048CE3B15CFB0B1D75C7A42F6C4CE5"
+      "fileName": "02-scan-intake-1080x1920.png",
+      "capturedAtUtc": "2026-10-28T21:48:06.586541Z",
+      "sha256": "D8C8AA38DAA3BAF79B83B598AE87F8DDE69B37AA02BC425CDEC0303284FB16D1"
     },
     {
       "fileName": "03-pdf-to-word-1080x1920.png",
-      "capturedAtUtc": "2026-09-29T12:18:26.706251Z",
-      "sha256": "10276D901BCC4B060B4BAD230777312210C54650C8358E404DFC1761512AADD1"
+      "capturedAtUtc": "2026-10-28T21:48:24.130539Z",
+      "sha256": "94514DABEE1E101FAD76395569F11B5C4386B4BA93F46C3BA73652E7C723E92A"
+    },
+    {
+      "fileName": "04-pdf-reader-1080x1920.png",
+      "capturedAtUtc": "2026-10-28T21:48:12.227362Z",
+      "sha256": "EFA7A17072DD974028B5BE0D3AD361F22BA4893FC2A2376C252B824427FB8997"
+    },
+    {
+      "fileName": "05-organize-pages-1080x1920.png",
+      "capturedAtUtc": "2026-10-28T21:48:16.281954Z",
+      "sha256": "EADD6447852E21873FCFD00FDE06996E692CF7ABFE566DA3D81DD8CAECA1105F"
     },
     {
       "fileName": "06-recents-1080x1920.png",
-      "capturedAtUtc": "2026-09-29T12:18:38.068107Z",
-      "sha256": "039506C19DDBC6B42329A5266EAFEAAD0D4E48045C6860664555761F985498FC"
+      "capturedAtUtc": "2026-10-28T21:48:32.755602Z",
+      "sha256": "C4796796E7696AB1B1D59B454054C2CDDE17B9EC4882F66C747288F905D67BE6"
     }
   ]
 }

@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "sourceCommit": "6b3ead375d7d039b7346452d2043f9d30dd9fcad",
+  "artifactMode": "signed-release-google-test-ads",
+  "packageName": "com.reampdf.mobile",
+  "versionCode": 7,
+  "versionName": "1.2.1",
+  "androidApiLevel": 36,
+  "adConfiguration": {
+    "provider": "google-admob",
+    "appId": "ca-app-pub-9959568404035601~6472905937",
+    "bannerId": "ca-app-pub-3940256099942544/9214589741",
+    "isTesting": true,
+    "debugGeography": "OTHER"
+  },
+  "device": {
+    "manufacturer": "Google",
+    "model": "sdk_gphone64_x86_64",
+    "name": "emu64xa"
+  },
+  "serial": "emulator-5554",
+  "signingCertificateSha256": "47AF4BE263F6BFB63065BA344D1C14096320308C75C55CC40ACAEE430C82063A",
+  "installedApkSha256": "7FDACBAAFD1E9F5D9FBA30F996B2923752C275B99F25D9E5C4E4AAA97429112B",
+  "generatedAtUtc": "2026-09-29T12:18:52.117016Z",
+  "screenshots": [
+    {
+      "fileName": "01-tools-home-1080x1920.png",
+      "capturedAtUtc": "2026-09-29T12:18:00.447724Z",
+      "sha256": "08F977CA90FEBB92C8A21389FBF21C88B85289A60D25FCACA16FF98DC57EE826"
+    },
+    {
+      "fileName": "04-pdf-reader-1080x1920.png",
+      "capturedAtUtc": "2026-09-29T12:18:12.726041Z",
+      "sha256": "C2326ED03FB53A2FEF9D1EB9943A096A3AE151C0623C84A0AEAA75A33ACC9A3B"
+    },
+    {
+      "fileName": "05-organize-pages-1080x1920.png",
+      "capturedAtUtc": "2026-09-29T12:18:19.630407Z",
+      "sha256": "16FA3895C2902C2C2B13CFDEAA4EE16217048CE3B15CFB0B1D75C7A42F6C4CE5"
+    },
+    {
+      "fileName": "03-pdf-to-word-1080x1920.png",
+      "capturedAtUtc": "2026-09-29T12:18:26.706251Z",
+      "sha256": "10276D901BCC4B060B4BAD230777312210C54650C8358E404DFC1761512AADD1"
+    },
+    {
+      "fileName": "06-recents-1080x1920.png",
+      "capturedAtUtc": "2026-09-29T12:18:38.068107Z",
+      "sha256": "039506C19DDBC6B42329A5266EAFEAAD0D4E48045C6860664555761F985498FC"
+    }
+  ]
+}

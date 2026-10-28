@@ -1,11 +1,12 @@
 # Screenshot alt-text review sheet
 
-Reviewed native version 1.2.1 (7), workflow 36566379362, on 29 September 2026. Five unedited, signed-release captures from source commit `6b3ead375d7d039b7346452d2043f9d30dd9fcad` are selected. The scan-editor frame was rejected because its page did not render visibly; its original capture is retained in `../archive/screenshots-1.2.1-run4-raw/`, while `CI_CAPTURE_SOURCE.json` maps original framebuffer hashes to normalized RGB hashes. Version 1.1.1's reviewed images and provenance are preserved in `../archive/screenshots-1.1.1/`.
+Reviewed native version 1.4.0 (9), workflow 40773915866, on 29 October 2026. All six unedited, signed-release captures from source commit `d005099a06e905df67311eb18004d9095b1d07ed` are selected. `CI_CAPTURE_SOURCE.json` is the workflow's own record, mapping original framebuffer hashes to the normalized RGB images. Version 1.2.1's reviewed images and provenance are preserved in `../archive/screenshots-1.2.1/`.
 
 | File | Alt text |
 | --- | --- |
-| `01-tools-home-1080x1920.png` | Ream home with tool search, Scan a document and PDF to Word actions, and navigation tabs. |
-| `03-pdf-to-word-1080x1920.png` | PDF to Word with a synthetic sample PDF selected, English OCR language and the Convert to Word action. |
-| `04-pdf-reader-1080x1920.png` | PDF reader showing the first page of a five-page synthetic document with zoom, search, share and download controls. |
-| `05-organize-pages-1080x1920.png` | Organize pages showing two synthetic page thumbnails with move, rotate and remove controls plus bulk actions. |
-| `06-recents-1080x1920.png` | Recent synthetic Word, PDF and image files with search, save, rename and delete actions. |
+| `01-tools-home-1080x1920.png` | Ream home with Scan a document and PDF to Word actions, recent files and the navigation tabs. |
+| `02-scan-intake-1080x1920.png` | Crop and Edit for a scanned synthetic page with crop handles and Color, Gray and B&W filters. |
+| `03-pdf-to-word-1080x1920.png` | PDF to Word with a synthetic five-page PDF previewed, English OCR language and Convert to Word. |
+| `04-pdf-reader-1080x1920.png` | PDF reader showing the first page of a five-page synthetic document with zoom, search and share controls. |
+| `05-organize-pages-1080x1920.png` | Organize showing five synthetic page previews with order badges, rotate buttons, Tap order and Reset. |
+| `06-recents-1080x1920.png` | Recent synthetic Word, PDF and image files with save, share, rename and delete actions. |
