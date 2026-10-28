@@ -332,6 +332,9 @@ export function Viewer({ recentId }: ViewerProps) {
   // Tapping the page slides the header, toolbar and tool dock away to give
   // the page the whole screen; tapping again brings them back.
   const [chromeHidden, setChromeHidden] = useState(false);
+  // Pointer type of the press that led to the latest click: only touch and
+  // pen taps toggle the bars, so mouse clicks on the website don't.
+  const pressTypeRef = useRef("");
   const fitWidthRef = useRef(0);
   const moreRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -1303,9 +1306,13 @@ export function Viewer({ recentId }: ViewerProps) {
             <div
               ref={viewportRef}
               className="ps-reader-viewport"
+              onPointerDown={(event) => {
+                pressTypeRef.current = event.pointerType;
+              }}
               onClick={(event) => {
                 // A plain tap on the page toggles the bars; finishing a text
-                // selection does not.
+                // selection or clicking with a mouse does not.
+                if (pressTypeRef.current === "mouse") return;
                 if (event.detail > 1) return;
                 const selection = window.getSelection();
                 if (selection && !selection.isCollapsed) return;

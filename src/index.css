@@ -888,6 +888,27 @@ html.is-scan-camera .skip-to-nav,
   }
 }
 
+/* Wide layouts (the website on desktop) fit five files a row instead of three
+   giant cards; the add tile then centres in the third column. Sized by the
+   list's own width, so the phone app's grid is unaffected. */
+.order {
+  container-type: inline-size;
+}
+
+@container (min-width: 600px) {
+  .order__grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .order__add:nth-child(3n + 1) {
+    grid-column: auto;
+  }
+
+  .order__add:nth-child(5n + 1) {
+    grid-column: 3;
+  }
+}
+
 .order-card {
   position: relative;
   display: flex;
