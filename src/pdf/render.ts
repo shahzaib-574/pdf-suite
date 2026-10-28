@@ -289,11 +289,23 @@ async function withPdfjs<T>(
   }
 }
 
+// By default pdf.js keeps embedded images at up to the largest canvas the
+// device can allocate (as much as 32768 px a side), so one decoded scan or map
+// can take hundreds of MB and crash a phone. The reader caps each image's
+// decoded size by device memory; larger ones are halved until they fit.
+const VIEWER_IMAGE_BYTES =
+  ((typeof navigator !== "undefined" &&
+    (navigator as { deviceMemory?: number }).deviceMemory) ||
+    4) <= 4
+    ? 100_000_000
+    : 256_000_000;
+
 function createPdfTask(
   file: PickedFile,
   options?: {
     signal?: AbortSignal;
     onPassword?: (incorrect: boolean) => Promise<string>;
+    canvasMaxAreaInBytes?: number;
   },
 ) {
   options?.signal?.throwIfAborted();
@@ -304,6 +316,9 @@ function createPdfTask(
     useSystemFonts: true,
     fontExtraProperties: true,
     BinaryDataFactory: ViteBinaryDataFactory,
+    ...(options?.canvasMaxAreaInBytes
+      ? { canvasMaxAreaInBytes: options.canvasMaxAreaInBytes }
+      : {}),
   });
   if (options?.onPassword)
     task.onPassword = (update: (password: string) => void, reason: number) => {
@@ -399,7 +414,10 @@ export async function openPdfViewer(
     indexText?: boolean;
   },
 ): Promise<PdfViewerSession> {
-  const task = createPdfTask(file, options);
+  const task = createPdfTask(file, {
+    ...options,
+    canvasMaxAreaInBytes: VIEWER_IMAGE_BYTES,
+  });
   let pdf: PDFDocumentProxy;
   try {
     pdf = await task.promise;

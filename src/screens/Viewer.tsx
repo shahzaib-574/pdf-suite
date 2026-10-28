@@ -82,9 +82,17 @@ const MAX_PAGE_CSS = 200_000;
 // Smaller tiles land sooner and let the centre of the screen sharpen first.
 const TILE_CSS = 512;
 const MAX_TILES = 48;
+// Detail canvases are the reader's biggest memory cost, and a phone that runs
+// out of memory kills the app, so all tiles together stay under a pixel budget
+// sized to the device (4 bytes a pixel: 16M px is 64 MB).
+const TILE_PIXEL_BUDGET =
+  ((typeof navigator !== "undefined" &&
+    (navigator as { deviceMemory?: number }).deviceMemory) ||
+    4) <= 4
+    ? 16_000_000
+    : 32_000_000;
 const DETAIL_MAX_PIXELS = 3_000_000;
 const DETAIL_MAX_DIM = 1536;
-const HUGE_PAGE_CSS = 1800;
 const THUMBNAIL_WIDTH = 180;
 
 type ZoomFocal = {
@@ -1502,9 +1510,6 @@ const ReaderPage = memo(function ReaderPage({
   const tileLayerRef = useRef<HTMLDivElement>(null);
   const tilesRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
   const rasterKeyRef = useRef("");
-  // True once the viewport's tiles at the current zoom are all painted, so a
-  // huge page can stop drawing its stretched base image.
-  const [covered, setCovered] = useState(false);
   const detailGen = useRef(0);
 
   useEffect(() => {
@@ -1623,8 +1628,19 @@ const ReaderPage = memo(function ReaderPage({
       return;
     }
     const tiles = tilesRef.current;
-    const rasterKey = `${displayScale}:${dpr}`;
-    if (rasterKeyRef.current !== rasterKey) setCovered(false);
+    // Tiles covering the view (plus margin) get ~70% of the budget, leaving
+    // room for cover tiles from the previous zoom; on a small budget they
+    // render a little softer rather than exhausting memory.
+    const edge = TILE_CSS / 2;
+    const across = Math.ceil((viewport.clientWidth + edge * 2) / TILE_CSS) + 1;
+    const down = Math.ceil((viewport.clientHeight + edge * 2) / TILE_CSS) + 1;
+    const density = Math.min(
+      dpr,
+      Math.sqrt(
+        (TILE_PIXEL_BUDGET * 0.7) / (across * down * TILE_CSS * TILE_CSS),
+      ),
+    );
+    const rasterKey = `${displayScale}:${density}`;
     rasterKeyRef.current = rasterKey;
 
     let timer = 0;
@@ -1691,8 +1707,14 @@ const ReaderPage = memo(function ReaderPage({
         .sort((a, b) => b.distance - a.distance);
       void Promise.allSettled(
         missing.map(async (job) => {
-          let outW = Math.max(1, Math.round(job.width * displayScale * dpr));
-          let outH = Math.max(1, Math.round(job.height * displayScale * dpr));
+          let outW = Math.max(
+            1,
+            Math.round(job.width * displayScale * density),
+          );
+          let outH = Math.max(
+            1,
+            Math.round(job.height * displayScale * density),
+          );
           const fit = Math.min(
             1,
             DETAIL_MAX_DIM / outW,
@@ -1727,10 +1749,16 @@ const ReaderPage = memo(function ReaderPage({
           // Show each tile the moment it lands, above any older-zoom tiles.
           layer.appendChild(canvas);
           tiles.set(job.key, canvas);
-          // Cap the cover tiles kept from earlier zoom levels (oldest first).
+          // Drop cover tiles from earlier zoom levels, oldest first, to stay
+          // within the tile count and pixel budget.
+          let pixels = 0;
+          tiles.forEach((tile) => {
+            pixels += tile.width * tile.height;
+          });
           for (const [key, stale] of tiles) {
-            if (tiles.size <= MAX_TILES) break;
+            if (tiles.size <= MAX_TILES && pixels <= TILE_PIXEL_BUDGET) break;
             if (keep.has(key)) continue;
+            pixels -= stale.width * stale.height;
             releaseTile(stale);
             tiles.delete(key);
           }
@@ -1747,7 +1775,6 @@ const ReaderPage = memo(function ReaderPage({
               tiles.delete(key);
             }
           });
-          setCovered(true);
         })
         .catch(() => undefined);
     };
@@ -1795,7 +1822,6 @@ const ReaderPage = memo(function ReaderPage({
     tilesRef.current.forEach(releaseTile);
     tilesRef.current.clear();
     rasterKeyRef.current = "";
-    setCovered(false);
   }, [needsDetail]);
 
   // Tiles are positioned against the page's size; drop them if it changes
@@ -1811,8 +1837,6 @@ const ReaderPage = memo(function ReaderPage({
 
   const width = page.width * displayScale;
   const height = page.height * displayScale;
-  const layoutHuge = width > HUGE_PAGE_CSS || height > HUGE_PAGE_CSS;
-  const showBase = Boolean(src) && (!layoutHuge || !covered);
 
   return (
     <article
@@ -1829,14 +1853,17 @@ const ReaderPage = memo(function ReaderPage({
       <div
         className="ps-reader-page__surface"
       >
-        {showBase ? (
+        {/* The base image always stays under the detail tiles: when a zoom
+            out or pinch reveals area no tile covers yet, the page shows
+            there at once (softer) instead of blank white. */}
+        {src ? (
           <img
             src={src!}
             alt=""
             draggable={false}
             decoding="async"
           />
-        ) : src || covered ? null : (
+        ) : (
           <div className="ps-reader-page__placeholder" aria-hidden="true">
             {renderError ? (
               <span>{renderError}</span>
