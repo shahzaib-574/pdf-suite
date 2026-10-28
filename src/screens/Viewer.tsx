@@ -79,7 +79,9 @@ const ZOOM_FACTOR = 1.2;
 // ~33.5M), so the whole stacked document must fit under this at any zoom.
 const MAX_STACK_CSS = 16_000_000;
 const MAX_PAGE_CSS = 200_000;
-const TILE_CSS = 768;
+// Smaller tiles land sooner and let the centre of the screen sharpen first.
+const TILE_CSS = 512;
+const MAX_TILES = 48;
 const DETAIL_MAX_PIXELS = 3_000_000;
 const DETAIL_MAX_DIM = 1536;
 const HUGE_PAGE_CSS = 1800;
@@ -1456,14 +1458,22 @@ type ReaderPageProps = {
   viewportRef: React.RefObject<HTMLDivElement | null>;
 };
 
+/** A detail tile's clip, in PDF units. */
 type PageDetail = {
-  src: string;
   left: number;
   top: number;
   width: number;
   height: number;
   key: string;
+  /** Squared CSS distance from the viewport centre, for paint order. */
+  distance: number;
 };
+
+function releaseTile(canvas: HTMLCanvasElement): void {
+  canvas.remove();
+  canvas.width = 0;
+  canvas.height = 0;
+}
 
 // Memoized: indexing and the active-page highlight change props for only a
 // few pages at a time, so long documents don't re-render every page.
@@ -1486,8 +1496,15 @@ const ReaderPage = memo(function ReaderPage({
   const renderedTextRef = useRef<PdfViewerTextLayer | null>(null);
   const queryRef = useRef(query);
   const imageCache = viewerImageCaches(session).pages;
-  const [tiles, setTiles] = useState<PageDetail[]>([]);
-  const tileUrlsRef = useRef<Map<string, string>>(new Map());
+  // Detail tiles are pdf.js canvases placed straight into this layer (no
+  // image encode/decode), positioned in page percentages so they stay put
+  // while the zoom changes until sharper ones replace them.
+  const tileLayerRef = useRef<HTMLDivElement>(null);
+  const tilesRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
+  const rasterKeyRef = useRef("");
+  // True once the viewport's tiles at the current zoom are all painted, so a
+  // huge page can stop drawing its stretched base image.
+  const [covered, setCovered] = useState(false);
   const detailGen = useRef(0);
 
   useEffect(() => {
@@ -1601,9 +1618,14 @@ const ReaderPage = memo(function ReaderPage({
   useEffect(() => {
     const viewport = viewportRef.current;
     const pageEl = pageRef.current;
-    if (!viewport || !pageEl || !needsDetail) {
+    const layer = tileLayerRef.current;
+    if (!viewport || !pageEl || !layer || !needsDetail) {
       return;
     }
+    const tiles = tilesRef.current;
+    const rasterKey = `${displayScale}:${dpr}`;
+    if (rasterKeyRef.current !== rasterKey) setCovered(false);
+    rasterKeyRef.current = rasterKey;
 
     let timer = 0;
     let batch: AbortController | null = null;
@@ -1611,7 +1633,8 @@ const ReaderPage = memo(function ReaderPage({
       if (viewport.classList.contains("is-pinching")) return;
       const pageBox = pageEl.getBoundingClientRect();
       const viewBox = viewport.getBoundingClientRect();
-      const pad = 48;
+      // Paint half a tile beyond the edges so short scrolls stay sharp.
+      const pad = TILE_CSS / 2;
       const cssLeft = Math.max(0, viewBox.left - pageBox.left - pad);
       const cssTop = Math.max(0, viewBox.top - pageBox.top - pad);
       const cssRight = Math.min(
@@ -1623,11 +1646,12 @@ const ReaderPage = memo(function ReaderPage({
         viewBox.bottom - pageBox.top + pad,
       );
       if (cssRight - cssLeft < 8 || cssBottom - cssTop < 8) return;
+      const centerX = viewBox.left + viewBox.width / 2 - pageBox.left;
+      const centerY = viewBox.top + viewBox.height / 2 - pageBox.top;
       // Tile clips are derived from the exact display scale. Reusing a tile
       // from a nearby rounded scale shifts its PDF-space clip even when its
       // CSS tile coordinates are unchanged, so the raster cache key must use
       // the exact scale and output density as well.
-      const rasterKey = `${displayScale}:${dpr}`;
       const startX = Math.floor(cssLeft / TILE_CSS);
       const startY = Math.floor(cssTop / TILE_CSS);
       const endX = Math.floor((cssRight - 1) / TILE_CSS);
@@ -1640,13 +1664,15 @@ const ReaderPage = memo(function ReaderPage({
           const width = Math.min(TILE_CSS, pageBox.width - left);
           const height = Math.min(TILE_CSS, pageBox.height - top);
           if (width < 8 || height < 8) continue;
+          const dx = left + width / 2 - centerX;
+          const dy = top + height / 2 - centerY;
           jobs.push({
-            src: "",
             key: `${rasterKey}:${tx}:${ty}`,
             left: left / displayScale,
             top: top / displayScale,
             width: width / displayScale,
             height: height / displayScale,
+            distance: dx * dx + dy * dy,
           });
         }
       }
@@ -1657,10 +1683,14 @@ const ReaderPage = memo(function ReaderPage({
       batch?.abort();
       batch = new AbortController();
       const signal = batch.signal;
+      const keep = new Set(jobs.map((job) => job.key));
+      // The paint queue runs newest-first, so queue the farthest tile first
+      // and the one under the centre of the screen last.
+      const missing = jobs
+        .filter((job) => !tiles.has(job.key))
+        .sort((a, b) => b.distance - a.distance);
       void Promise.allSettled(
-        jobs.map(async (job) => {
-          const cached = tileUrlsRef.current.get(job.key);
-          if (cached) return { ...job, src: cached };
+        missing.map(async (job) => {
           let outW = Math.max(1, Math.round(job.width * displayScale * dpr));
           let outH = Math.max(1, Math.round(job.height * displayScale * dpr));
           const fit = Math.min(
@@ -1683,91 +1713,106 @@ const ReaderPage = memo(function ReaderPage({
             outH,
             signal,
           );
-          const url = URL.createObjectURL(region.blob);
-          const image = new Image();
-          image.src = url;
-          try {
-            await image.decode();
-          } catch {
-            URL.revokeObjectURL(url);
-            throw new Error("Could not decode this page tile.");
-          }
-          return { ...job, src: url };
-        }),
-      )
-        .then((results) => {
-          const next = results.flatMap((result) =>
-            result.status === "fulfilled" ? [result.value] : [],
-          );
-          // A failed tile drops the whole batch; revoke the tiles it already
-          // rendered so they don't leak.
-          if (
-            generation !== detailGen.current ||
-            next.length !== results.length
-          ) {
-            next.forEach((tile) => {
-              if (!tileUrlsRef.current.has(tile.key))
-                URL.revokeObjectURL(tile.src);
-            });
+          const canvas = region.canvas;
+          // A tile that finishes after the zoom moved on is no longer valid.
+          if (rasterKeyRef.current !== rasterKey || tiles.has(job.key)) {
+            releaseTile(canvas);
             return;
           }
-          const keep = new Set(next.map((tile) => tile.key));
-          tileUrlsRef.current.forEach((url, key) => {
+          canvas.className = "ps-reader-page__detail";
+          canvas.style.left = `${(job.left / page.width) * 100}%`;
+          canvas.style.top = `${(job.top / page.height) * 100}%`;
+          canvas.style.width = `${(job.width / page.width) * 100}%`;
+          canvas.style.height = `${(job.height / page.height) * 100}%`;
+          // Show each tile the moment it lands, above any older-zoom tiles.
+          layer.appendChild(canvas);
+          tiles.set(job.key, canvas);
+          // Cap the cover tiles kept from earlier zoom levels (oldest first).
+          for (const [key, stale] of tiles) {
+            if (tiles.size <= MAX_TILES) break;
+            if (keep.has(key)) continue;
+            releaseTile(stale);
+            tiles.delete(key);
+          }
+        }),
+      )
+        .then(() => {
+          if (generation !== detailGen.current) return;
+          // Older-zoom and off-screen tiles stay under the new ones as cover
+          // until every tile in view is ready, so nothing flashes blank.
+          if (![...keep].every((key) => tiles.has(key))) return;
+          tiles.forEach((canvas, key) => {
             if (!keep.has(key)) {
-              URL.revokeObjectURL(url);
-              tileUrlsRef.current.delete(key);
+              releaseTile(canvas);
+              tiles.delete(key);
             }
           });
-          next.forEach((tile) => tileUrlsRef.current.set(tile.key, tile.src));
-          setTiles(next);
+          setCovered(true);
         })
         .catch(() => undefined);
     };
 
-    const schedule = () => {
+    const schedule = (delay: number) => {
       window.clearTimeout(timer);
       if (!viewport.classList.contains("is-pinching")) {
-        timer = window.setTimeout(paint, 70);
+        timer = window.setTimeout(paint, delay);
       }
     };
+    // A zoom step paints almost at once; wheel and slider zoom change the
+    // scale every frame, so the short wait lets them settle first.
+    const onScroll = () => schedule(50);
+    const onPinchEnd = () => schedule(0);
     const pause = () => {
       window.clearTimeout(timer);
       batch?.abort();
       detailGen.current += 1;
     };
-    schedule();
-    viewport.addEventListener("scroll", schedule, { passive: true });
+    schedule(30);
+    viewport.addEventListener("scroll", onScroll, { passive: true });
     viewport.addEventListener("reader-pinch-start", pause);
-    viewport.addEventListener("reader-pinch-end", schedule);
+    viewport.addEventListener("reader-pinch-end", onPinchEnd);
     return () => {
       window.clearTimeout(timer);
-      viewport.removeEventListener("scroll", schedule);
+      viewport.removeEventListener("scroll", onScroll);
       viewport.removeEventListener("reader-pinch-start", pause);
-      viewport.removeEventListener("reader-pinch-end", schedule);
+      viewport.removeEventListener("reader-pinch-end", onPinchEnd);
       batch?.abort();
       detailGen.current += 1;
     };
-  }, [displayScale, dpr, needsDetail, pageIndex, session, viewportRef]);
+  }, [
+    displayScale,
+    dpr,
+    needsDetail,
+    page.height,
+    page.width,
+    pageIndex,
+    session,
+    viewportRef,
+  ]);
 
   useEffect(() => {
     if (needsDetail) return;
-    tileUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-    tileUrlsRef.current.clear();
-    setTiles([]);
+    tilesRef.current.forEach(releaseTile);
+    tilesRef.current.clear();
+    rasterKeyRef.current = "";
+    setCovered(false);
   }, [needsDetail]);
 
-  useEffect(
-    () => () => {
-      tileUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-      tileUrlsRef.current.clear();
-    },
-    [],
-  );
+  // Tiles are positioned against the page's size; drop them if it changes
+  // (indexing refines it) and when the page unmounts.
+  useEffect(() => {
+    const tiles = tilesRef.current;
+    return () => {
+      tiles.forEach(releaseTile);
+      tiles.clear();
+      rasterKeyRef.current = "";
+    };
+  }, [page.width, page.height]);
 
   const width = page.width * displayScale;
   const height = page.height * displayScale;
   const layoutHuge = width > HUGE_PAGE_CSS || height > HUGE_PAGE_CSS;
-  const showBase = Boolean(src) && (!layoutHuge || tiles.length === 0);
+  const showBase = Boolean(src) && (!layoutHuge || !covered);
 
   return (
     <article
@@ -1791,7 +1836,7 @@ const ReaderPage = memo(function ReaderPage({
             draggable={false}
             decoding="async"
           />
-        ) : src || tiles.length > 0 ? null : (
+        ) : src || covered ? null : (
           <div className="ps-reader-page__placeholder" aria-hidden="true">
             {renderError ? (
               <span>{renderError}</span>
@@ -1801,23 +1846,11 @@ const ReaderPage = memo(function ReaderPage({
           </div>
         )}
       </div>
-      {needsDetail
-        ? tiles.map((tile) => (
-            <img
-              key={tile.key}
-              className="ps-reader-page__detail"
-              src={tile.src}
-              alt=""
-              draggable={false}
-              style={{
-                left: tile.left * displayScale,
-                top: tile.top * displayScale,
-                width: tile.width * displayScale,
-                height: tile.height * displayScale,
-              }}
-            />
-          ))
-        : null}
+      <div
+        ref={tileLayerRef}
+        className="ps-reader-page__tiles"
+        aria-hidden="true"
+      />
       <div
         ref={textLayerRef}
         className="textLayer ps-reader-text-layer"

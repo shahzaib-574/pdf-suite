@@ -1337,6 +1337,14 @@
   user-select: none;
 }
 
+.ps-reader-page__tiles {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .ps-reader-page__detail {
   position: absolute;
   z-index: 1;
