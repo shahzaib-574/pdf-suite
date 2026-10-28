@@ -23,7 +23,7 @@ import { retainIncoming } from "./store/recents";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { markUpdateReady } from "./store/updates";
 import { Capacitor } from "@capacitor/core";
-import { isWebsite } from './web/platform';
+import { useWebLayout } from './web/platform';
 import { WebFooter, WebHeader, WebHome, WebNavProvider } from './web/WebHome';
 import './web/website.css';
 import { initializeMobileAds, retireMobileBanners, markBannerCleanupFailed } from './ads/admob';
@@ -43,6 +43,9 @@ export function AppView({nativeScan, loadNativeScanDraft}: {
   nativeScan?: NativeScanAdapter;
   loadNativeScanDraft?: typeof loadScanDraft;
 }) {
+  // The website shows its web header, home and footer only on wide screens;
+  // at phone width it is the app (bottom nav, app home).
+  const webLayout = useWebLayout();
   useEffect(() => { document.getElementById('app-boot')?.remove(); }, []);
   useEffect(() => {
     void initializeMobileAds();
@@ -182,7 +185,7 @@ export function AppView({nativeScan, loadNativeScanDraft}: {
 
 
   useLayoutEffect(() => {
-    document.title = isWebsite && visibleRoute.name === 'home' ? 'Ream PDF Suite \u2014 Free PDF tools in your browser' : `${routeTitle(visibleRoute)} \u00b7 Ream`;
+    document.title = webLayout && visibleRoute.name === 'home' ? 'Ream PDF Suite \u2014 Free PDF tools in your browser' : `${routeTitle(visibleRoute)} \u00b7 Ream`;
     if (pendingOrigin && scanOrigin) {
       window.scrollTo(0, scanOrigin.scroll);
       return;
@@ -208,13 +211,13 @@ export function AppView({nativeScan, loadNativeScanDraft}: {
       heading.tabIndex = -1;
       heading.focus({ preventScroll: true });
     }
-  }, [visibleRoute, pendingOrigin, scanOrigin]);
+  }, [visibleRoute, pendingOrigin, scanOrigin, webLayout]);
 
 
   return (
     <ThemeProvider>
       <WebNavProvider>
-      {isWebsite ? <WebHeader /> : null}
+      {webLayout ? <WebHeader /> : null}
       {Capacitor.isNativePlatform() ||
       window.matchMedia("(hover: none) and (pointer: coarse)").matches ? null : (
         <button
@@ -320,11 +323,11 @@ export function AppView({nativeScan, loadNativeScanDraft}: {
               onNativePresentation={presentScan} onEmptyScanClose={closeEmptyScan} />
           </div>
         </div>
-        {isWebsite || (visibleRoute.name === "tool" && visibleRoute.id === "scan") || visibleRoute.name === "viewer" ? null : (
+        {webLayout || (visibleRoute.name === "tool" && visibleRoute.id === "scan") || visibleRoute.name === "viewer" ? null : (
           <div inert={scanOrigin ? true : undefined}><BottomNav activeTab={activeNavTab(visibleRoute)} /></div>
         )}
       </div>
-      {isWebsite ? <WebFooter /> : null}
+      {webLayout ? <WebFooter /> : null}
       </WebNavProvider>
     </ThemeProvider>
   );
@@ -336,9 +339,10 @@ function RouteView({ route, bannerEligible, nativeScan, loadNativeScanDraft, onN
   onNativePresentation?: (phase: ScanPresentation) => void;
   onEmptyScanClose?: () => void; presentationActive?: boolean;
 }) {
+  const webLayout = useWebLayout();
   switch (route.name) {
     case "home":
-      return isWebsite ? <WebHome /> : <Home bannerEligible={bannerEligible} />;
+      return webLayout ? <WebHome /> : <Home bannerEligible={bannerEligible} />;
     case "recents":
       return <Recents />;
     case "search":
