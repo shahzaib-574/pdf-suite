@@ -1,0 +1,1 @@
+Ream 1.4.0 makes reading PDFs faster and smoother. Long documents, large scans and detailed maps open quickly and stay sharp when you zoom in. A new Search tab finds any tool in a moment. Tools now show a full page preview, and Merge, Split and Organize have cleaner, simpler controls. Your files are still processed on your device.
