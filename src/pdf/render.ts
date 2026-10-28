@@ -292,13 +292,19 @@ async function withPdfjs<T>(
 // By default pdf.js keeps embedded images at up to the largest canvas the
 // device can allocate (as much as 32768 px a side), so one decoded scan or map
 // can take hundreds of MB and crash a phone. The reader caps each image's
-// decoded size by device memory; larger ones are halved until they fit.
+// decoded size by device memory; larger ones are halved per side until they
+// fit. 128 MB lets a 300 DPI 40x28 in map (12000x8400) decode at half size
+// rather than a quarter.
 const VIEWER_IMAGE_BYTES =
   ((typeof navigator !== "undefined" &&
     (navigator as { deviceMemory?: number }).deviceMemory) ||
     4) <= 4
-    ? 100_000_000
+    ? 128_000_000
     : 256_000_000;
+// Pages whose parsed content and decoded images stay in memory between
+// renders. Freeing them after every paint meant a big scan or map was decoded
+// again for the next zoom step (seconds on a phone).
+const WARM_PAGES = 2;
 
 function createPdfTask(
   file: PickedFile,
@@ -459,7 +465,7 @@ export async function openPdfViewer(
                 } catch {
                   /* Keep page dimensions even if text content is malformed. */
                 }
-                page.cleanup();
+                if (!warmPages.includes(i)) page.cleanup();
                 pages[i] = {
                   width: viewport.width,
                   height: viewport.height,
@@ -513,7 +519,20 @@ export async function openPdfViewer(
     let painting = false;
     let idleWaiters: (() => void)[] = [];
     let pumpQueued = false;
-    let detailPage = -1;
+    // Most recently painted first; a page leaving this list is cleaned up.
+    const warmPages: number[] = [];
+
+    function keepWarm(pageIndex: number): void {
+      const at = warmPages.indexOf(pageIndex);
+      if (at >= 0) warmPages.splice(at, 1);
+      warmPages.unshift(pageIndex);
+      for (const stale of warmPages.splice(WARM_PAGES)) {
+        void pdf
+          .getPage(stale + 1)
+          .then((page) => page.cleanup())
+          .catch(() => undefined);
+      }
+    }
 
     // Requests made in the same tick (a batch of tiles) all queue before one
     // is picked, so the caller's ordering decides which paints first.
@@ -620,7 +639,10 @@ export async function openPdfViewer(
               canvas.height = 0;
             }
           } finally {
-            page.cleanup();
+            // Reading-size paints keep the page warm for the zoom tiles that
+            // follow; thumbnails don't, so a sidebar scroll can't evict it.
+            if (width >= 400) keepWarm(pageIndex);
+            else if (!warmPages.includes(pageIndex)) page.cleanup();
           }
         }, signal);
       },
@@ -637,17 +659,9 @@ export async function openPdfViewer(
             throw new Error("That page is out of range.");
           }
           const page = await pdf.getPage(pageIndex + 1);
-          // Tiles of one page reuse its parsed drawing instructions; free them
-          // only once tiling moves to another page.
-          if (detailPage !== pageIndex) {
-            const previous = detailPage;
-            detailPage = pageIndex;
-            if (previous >= 0)
-              void pdf
-                .getPage(previous + 1)
-                .then((stale) => stale.cleanup())
-                .catch(() => undefined);
-          }
+          // Tiles of one page reuse its parsed drawing instructions and
+          // decoded images.
+          keepWarm(pageIndex);
           try {
             return await renderClippedPage(page, clip, outputWidth, signal);
           } catch (error) {

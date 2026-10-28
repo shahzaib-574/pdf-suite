@@ -89,10 +89,17 @@ const TILE_PIXEL_BUDGET =
   ((typeof navigator !== "undefined" &&
     (navigator as { deviceMemory?: number }).deviceMemory) ||
     4) <= 4
-    ? 16_000_000
-    : 32_000_000;
+    ? 24_000_000
+    : 40_000_000;
 const DETAIL_MAX_PIXELS = 3_000_000;
 const DETAIL_MAX_DIM = 1536;
+// A page whose tiles each take longer than this to paint (a huge scan or map
+// that pdf.js re-shrinks in full on every render, however small the tile)
+// switches to one region covering the view, so a zoom step or scroll stop
+// costs one render instead of nine or more.
+const SLOW_TILE_MS = 120;
+const VIEW_MAX_PIXELS = 12_000_000;
+const VIEW_MAX_DIM = 4096;
 const THUMBNAIL_WIDTH = 180;
 
 type ZoomFocal = {
@@ -1511,6 +1518,9 @@ const ReaderPage = memo(function ReaderPage({
   const tilesRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
   const rasterKeyRef = useRef("");
   const detailGen = useRef(0);
+  const slowTilesRef = useRef(false);
+  // Bumped when a page switches to whole-view regions, to restart painting.
+  const [viewModeTick, setViewModeTick] = useState(0);
 
   useEffect(() => {
     queryRef.current = query;
@@ -1628,17 +1638,20 @@ const ReaderPage = memo(function ReaderPage({
       return;
     }
     const tiles = tilesRef.current;
+    const tileCss = TILE_CSS;
+    const viewMode = slowTilesRef.current;
     // Tiles covering the view (plus margin) get ~70% of the budget, leaving
     // room for cover tiles from the previous zoom; on a small budget they
     // render a little softer rather than exhausting memory.
-    const edge = TILE_CSS / 2;
-    const across = Math.ceil((viewport.clientWidth + edge * 2) / TILE_CSS) + 1;
-    const down = Math.ceil((viewport.clientHeight + edge * 2) / TILE_CSS) + 1;
+    const edge = tileCss / 2;
+    const across = Math.ceil((viewport.clientWidth + edge * 2) / tileCss) + 1;
+    const down = Math.ceil((viewport.clientHeight + edge * 2) / tileCss) + 1;
+    const coverArea = viewMode
+      ? (viewport.clientWidth + edge * 2) * (viewport.clientHeight + edge * 2)
+      : across * down * tileCss * tileCss;
     const density = Math.min(
       dpr,
-      Math.sqrt(
-        (TILE_PIXEL_BUDGET * 0.7) / (across * down * TILE_CSS * TILE_CSS),
-      ),
+      Math.sqrt((TILE_PIXEL_BUDGET * 0.7) / coverArea),
     );
     const rasterKey = `${displayScale}:${density}`;
     rasterKeyRef.current = rasterKey;
@@ -1650,7 +1663,7 @@ const ReaderPage = memo(function ReaderPage({
       const pageBox = pageEl.getBoundingClientRect();
       const viewBox = viewport.getBoundingClientRect();
       // Paint half a tile beyond the edges so short scrolls stay sharp.
-      const pad = TILE_CSS / 2;
+      const pad = tileCss / 2;
       const cssLeft = Math.max(0, viewBox.left - pageBox.left - pad);
       const cssTop = Math.max(0, viewBox.top - pageBox.top - pad);
       const cssRight = Math.min(
@@ -1668,22 +1681,39 @@ const ReaderPage = memo(function ReaderPage({
       // from a nearby rounded scale shifts its PDF-space clip even when its
       // CSS tile coordinates are unchanged, so the raster cache key must use
       // the exact scale and output density as well.
-      const startX = Math.floor(cssLeft / TILE_CSS);
-      const startY = Math.floor(cssTop / TILE_CSS);
-      const endX = Math.floor((cssRight - 1) / TILE_CSS);
-      const endY = Math.floor((cssBottom - 1) / TILE_CSS);
+      const startX = Math.floor(cssLeft / tileCss);
+      const startY = Math.floor(cssTop / tileCss);
+      const endX = Math.floor((cssRight - 1) / tileCss);
+      const endY = Math.floor((cssBottom - 1) / tileCss);
       const jobs: PageDetail[] = [];
-      for (let ty = startY; ty <= endY; ty++) {
+      if (viewMode) {
+        // One region for the whole view; rounding to 64 px lets a tiny
+        // scroll reuse the region already painted.
+        const left = Math.floor(cssLeft / 64) * 64;
+        const top = Math.floor(cssTop / 64) * 64;
+        const width = Math.min(pageBox.width, Math.ceil(cssRight / 64) * 64) - left;
+        const height =
+          Math.min(pageBox.height, Math.ceil(cssBottom / 64) * 64) - top;
+        jobs.push({
+          key: `${rasterKey}:view:${left}:${top}:${width}:${height}`,
+          left: left / displayScale,
+          top: top / displayScale,
+          width: width / displayScale,
+          height: height / displayScale,
+          distance: 0,
+        });
+      }
+      for (let ty = startY; !viewMode && ty <= endY; ty++) {
         for (let tx = startX; tx <= endX; tx++) {
-          const left = tx * TILE_CSS;
-          const top = ty * TILE_CSS;
-          const width = Math.min(TILE_CSS, pageBox.width - left);
-          const height = Math.min(TILE_CSS, pageBox.height - top);
+          const left = tx * tileCss;
+          const top = ty * tileCss;
+          const width = Math.min(tileCss, pageBox.width - left);
+          const height = Math.min(tileCss, pageBox.height - top);
           if (width < 8 || height < 8) continue;
           const dx = left + width / 2 - centerX;
           const dy = top + height / 2 - centerY;
           jobs.push({
-            key: `${rasterKey}:${tx}:${ty}`,
+            key: `${rasterKey}:${tileCss}:${tx}:${ty}`,
             left: left / displayScale,
             top: top / displayScale,
             width: width / displayScale,
@@ -1705,6 +1735,8 @@ const ReaderPage = memo(function ReaderPage({
       const missing = jobs
         .filter((job) => !tiles.has(job.key))
         .sort((a, b) => b.distance - a.distance);
+      let lastDone = performance.now();
+      let slowTiles = 0;
       void Promise.allSettled(
         missing.map(async (job) => {
           let outW = Math.max(
@@ -1715,11 +1747,13 @@ const ReaderPage = memo(function ReaderPage({
             1,
             Math.round(job.height * displayScale * density),
           );
+          const maxDim = viewMode ? VIEW_MAX_DIM : DETAIL_MAX_DIM;
+          const maxPixels = viewMode ? VIEW_MAX_PIXELS : DETAIL_MAX_PIXELS;
           const fit = Math.min(
             1,
-            DETAIL_MAX_DIM / outW,
-            DETAIL_MAX_DIM / outH,
-            Math.sqrt(DETAIL_MAX_PIXELS / Math.max(1, outW * outH)),
+            maxDim / outW,
+            maxDim / outH,
+            Math.sqrt(maxPixels / Math.max(1, outW * outH)),
           );
           outW = Math.max(1, Math.round(outW * fit));
           outH = Math.max(1, Math.round(outH * fit));
@@ -1736,6 +1770,19 @@ const ReaderPage = memo(function ReaderPage({
             signal,
           );
           const canvas = region.canvas;
+          // Paints run one at a time, so the gap between completions is about
+          // one tile's render time.
+          const now = performance.now();
+          if (now - lastDone > SLOW_TILE_MS && ++slowTiles >= 2) {
+            // Switch now rather than on the next zoom: finish this view as
+            // one region instead of waiting on the remaining slow tiles.
+            if (!slowTilesRef.current) {
+              slowTilesRef.current = true;
+              batch?.abort();
+              setViewModeTick((tick) => tick + 1);
+            }
+          }
+          lastDone = now;
           // A tile that finishes after the zoom moved on is no longer valid.
           if (rasterKeyRef.current !== rasterKey || tiles.has(job.key)) {
             releaseTile(canvas);
@@ -1814,6 +1861,7 @@ const ReaderPage = memo(function ReaderPage({
     page.width,
     pageIndex,
     session,
+    viewModeTick,
     viewportRef,
   ]);
 
