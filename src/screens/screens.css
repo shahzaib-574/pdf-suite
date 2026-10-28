@@ -498,6 +498,27 @@
   padding-top: 10px;
 }
 
+/* Multi-file tools: reorder control | centred main button. */
+.ps-actions__bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.ps-actions__side {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.ps-actions__main.btn {
+  min-width: 132px;
+  min-height: 44px;
+  padding: 0 22px;
+  font-size: 15px;
+}
+
 .ps-actions--sticky {
   position: sticky;
   bottom: calc(

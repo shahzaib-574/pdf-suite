@@ -491,6 +491,14 @@ ol {
   box-shadow: 0 6px 14px color-mix(in srgb, var(--primary) 28%, transparent);
 }
 
+/* With the nav hidden for the keyboard, drop the space reserved for it so the
+   page and sticky action rows sit on the keyboard instead of above a gap. */
+html.is-keyboard-open body {
+  --nav-height: 0px;
+}
+
+html.is-keyboard-open .shell__nav,
+html.is-keyboard-open .skip-to-nav,
 html.is-scan-camera .shell__nav,
 html.is-scan-camera .skip-to-nav,
 .app-frame--scan .shell__nav,
@@ -847,6 +855,39 @@ html.is-scan-camera .skip-to-nav,
   }
 }
 
+/* The add tile follows the last file. When the files fill a row it starts
+   the next one on its own, centred under them. */
+.order__add {
+  display: flex;
+  min-width: 0;
+}
+
+.order__add:nth-child(3n + 1) {
+  grid-column: 2;
+}
+
+.order__add .well__add {
+  width: 100%;
+  height: auto;
+  min-height: 100%;
+  aspect-ratio: 5 / 8;
+  border: 1.5px dashed color-mix(in srgb, var(--primary) 45%, var(--line));
+  border-radius: calc(var(--radius) / 2);
+  background: color-mix(in srgb, var(--primary-soft) 55%, transparent);
+}
+
+@media (max-width: 339px) {
+  .order__add:nth-child(3n + 1) {
+    grid-column: auto;
+  }
+
+  .order__add:nth-child(2n + 1) {
+    grid-column: 1 / -1;
+    justify-self: center;
+    width: calc(50% - 5px);
+  }
+}
+
 .order-card {
   position: relative;
   display: flex;
@@ -856,7 +897,7 @@ html.is-scan-camera .skip-to-nav,
   padding: 6px 6px 8px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: calc(var(--radius) / 2);
   box-shadow: var(--shadow-soft);
   cursor: grab;
   user-select: none;
@@ -897,7 +938,7 @@ html.is-scan-camera .skip-to-nav,
   aspect-ratio: 3 / 4;
   margin-bottom: 4px;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: 5px;
   background: #fff;
   color: #8a8fa0;
 }

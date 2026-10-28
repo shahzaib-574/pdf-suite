@@ -10,6 +10,7 @@ import {
   SelectField,
 } from "../components";
 import { movedOrder } from "../components/useDragReorder";
+import { ActionSlotsContext } from "../components/actionSlots";
 import { ScanCamera, type NativeScanAdapter } from "./ScanCamera";
 import { OCR_LANGUAGES, type OcrLanguage } from '../lib/ocrLanguages';
 import { loadScanDraft, saveScanDraft, clearScanDraft, type ScanPageDraft } from '../store/scanDraft';
@@ -395,6 +396,13 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
   const multiple = tool.id === "organize" || tool.accept === "pdfs" || tool.accept === "images";
   const copy = wellCopy(tool.id, tool.minFiles);
   const reorderable = tool.accept === "pdfs" || tool.accept === "images";
+  // Multi-file tools put the file list's reorder control beside a compact,
+  // centred main button in the bottom action row.
+  const [actionStart, setActionStart] = useState<HTMLElement | null>(null);
+  const actionSlots = useMemo(
+    () => (multiple ? { start: actionStart } : null),
+    [actionStart, multiple],
+  );
   const wellItems = useMemo(
     () =>
       picked.map((file) => ({
@@ -865,11 +873,11 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
     ) : null;
 
   return (
-    <>
+    <ActionSlotsContext.Provider value={actionSlots}>
     {nativeScan && tool.id === 'scan' && !draftReady ? createPortal(
       <button autoFocus className="btn native-capture-cancel" onClick={onEmptyScanClose ?? (() => goBack())}>Cancel scan</button>, document.body,
     ) : null}
-    {tool.id === 'scan' && !draftReady ? <p role="status">Restoring your scan\u2026</p> : null}
+    {tool.id === 'scan' && !draftReady ? <p role="status">Restoring your scan…</p> : null}
     {scanCamera}
     <div
       style={tool.id === "scan" && cameraOpen && (!nativeScan || nativePresentation === 'explicit') ? {display: "none"} : undefined}
@@ -937,11 +945,11 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
             fonts preserve Latin, Greek and Cyrillic text. Files with
             unsupported characters are rejected instead of changing the text.
           </p>
-          {docxChecking ? <p role="status">Checking document compatibility\u2026</p> : null}
+          {docxChecking ? <p role="status">Checking document compatibility…</p> : null}
           {docxWarnings.length ? <div className="ps-banner" role="status"><strong>Before you convert</strong>{docxWarnings.map(warning=><p key={warning}>{warning}</p>)}</div> : null}
           </>
         ) : null}
-        {tool.id === "organize" && organizeInputBusy ? <p role="status">Preparing organizer input\u2026</p> : null}
+        {tool.id === "organize" && organizeInputBusy ? <p role="status">Preparing organizer input…</p> : null}
         {PDF_INPUT_TOOLS.has(tool.id) || tool.id === "organize" ? (
           <>
           {passwordPrompt && (tool.id === "organize" || passwordPrompt.file === pendingPdf) ? (
@@ -954,7 +962,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
                 <button type="button" className="btn btn--ghost" onClick={()=>{if(tool.id === "organize")organizeRequest.current?.abort();else setPicked(prev=>prev.filter(file=>file!==passwordPrompt.file));setPasswordPrompt(null);setInputPassword('');}}>Cancel</button>
               </div>
             </form>
-          ) : checkingPdf ? <p role="status">Checking PDF access\u2026</p> : null}
+          ) : checkingPdf ? <p role="status">Checking PDF access…</p> : null}
           {tool.id === "pdf-docx" ? <><label className="ps-field">Scanned text language<select aria-label="Scanned text language" value={ocrLanguage} disabled={busy} onChange={event=>setOcrLanguage(event.target.value as OcrLanguage)}>{OCR_LANGUAGES.map(language=><option key={language.id} value={language.id}>{language.label}</option>)}</select></label>
           <p className="ps-note">
             Rebuilds styled text, detected tables, and two-column layouts.
@@ -1303,7 +1311,15 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
             {tool.id === "scan" ? <>
               <AnimatedButton disabled={!canRun} onClick={() => void run("save")}>Save PDF</AnimatedButton>
               <AnimatedButton variant="ghost" disabled={!canRun} onClick={() => void run("share")}>Share PDF</AnimatedButton>
-            </> : <AnimatedButton block disabled={!canRun} onClick={() => void run()}>
+            </> : multiple ? (
+              <div className="ps-actions__bar">
+                <div className="ps-actions__side" ref={setActionStart} />
+                <AnimatedButton className="ps-actions__main" disabled={!canRun} onClick={() => void run()}>
+                  {ACTION_LABELS[tool.id as Exclude<ToolId, "view">]}
+                </AnimatedButton>
+                <div className="ps-actions__side" aria-hidden="true" />
+              </div>
+            ) : <AnimatedButton block disabled={!canRun} onClick={() => void run()}>
               {ACTION_LABELS[tool.id as Exclude<ToolId, "view">]}
             </AnimatedButton>}
           </div>
@@ -1318,7 +1334,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
         onCancel={cancelJob}
       />
     </div>
-    </>
+    </ActionSlotsContext.Provider>
   );
 }
 

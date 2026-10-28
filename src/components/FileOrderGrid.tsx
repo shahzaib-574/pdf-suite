@@ -1,4 +1,5 @@
 import {
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -6,6 +7,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   FilePenLine,
   FileText,
@@ -14,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import type { PickedFile } from "../lib/types";
+import { ActionSlotsContext } from "./actionSlots";
 import { engine } from "../pdf";
 import { toArrayBuffer } from "../store/files";
 import { movedOrder, useDragReorder } from "./useDragReorder";
@@ -138,6 +141,7 @@ export function FileOrderGrid({
   onRemove,
 }: Props) {
   const gridRef = useRef<HTMLOListElement>(null);
+  const slots = useContext(ActionSlotsContext);
   const cardRefs = useRef(new Map<string, HTMLElement>());
   const focusAfterMove = useRef<string | null>(null);
   const [tapIds, setTapIds] = useState<string[] | null>(null);
@@ -277,6 +281,29 @@ export function FileOrderGrid({
     );
   }
 
+  const orderControl = canOrder ? (
+    tapping ? (
+      <button
+        type="button"
+        className="order__chip is-active"
+        onClick={() =>
+          tapSeq.length ? applyTapOrder(tapSeq) : setTapIds(null)
+        }
+      >
+        {tapSeq.length ? "Done" : "Cancel"}
+      </button>
+    ) : (
+      <button
+        type="button"
+        className="order__chip"
+        onClick={() => setTapIds([])}
+      >
+        <ListOrdered size={16} strokeWidth={2.1} aria-hidden="true" />
+        Tap order
+      </button>
+    )
+  ) : null;
+
   return (
     <div className="order">
       <div className="order__bar">
@@ -286,29 +313,8 @@ export function FileOrderGrid({
           </p>
           <p className="order__status">{status}</p>
         </div>
-        {canOrder ? (
-          tapping ? (
-            <button
-              type="button"
-              className="order__chip is-active"
-              onClick={() =>
-                tapSeq.length ? applyTapOrder(tapSeq) : setTapIds(null)
-              }
-            >
-              {tapSeq.length ? "Done" : "Cancel"}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="order__chip"
-              onClick={() => setTapIds([])}
-            >
-              <ListOrdered size={16} strokeWidth={2.1} aria-hidden="true" />
-              Tap order
-            </button>
-          )
-        ) : null}
-        {addControl}
+        {/* In a tool's action row this sits left of the main button. */}
+        {slots?.start ? createPortal(orderControl, slots.start) : orderControl}
       </div>
       <ol
         ref={gridRef}
@@ -368,6 +374,11 @@ export function FileOrderGrid({
             </li>
           );
         })}
+        {/* Trails the last file; starts the next row (centred) once a row is
+            full. Not a file, so it stays out of the list's semantics. */}
+        <li className="order__add" role="none">
+          {addControl}
+        </li>
       </ol>
       {canOrder ? (
         <p id="order-help" className="sr-only">
