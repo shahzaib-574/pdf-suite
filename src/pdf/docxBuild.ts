@@ -15,8 +15,24 @@ const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDr
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const PIC_NS = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
 
+function stripXmlControlChars(text: string): string {
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (
+      code === 0x09 ||
+      code === 0x0a ||
+      code === 0x0d ||
+      (code >= 0x20 && code !== 0xfffe && code !== 0xffff)
+    ) {
+      out += text[i];
+    }
+  }
+  return out;
+}
+
 function xmlEscape(text: string): string {
-  return text
+  return stripXmlControlChars(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -502,7 +518,7 @@ function pageSectionXml(page: PdfTextPage, final: boolean, geometry: PageGeometr
 }
 
 function numberingPartXml(entries: NumberingEntry[]): string {
-  const bullets = ['•', '◦', '▪'];
+  const bullets = ['\u2022', '\u25e6', '\u25aa'];
   const definitions = entries
     .map((entry) => {
       const levels = Array.from({ length: 9 }, (_, level) => {

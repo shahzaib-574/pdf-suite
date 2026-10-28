@@ -33,37 +33,28 @@ function pagerShift(active: number, count: number): number {
 async function applyPageEdit(
   original: PickedFile,
   edit: ScanEdit,
-  assign: (job: Worker | null) => void,
+  sharedJob: Worker | null,
 ): Promise<ArrayBuffer> {
+  if (!sharedJob) {
+    return applyScanEdit(toArrayBuffer(original.bytes), original.mime, edit);
+  }
   const bytes = toArrayBuffer(original.bytes);
   try {
     return await new Promise<ArrayBuffer>((resolve, reject) => {
-      let job: Worker;
-      try {
-        job = new Worker(new URL("../pdf/scanWorker.ts", import.meta.url), { type: "module" });
-      } catch {
-        reject(new Error(WORKER_START));
-        return;
-      }
-      assign(job);
-      job.onerror = () => {
-        job.terminate();
+      sharedJob.onerror = () => {
         reject(new Error(WORKER_START));
       };
-      job.onmessage = (event: MessageEvent<{ ok: boolean; bytes?: ArrayBuffer; message?: string }>) => {
-        job.terminate();
+      sharedJob.onmessage = (event: MessageEvent<{ ok: boolean; bytes?: ArrayBuffer; message?: string }>) => {
         if (event.data.ok && event.data.bytes) resolve(event.data.bytes);
         else reject(new Error(event.data.message ?? "Could not adjust this page."));
       };
-      job.postMessage({ bytes, mime: original.mime, edit }, { transfer: [bytes] });
+      sharedJob.postMessage({ bytes, mime: original.mime, edit }, { transfer: [bytes] });
     });
   } catch (error) {
     if (error instanceof Error && error.message === WORKER_START) {
       return applyScanEdit(toArrayBuffer(original.bytes), original.mime, edit);
     }
     throw error;
-  } finally {
-    assign(null);
   }
 }
 export function ScanEditor({
@@ -79,6 +70,7 @@ export function ScanEditor({
   onDrafts,
   onFiles,
   onRetake,
+  importError,
 }: {
   files: PickedFile[];
   onDone?: () => void;
@@ -90,6 +82,7 @@ export function ScanEditor({
   onDrafts?: (edits: (ScanPageDraft | null)[]) => void;
   onFiles: (files: PickedFile[]) => void;
   onRetake: (index: number) => void;
+  importError?:string|null;
   onChange: (original: PickedFile, file: PickedFile) => void;
   onBusyChange: (busy: boolean) => void;
 }) {
@@ -216,13 +209,20 @@ export function ScanEditor({
     }
     if (!pending.length) {onDone?.();return;}
     setBusy(true); onBusyChange(true); setError("");
+    let sharedJob: Worker | null = null;
     try {
+      try {
+        sharedJob = new Worker(new URL("../pdf/scanWorker.ts", import.meta.url), { type: "module" });
+        worker.current = sharedJob;
+      } catch {
+        sharedJob = null;
+      }
       // Process each page once, only after Next. Keep drafts intact if any page fails.
       const results: {original: PickedFile; changed: PickedFile}[] = [];
       for (const original of pending) {
         const draft = drafts.current.get(original)!;
         const edit: ScanEdit = {corners: draft.corners, mode: draft.mode, rotate: ((draft.rotation % 360) + 360) % 360};
-        const output = await applyPageEdit(original, edit, (job) => { worker.current = job; });
+        const output = await applyPageEdit(original, edit, sharedJob);
         results.push({original, changed: {...original, scanCorners: undefined, scanSource: original.scanSource ?? {name:original.name,mime:original.mime,bytes:original.bytes}, mime: "image/png", name: original.name.replace(/\.[^.]+$/, ".png"), bytes: new Uint8Array(output)}});
       }
       for (const {original, changed} of results) { onChange(original, changed); drafts.current.delete(original); }
@@ -230,7 +230,12 @@ export function ScanEditor({
       onDone?.();
     } catch (error) {
       setError(error instanceof Error ? error.message : "Could not adjust the pages.");
-    } finally {worker.current = null;setBusy(false);onBusyChange(false);}
+    } finally {
+      sharedJob?.terminate();
+      worker.current = null;
+      setBusy(false);
+      onBusyChange(false);
+    }
   }
   const leave = (after: () => void) => {remember();after();};
   const turn = ((rotation % 360) + 360) % 360;
@@ -495,7 +500,7 @@ export function ScanEditor({
           />
         </div>
       </div>
-      {error ? <p role="alert">{error}</p> : null}
+      {error||importError ? <p role="alert">{error||importError}</p> : null}
       {file ? (
       <div className="scan-edit__options" aria-label="Page adjustments">
         <div className="scan-edit__filters" role="radiogroup" aria-label="Scan cleanup">

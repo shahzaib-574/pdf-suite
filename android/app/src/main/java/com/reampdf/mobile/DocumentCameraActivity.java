@@ -68,6 +68,12 @@ public class DocumentCameraActivity extends AppCompatActivity {
     private boolean torchOn;
     private volatile boolean stopped = true;
     private File pendingPhoto;
+    private String requestId;
+    private NativeCameraSession session;
+    private Runnable cancelActivity;
+    private boolean resultAssigned;
+    private String focusOutcome="not-requested";
+    private int stillWidth,stillHeight;
     private final ActivityResultLauncher<String> permission = registerForActivityResult(
         new ActivityResultContracts.RequestPermission(), granted -> {
             if (granted) startCamera(); else fail("Camera permission was denied. Allow it in Android Settings or choose a gallery photo.");
@@ -75,6 +81,13 @@ public class DocumentCameraActivity extends AppCompatActivity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        requestId=getIntent().getStringExtra("requestId");
+        if(requestId!=null){
+            session=DocumentCameraPlugin.session(requestId);
+            if(session==null){fail("Camera session expired. Try again.");return;}
+            cancelActivity=()->runOnUiThread(this::finish);session.attach(cancelActivity);
+            if(session.isCancelled())return;
+        }
         if (!OpenCVLoader.initLocal()) { fail("The document detector could not start. Please reinstall this APK."); return; }
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(color(R.color.camera_bg));
@@ -135,8 +148,7 @@ public class DocumentCameraActivity extends AppCompatActivity {
         gallery = iconTextButton(R.drawable.ic_camera_images, "Gallery");
         gallery.setOnClickListener(v -> {
             if (!busy) {
-                setResult(RESULT_CANCELED, new Intent().putExtra("gallery", true));
-                finish();
+                finishResult(RESULT_CANCELED, new Intent().putExtra("gallery", true));
             }
         });
         LinearLayout left = new LinearLayout(this);
@@ -181,7 +193,9 @@ public class DocumentCameraActivity extends AppCompatActivity {
             if (event.getAction() == MotionEvent.ACTION_UP && camera != null && !busy) {
                 view.performClick();
                 MeteringPoint point = preview.getMeteringPointFactory().createPoint(event.getX(), event.getY());
-                camera.getCameraControl().startFocusAndMetering(new FocusMeteringAction.Builder(point).setAutoCancelDuration(4, TimeUnit.SECONDS).build());
+                focusOutcome="focusing";int owner=generation;
+                ListenableFuture<FocusMeteringResult> focus=camera.getCameraControl().startFocusAndMetering(new FocusMeteringAction.Builder(point).setAutoCancelDuration(4, TimeUnit.SECONDS).build());
+                focus.addListener(()->{if(owner!=generation||isFinishing())return;try{focusOutcome=focus.get().isFocusSuccessful()?"locked":"not-locked";}catch(Exception error){focusOutcome="cancelled-or-failed";}diagnostic("focus",0,0,0,0);},ContextCompat.getMainExecutor(this));
                 return true;
             }
             return true;
@@ -192,7 +206,10 @@ public class DocumentCameraActivity extends AppCompatActivity {
 
     private int color(int id) { return ContextCompat.getColor(this, id); }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
-    private void fail(String message) { setResult(RESULT_CANCELED, new Intent().putExtra("error", message)); finish(); }
+    private void finishResult(int code,Intent data){resultAssigned=true;if(requestId!=null)data.putExtra("requestId",requestId);setResult(code,data);finish();}
+    @Override public void finish(){if(!resultAssigned){Intent data=new Intent();if(requestId!=null)data.putExtra("requestId",requestId);setResult(RESULT_CANCELED,data);}super.finish();}
+    private void fail(String message) { finishResult(RESULT_CANCELED,new Intent().putExtra("error",message)); }
+    private void diagnostic(String phase,int width,int height,int rotation,long bytes){if(BuildConfig.DEBUG)android.util.Log.d("ReamCamera","phase="+phase+" bound="+stillWidth+"x"+stillHeight+" jpeg="+width+"x"+height+" rotation="+rotation+" bytes="+bytes+" focus="+focusOutcome);}
 
     private ImageButton iconButton(int icon, String label) {
         ImageButton button = new ImageButton(this);
@@ -287,6 +304,7 @@ public class DocumentCameraActivity extends AppCompatActivity {
                 analysis.setAnalyzer(analysisExecutor, this::analyze);
                 provider.unbindAll();
                 camera = provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, stream, capture, analysis);
+                ResolutionInfo info=capture.getResolutionInfo();if(info!=null){stillWidth=info.getResolution().getWidth();stillHeight=info.getResolution().getHeight();}diagnostic("bound",0,0,0,0);
                 shutter.setEnabled(true);
                 shutter.setAlpha(1f);
                 torch.setEnabled(camera.getCameraInfo().hasFlashUnit());
@@ -382,7 +400,7 @@ public class DocumentCameraActivity extends AppCompatActivity {
         capture.setTargetRotation(preview.getDisplay().getRotation());
         capture.takePicture(new ImageCapture.OutputFileOptions.Builder(file).build(), photoExecutor, new ImageCapture.OnImageSavedCallback() {
             @Override public void onImageSaved(@NonNull ImageCapture.OutputFileResults result) {
-                if (isFinishing() || isDestroyed()) { file.delete(); return; }
+                if (isFinishing() || isDestroyed() || (session!=null&&session.isCancelled())) { file.delete(); return; }
                 try {
                     if (file.length() > 128L * 1024 * 1024) throw new IllegalStateException("Photo exceeds 128 MB.");
                     BitmapFactory.Options options = new BitmapFactory.Options(); options.inJustDecodeBounds = true;
@@ -393,6 +411,7 @@ public class DocumentCameraActivity extends AppCompatActivity {
                     Bitmap bitmap = BitmapFactory.decodeFile(file.getPath(), options);
                     if (bitmap == null) throw new IllegalStateException("Could not inspect the photo.");
                     int rotation = new ExifInterface(file).getRotationDegrees();
+                    diagnostic("jpeg",width,height,rotation,file.length());
                     Matrix rotate = new Matrix(); rotate.postRotate(rotation);
                     Bitmap upright = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), rotate, true);
                     Mat mat = new Mat(); DocumentEdges.Detection detection;
@@ -403,8 +422,8 @@ public class DocumentCameraActivity extends AppCompatActivity {
                     Intent data = new Intent().putExtra("id", id).putExtra("width", rotation % 180 == 0 ? width : height)
                         .putExtra("height", rotation % 180 == 0 ? height : width).putExtra("corners", corners.toString());
                     runOnUiThread(() -> {
-                        if (isFinishing() || isDestroyed()) { file.delete(); return; }
-                        pendingPhoto = null; setResult(RESULT_OK, data); finish();
+                        if (isFinishing() || isDestroyed() || (session!=null&&session.isCancelled())) { file.delete(); return; }
+                        pendingPhoto = null; finishResult(RESULT_OK,data);
                     });
                 } catch (Exception error) { file.delete(); runOnUiThread(() -> fail("Could not read the captured photo. Please try again.")); }
             }
@@ -417,13 +436,14 @@ public class DocumentCameraActivity extends AppCompatActivity {
     @Override protected void onResume() { super.onResume(); generation++; stopped = false; }
     @Override protected void onPause() { stopped = true; generation++; pendingResult.set(null); if (outline != null) outline.clear(); super.onPause(); }
     @Override protected void onDestroy() {
+        if(session!=null){if(busy&&!isFinishing())session.cancel("Camera was restarted during capture. Try again.");session.detach(cancelActivity);}
         stopped = true; if (provider != null) provider.unbindAll();
         analysisExecutor.execute(() -> {
             if (detector != null) detector.close();
             if (analysisGray != null) analysisGray.release();
         });
         analysisExecutor.shutdown(); photoExecutor.shutdown();
-        if (pendingPhoto != null && isFinishing()) pendingPhoto.delete();
+        if (pendingPhoto != null && (isFinishing()||(session!=null&&session.isCancelled()))) pendingPhoto.delete();
         super.onDestroy();
     }
 

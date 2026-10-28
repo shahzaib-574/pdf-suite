@@ -108,7 +108,8 @@ class ViteBinaryDataFactory {
 }
 
 const COMPRESS: Record<CompressLevel, { scale: number; quality: number }> = {
-  strong: { scale: 1.2, quality: 0.55 },
+  // Extreme: pages become ~120 DPI images.
+  strong: { scale: 120 / 72, quality: 0.6 },
   balanced: { scale: 2, quality: 0.78 },
   keep: { scale: 1, quality: 0.92 },
 };
@@ -138,19 +139,26 @@ export type PdfViewerTextLayer = {
 };
 
 export type PdfViewerPageRegion = {
-  blob: Blob;
+  /** The rendered clip. The caller owns it and should zero it when done. */
+  canvas: HTMLCanvasElement;
   width: number;
   height: number;
 };
 
 export type PdfViewerSession = {
   document: PdfViewerDocument;
-  renderPage(pageIndex: number, width: number): Promise<Blob>;
+  /** Aborting `signal` drops a queued paint or cancels one in progress. */
+  renderPage(
+    pageIndex: number,
+    width: number,
+    signal?: AbortSignal,
+  ): Promise<Blob>;
   renderPageRegion(
     pageIndex: number,
     clip: { x: number; y: number; width: number; height: number },
     outputWidth: number,
     outputHeight: number,
+    signal?: AbortSignal,
   ): Promise<PdfViewerPageRegion>;
   renderTextLayer(
     pageIndex: number,
@@ -174,25 +182,26 @@ function safePageScale(
   );
 }
 
-function canvasToBlob(
-  canvas: HTMLCanvasElement,
-  type: string,
-  quality?: number,
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) =>
-        blob ? resolve(blob) : reject(new Error("Could not encode this page.")),
-      type,
-      quality,
-    );
-  });
+function abortError(): DOMException {
+  return new DOMException("The page paint was cancelled.", "AbortError");
+}
+
+/** Cancels `renderTask` when `signal` aborts, until the returned cleanup runs. */
+function cancelOnAbort(
+  renderTask: { cancel(): void },
+  signal: AbortSignal | undefined,
+): () => void {
+  if (!signal) return () => undefined;
+  const onAbort = () => renderTask.cancel();
+  signal.addEventListener("abort", onAbort, { once: true });
+  return () => signal.removeEventListener("abort", onAbort);
 }
 
 async function renderClippedPage(
   page: PDFPageProxy,
   clip: { x: number; y: number; width: number; height: number },
   outputWidth: number,
+  signal?: AbortSignal,
 ): Promise<PdfViewerPageRegion> {
   const base = page.getViewport({ scale: 1 });
   const x = Math.min(Math.max(0, clip.x), Math.max(0, base.width - 0.01));
@@ -205,9 +214,12 @@ async function renderClippedPage(
     0.01,
     Math.min(clip.height, base.height - y),
   );
+  // Only the clip is rasterized, so bound the clip's canvas, not the whole
+  // page's: a page-sized bound caps deep zoom at ~10 px per point and turns
+  // detail tiles into upscaled blur.
   const scale = Math.min(
     Math.max(0.2, outputWidth) / clipWidth,
-    safePageScale(base, 8192, 16_000_000),
+    safePageScale({ width: clipWidth, height: clipHeight }, 8192, 16_000_000),
   );
   const width = Math.max(1, Math.round(clipWidth * scale));
   const height = Math.max(1, Math.round(clipHeight * scale));
@@ -228,15 +240,18 @@ async function renderClippedPage(
     transform: [1, 0, 0, 1, -x * scale, -y * scale],
     background: "#ffffff",
   });
+  const release = cancelOnAbort(renderTask, signal);
   try {
     await renderTask.promise;
-    // Viewer detail tiles contain text and line art. Keep them lossless so the
-    // sharpening layer does not introduce JPEG ringing at high zoom.
-    const blob = await canvasToBlob(canvas, "image/png");
-    return { blob, width, height };
-  } finally {
+    // Hand the canvas itself to the viewer: encoding a lossless PNG and
+    // decoding it again cost more than the render and delayed every tile.
+    return { canvas, width, height };
+  } catch (error) {
     canvas.width = 0;
     canvas.height = 0;
+    throw error;
+  } finally {
+    release();
   }
 }
 
@@ -262,8 +277,9 @@ function canvasToJpeg(
 async function withPdfjs<T>(
   file: PickedFile,
   fn: (pdf: PDFDocumentProxy) => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<T> {
-  const task = createPdfTask(file);
+  const task = createPdfTask(file, { signal });
   let pdf: PDFDocumentProxy | undefined;
   try {
     pdf = await task.promise;
@@ -273,11 +289,29 @@ async function withPdfjs<T>(
   }
 }
 
+// By default pdf.js keeps embedded images at up to the largest canvas the
+// device can allocate (as much as 32768 px a side), so one decoded scan or map
+// can take hundreds of MB and crash a phone. The reader caps each image's
+// decoded size by device memory; larger ones are halved per side until they
+// fit. 128 MB lets a 300 DPI 40x28 in map (12000x8400) decode at half size
+// rather than a quarter.
+const VIEWER_IMAGE_BYTES =
+  ((typeof navigator !== "undefined" &&
+    (navigator as { deviceMemory?: number }).deviceMemory) ||
+    4) <= 4
+    ? 128_000_000
+    : 256_000_000;
+// Pages whose parsed content and decoded images stay in memory between
+// renders. Freeing them after every paint meant a big scan or map was decoded
+// again for the next zoom step (seconds on a phone).
+const WARM_PAGES = 2;
+
 function createPdfTask(
   file: PickedFile,
   options?: {
     signal?: AbortSignal;
     onPassword?: (incorrect: boolean) => Promise<string>;
+    canvasMaxAreaInBytes?: number;
   },
 ) {
   options?.signal?.throwIfAborted();
@@ -288,6 +322,9 @@ function createPdfTask(
     useSystemFonts: true,
     fontExtraProperties: true,
     BinaryDataFactory: ViteBinaryDataFactory,
+    ...(options?.canvasMaxAreaInBytes
+      ? { canvasMaxAreaInBytes: options.canvasMaxAreaInBytes }
+      : {}),
   });
   if (options?.onPassword)
     task.onPassword = (update: (password: string) => void, reason: number) => {
@@ -383,7 +420,10 @@ export async function openPdfViewer(
     indexText?: boolean;
   },
 ): Promise<PdfViewerSession> {
-  const task = createPdfTask(file, options);
+  const task = createPdfTask(file, {
+    ...options,
+    canvasMaxAreaInBytes: VIEWER_IMAGE_BYTES,
+  });
   let pdf: PDFDocumentProxy;
   try {
     pdf = await task.promise;
@@ -411,27 +451,45 @@ export async function openPdfViewer(
         void (async () => {
           try {
             for (let i = 0; i < pdf.numPages; i++) {
+              // Indexing shares the PDF worker with painting; let on-screen
+              // pages finish first so a long document stays responsive.
+              await paintIdle();
               if (destroyed || options?.signal?.aborted) return;
-              const page = await pdf.getPage(i + 1);
-              const viewport = page.getViewport({ scale: 1 });
-              const content = await page.getTextContent();
-              pages[i] = {
-                width: viewport.width,
-                height: viewport.height,
-                text: textOf(content),
-              };
+              try {
+                const page = await pdf.getPage(i + 1);
+                const viewport = page.getViewport({ scale: 1 });
+                let text = "";
+                try {
+                  const content = await page.getTextContent();
+                  text = textOf(content);
+                } catch {
+                  /* Keep page dimensions even if text content is malformed. */
+                }
+                if (!warmPages.includes(i)) page.cleanup();
+                pages[i] = {
+                  width: viewport.width,
+                  height: viewport.height,
+                  text,
+                };
+              } catch {
+                /* Skip malformed page and continue indexing remaining pages. */
+              }
               onProgress?.(i + 1, pdf.numPages);
               await new Promise((resolve) => setTimeout(resolve, 0));
             }
-            if (!destroyed) {
-              viewerDocument.outline = await flattenOutline(
-                pdf,
-                await pdf.getOutline(),
-              );
+            if (!destroyed && !options?.signal?.aborted) {
+              try {
+                viewerDocument.outline = await flattenOutline(
+                  pdf,
+                  await pdf.getOutline(),
+                );
+              } catch {
+                /* Ignore malformed outline trees. */
+              }
               onProgress?.(pdf.numPages, pdf.numPages);
             }
           } catch {
-            /* Visible pages remain readable if a malformed page cannot be indexed. */
+            /* Visible pages remain readable if background indexing stops. */
           }
         })();
       }, 0);
@@ -453,25 +511,92 @@ export async function openPdfViewer(
       return next;
     }
 
-    let paintTail: Promise<unknown> = Promise.resolve();
+    // Paints run one at a time, newest request first: after a fast scroll the
+    // pages now on screen paint before the ones the reader flew past, and
+    // those stale requests are aborted out of the queue by their owners.
+    type PaintJob = { run: () => Promise<void> };
+    const paintJobs: PaintJob[] = [];
+    let painting = false;
+    let idleWaiters: (() => void)[] = [];
+    let pumpQueued = false;
+    // Most recently painted first; a page leaving this list is cleaned up.
+    const warmPages: number[] = [];
+
+    function keepWarm(pageIndex: number): void {
+      const at = warmPages.indexOf(pageIndex);
+      if (at >= 0) warmPages.splice(at, 1);
+      warmPages.unshift(pageIndex);
+      for (const stale of warmPages.splice(WARM_PAGES)) {
+        void pdf
+          .getPage(stale + 1)
+          .then((page) => page.cleanup())
+          .catch(() => undefined);
+      }
+    }
+
+    // Requests made in the same tick (a batch of tiles) all queue before one
+    // is picked, so the caller's ordering decides which paints first.
+    function schedulePump(): void {
+      if (pumpQueued) return;
+      pumpQueued = true;
+      queueMicrotask(() => {
+        pumpQueued = false;
+        pumpPaint();
+      });
+    }
+
+    function pumpPaint(): void {
+      if (painting) return;
+      const job = paintJobs.pop();
+      if (!job) {
+        const waiters = idleWaiters;
+        idleWaiters = [];
+        waiters.forEach((resolve) => resolve());
+        return;
+      }
+      painting = true;
+      void job.run().finally(() => {
+        painting = false;
+        pumpPaint();
+      });
+    }
+
+    function paintIdle(): Promise<void> {
+      if (!painting && paintJobs.length === 0) return Promise.resolve();
+      return new Promise((resolve) => idleWaiters.push(resolve));
+    }
+
     function enqueuePaint<T>(
       pageIndex: number,
       work: () => Promise<T>,
+      signal?: AbortSignal,
     ): Promise<T> {
-      const run = paintTail.then(
-        () => enqueuePage(pageIndex, work),
-        () => enqueuePage(pageIndex, work),
-      );
-      paintTail = run.then(
-        () => undefined,
-        () => undefined,
-      );
-      return run;
+      if (signal?.aborted) return Promise.reject(abortError());
+      return new Promise<T>((resolve, reject) => {
+        const onAbort = () => {
+          const at = paintJobs.indexOf(job);
+          if (at < 0) return;
+          paintJobs.splice(at, 1);
+          reject(abortError());
+        };
+        const job: PaintJob = {
+          run: () => {
+            signal?.removeEventListener("abort", onAbort);
+            return enqueuePage(pageIndex, () => {
+              if (signal?.aborted) throw abortError();
+              return work();
+            }).then(resolve, reject);
+          },
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+        paintJobs.push(job);
+        schedulePump();
+      });
     }
 
     return {
       document: viewerDocument,
-      async renderPage(pageIndex, width) {
+      async renderPage(pageIndex, width, signal) {
         return enqueuePaint(pageIndex, async () => {
           if (destroyed) throw new Error("This viewer session is closed.");
           if (pageIndex < 0 || pageIndex >= pdf.numPages) {
@@ -495,6 +620,7 @@ export async function openPdfViewer(
             canvasContext.fillStyle = "#ffffff";
             canvasContext.fillRect(0, 0, canvas.width, canvas.height);
             const renderTask = page.render({ canvas, canvasContext, viewport });
+            const release = cancelOnAbort(renderTask, signal);
             try {
               await renderTask.promise;
               // Reader text and line art should not acquire JPEG ringing.
@@ -508,29 +634,46 @@ export async function openPdfViewer(
                 );
               });
             } finally {
+              release();
               canvas.width = 0;
               canvas.height = 0;
             }
           } finally {
-            page.cleanup();
+            // Reading-size paints keep the page warm for the zoom tiles that
+            // follow; thumbnails don't, so a sidebar scroll can't evict it.
+            if (width >= 400) keepWarm(pageIndex);
+            else if (!warmPages.includes(pageIndex)) page.cleanup();
           }
-        });
+        }, signal);
       },
-      async renderPageRegion(pageIndex, clip, outputWidth, _outputHeight) {
+      async renderPageRegion(
+        pageIndex,
+        clip,
+        outputWidth,
+        _outputHeight,
+        signal,
+      ) {
         return enqueuePaint(pageIndex, async () => {
           if (destroyed) throw new Error("This viewer session is closed.");
           if (pageIndex < 0 || pageIndex >= pdf.numPages) {
             throw new Error("That page is out of range.");
           }
           const page = await pdf.getPage(pageIndex + 1);
+          // Tiles of one page reuse its parsed drawing instructions and
+          // decoded images.
+          keepWarm(pageIndex);
           try {
-            return await renderClippedPage(page, clip, outputWidth);
-          } catch {
-            return await renderClippedPage(page, clip, Math.max(64, outputWidth / 2));
-          } finally {
-            page.cleanup();
+            return await renderClippedPage(page, clip, outputWidth, signal);
+          } catch (error) {
+            if (signal?.aborted) throw error;
+            return await renderClippedPage(
+              page,
+              clip,
+              Math.max(64, outputWidth / 2),
+              signal,
+            );
           }
-        });
+        }, signal);
       },
       async renderTextLayer(pageIndex, container, scale) {
         return enqueuePage(pageIndex, async () => {
@@ -691,7 +834,7 @@ export async function pdfToImages(
         pageCount: pages.length,
         extra: { images },
       };
-    });
+    }, control?.signal);
   } catch (err) {
     return { ok: false, message: humanError(err) };
   }
@@ -750,7 +893,7 @@ export async function compress(
           },
         },
       };
-    });
+    }, control?.signal);
   } catch (err) {
     return { ok: false, message: humanError(err) };
   }
@@ -1127,5 +1270,5 @@ export async function extractPdfText(
     }
     onProgress?.({ progress: 0.96, label: "Building Word document" });
     return pages;
-  });
+  }, signal);
 }

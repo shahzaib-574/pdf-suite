@@ -9,7 +9,7 @@ The protected `production-aab.yml` workflow builds signed APK/AAB artifacts; it 
 
 After reviewed changes reach `main`, run **Build signed production AAB** and confirm the manual input. The workflow installs exact dependencies, builds and syncs production assets, runs `verify:ads`, validates production IDs/UMP/rating, builds release lint/tests/APK/AAB, verifies signing and 16 KB alignment, and checks the final manifest, permissions, DEX SDK components, plugin registry, and packaged metadata. It uploads artifacts only.
 
-For local verification, configure JDK 21 and Android SDK 36. Use ignored `android/keystore.properties` for a signed candidate, or only in CI use `-PallowUnsignedRelease=true` for compilation. Run `npm run android:sync` and `npm run verify:ads` first. The next candidate identity is 1.2.1 (7).
+For local verification, configure JDK 21 and Android SDK 36. Use ignored `android/keystore.properties` for a signed candidate, or only in CI use `-PallowUnsignedRelease=true` for compilation. Run `npm run android:sync` and `npm run verify:ads` first. The next candidate identity is 1.4.0 (9).
 
 The workflow verifies every 64-bit ELF `PT_LOAD` segment in the APK for 16 KB alignment in addition to ZIP alignment. Its release manifest uses package/version values read back from the built APK, the checked-out Git commit, actual APK/AAB/mapping hashes, and the actual signing-certificate digest; those values are checked again before artifact upload. Retain that manifest with every Play upload.
 

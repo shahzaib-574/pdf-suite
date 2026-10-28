@@ -1,6 +1,7 @@
 import { PAPER_SIZES } from "../lib/paperSizes";
-import { useEffect, useMemo, useState, useRef } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
+import { Eye, EyeOff, Undo2 } from "lucide-react";
+import { createPortal } from 'react-dom';
 import {
   AnimatedButton,
   FileWell,
@@ -8,10 +9,15 @@ import {
   ProgressHud,
   SelectField,
 } from "../components";
-import { ScanCamera } from "./ScanCamera";
+import { movedOrder } from "../components/useDragReorder";
+import { ActionSlotsContext } from "../components/actionSlots";
+import { showToast } from "../components/Toast";
+import { ScanCamera, type NativeScanAdapter } from "./ScanCamera";
 import { OCR_LANGUAGES, type OcrLanguage } from '../lib/ocrLanguages';
 import { loadScanDraft, saveScanDraft, clearScanDraft, type ScanPageDraft } from '../store/scanDraft';
 import { ScanEditor } from "./ScanEditor";
+import { OrganizeGrid } from "./OrganizeGrid";
+import { prepareOrganizeInput } from "../store/organizeInput";
 import { ScanPdfPreview } from "./ScanPdfPreview";
 import { TOOLS, type ToolDef } from "../lib/catalog";
 import type {
@@ -28,15 +34,21 @@ import { engine, cancelPendingJobs } from "../pdf";
 import { parsePages } from "../pdf/pageSelection";
 import { takeToolFiles } from "../store/toolInput";
 import { usePro } from "../store/entitlements";
-import { fileListToPicked, MAX_INPUT_BYTES, saveBytes, shareOrDownload } from "../store/files";
+import { fileListToPicked, fileListToScanImages, MAX_INPUT_BYTES, saveBytes, shareOrDownload } from "../store/files";
+import { assertScanBudget, retainedScanBytes, replaceScanPage } from '../store/scanInputPolicy';
 import { setCurrentViewer, setLastJob } from "../store/lastJob";
 import { saveRecent } from "../store/recents";
 import { takePendingScan, takePendingScanError } from "../store/pendingScan";
 import { goBack, navigate, replaceWith } from "./nav";
 import { useBackHandler } from "./back";
 
-type ToolFlowProps = {
+export type ToolFlowProps = {
   id: ToolId;
+  nativeScan?: NativeScanAdapter;
+  loadNativeScanDraft?: typeof loadScanDraft;
+  onNativePresentation?: (phase: 'pending' | 'explicit' | 'ready') => void;
+  onEmptyScanClose?: () => void;
+  presentationActive?: boolean;
 };
 
 function pad2(value: number): string {
@@ -52,22 +64,33 @@ const TOOL_BY_ID = Object.fromEntries(TOOLS.map((t) => [t.id, t])) as Record<
   ToolDef
 >;
 
-const LEVELS: { id: CompressLevel; label: string }[] = [
-  { id: "keep", label: "Preserve text" },
-  { id: "balanced", label: "Smaller scan" },
-  { id: "strong", label: "Smallest scan" },
+const LEVELS: { id: CompressLevel; label: string; note: string }[] = [
+  {
+    id: "keep",
+    label: "Recommended",
+    note: "Resizes photos, scans and maps to 200 DPI, sharp enough to zoom into fine print. Text, links and forms stay as they are.",
+  },
+  {
+    id: "balanced",
+    label: "Strong",
+    note: "Resizes images to 150 DPI. Smaller files; very fine print gets softer when zoomed. Text, links and forms stay as they are.",
+  },
+  {
+    id: "strong",
+    label: "Extreme",
+    note: "Turns every page into a 120 DPI image. Loses zoom detail on large maps and posters, plus selectable text, links, forms and signatures.",
+  },
 ];
 
-const TOOLS_WITH_OPTIONS = new Set<ToolId>([
+const PDF_INPUT_TOOLS = new Set<ToolId>([
+  "merge",
   "split",
-  "compress",
-  "organize",
-  "watermark",
-  "protect",
-  "scan",
-  "images",
   "pdf-images",
+  "compress",
+  "watermark",
   "numbers",
+  "protect",
+  "pdf-docx",
 ]);
 
 const ACTION_LABELS: Record<Exclude<ToolId, "view">, string> = {
@@ -77,7 +100,7 @@ const ACTION_LABELS: Record<Exclude<ToolId, "view">, string> = {
   "pdf-images": "Export images",
   compress: "Compress PDF",
   scan: "Create scanned PDF",
-  organize: "Apply page changes",
+  organize: "Organize",
   watermark: "Add watermark",
   numbers: "Add page numbers",
   protect: "Protect PDF",
@@ -130,15 +153,30 @@ function takeInitialScan(id: ToolId): {
   };
 }
 
-export function ToolFlow({ id }: ToolFlowProps) {
+const pickedFileIds = new WeakMap<PickedFile, string>();
+let nextPickedFileId = 0;
+/** Stable per-object key so reordered files keep their preview and focus. */
+function pickedFileId(file: PickedFile): string {
+  let id = pickedFileIds.get(file);
+  if (!id) {
+    id = `picked-${++nextPickedFileId}`;
+    pickedFileIds.set(file, id);
+  }
+  return id;
+}
+
+export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, onNativePresentation, onEmptyScanClose, presentationActive = true }: ToolFlowProps) {
   const tool = TOOL_BY_ID[id];
   const pro = usePro();
   const [initialScan] = useState(() => takeInitialScan(id));
-  const [picked, setPicked] = useState<PickedFile[]>(initialScan.files);
+  const queuedOrganizeGroup = id === 'organize' && initialScan.files.length > 0 &&
+    !(initialScan.files.length === 1 && (initialScan.files[0]!.mime === 'application/pdf' || /\.pdf$/i.test(initialScan.files[0]!.name)));
+  const [picked, setPicked] = useState<PickedFile[]>(queuedOrganizeGroup ? [] : initialScan.files);
   const [error, setError] = useState<string | null>(initialScan.error);
   const [cameraOpen, setCameraOpen] = useState(
     () => id === "scan" && initialScan.files.length === 0,
   );
+  const [nativePresentation, setNativePresentation] = useState<'pending' | 'explicit'>('pending');
   const [busy, setBusy] = useState(false);
   const [scanBusy, setScanBusy] = useState(false);
   const [scanStep, setScanStep] = useState<"edit" | "pdf">("edit");
@@ -147,52 +185,89 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const [draftReady, setDraftReady] = useState(id !== 'scan' || initialScan.files.length > 0);
   const [scanEdits, setScanEdits] = useState<(ScanPageDraft | null)[]>([]);
   const [ocrLanguage, setOcrLanguage] = useState<OcrLanguage>('eng');
-  const [pdfAccess, setPdfAccess] = useState<{file:PickedFile;password?:string} | null>(null);
-  const [pdfFailedFile, setPdfFailedFile] = useState<PickedFile | null>(null);
+  const [unlockedPdfs, setUnlockedPdfs] = useState<Set<PickedFile>>(() => new Set());
+  const [failedPdfs, setFailedPdfs] = useState<Set<PickedFile>>(() => new Set());
   const [passwordPrompt, setPasswordPrompt] = useState<{file:PickedFile;incorrect:boolean} | null>(null);
   const [inputPassword, setInputPassword] = useState('');
   const passwordReply = useRef<((password:string)=>void) | null>(null);
-  const inputPdf = picked[0];
-  const checkingPdf = id === 'pdf-docx' && !!inputPdf && pdfAccess?.file !== inputPdf;
+  const pendingPdf = PDF_INPUT_TOOLS.has(id)
+    ? picked.find((file) => !file.password && !unlockedPdfs.has(file) && !failedPdfs.has(file))
+    : undefined;
+  const checkingPdf = !!pendingPdf;
+  const hasFailedPdf = PDF_INPUT_TOOLS.has(id) && picked.some((file) => failedPdfs.has(file));
   useEffect(() => {
-    if(id !== 'pdf-docx' || !inputPdf)return;
-    const controller=new AbortController();
-    let enteredPassword=inputPdf.password;
-    let rejectReply:((reason:Error)=>void) | undefined;
-    void engine.openViewer(inputPdf,undefined,{
-      indexText:false,
-      signal:controller.signal,
-      onPassword:incorrect => new Promise<string>((resolve,reject)=>{
-        if(controller.signal.aborted){reject(new Error('Cancelled'));return;}
-        rejectReply=reject;
-        passwordReply.current=value=>{enteredPassword=value;passwordReply.current=null;setPasswordPrompt(null);resolve(value);};
-        setInputPassword('');setPasswordPrompt({file:inputPdf,incorrect});
+    if (!presentationActive || !pendingPdf) return;
+    const controller = new AbortController();
+    let enteredPassword = pendingPdf.password;
+    let rejectReply: ((reason: Error) => void) | undefined;
+    void engine.openViewer(pendingPdf, undefined, {
+      indexText: false,
+      signal: controller.signal,
+      onPassword: (incorrect) => new Promise<string>((resolve, reject) => {
+        if (controller.signal.aborted) { reject(new Error('Cancelled')); return; }
+        rejectReply = reject;
+        passwordReply.current = (value) => {
+          enteredPassword = value;
+          passwordReply.current = null;
+          setPasswordPrompt(null);
+          resolve(value);
+        };
+        setInputPassword('');
+        setPasswordPrompt({ file: pendingPdf, incorrect });
       }),
-    }).then(async session=>{
+    }).then(async (session) => {
       await session.destroy();
-      if(!controller.signal.aborted){setPdfAccess({file:inputPdf,password:enteredPassword});setPasswordPrompt(null);setInputPassword('');}
-    }).catch(error=>{if(!controller.signal.aborted){setPdfFailedFile(inputPdf);setError(error instanceof Error ? error.message : 'Could not open this PDF.');}});
-    return()=>{controller.abort();rejectReply?.(new Error('Cancelled'));passwordReply.current=null;};
-  }, [id,inputPdf]);
+      if (!controller.signal.aborted) {
+        const updated = enteredPassword ? { ...pendingPdf, password: enteredPassword } : pendingPdf;
+        if (enteredPassword) {
+          const existingId = pickedFileIds.get(pendingPdf);
+          if (existingId) pickedFileIds.set(updated, existingId);
+          setPicked((prev) => prev.map((file) => (file === pendingPdf ? updated : file)));
+        }
+        setUnlockedPdfs((prev) => {
+          const next = new Set(prev);
+          next.add(pendingPdf);
+          next.add(updated);
+          return next;
+        });
+        setPasswordPrompt(null);
+        setInputPassword('');
+      }
+    }).catch((err) => {
+      if (!controller.signal.aborted) {
+        setFailedPdfs((prev) => {
+          const next = new Set(prev);
+          next.add(pendingPdf);
+          return next;
+        });
+        setError(err instanceof Error ? err.message : 'Could not open this PDF.');
+      }
+    });
+    return () => {
+      controller.abort();
+      rejectReply?.(new Error('Cancelled'));
+      passwordReply.current = null;
+    };
+  }, [pendingPdf, presentationActive]);
   const [docxInspection, setDocxInspection] = useState<{file:PickedFile;warnings:string[]} | null>(null);
   const docxChecking = id === 'docx-pdf' && !!picked[0] && docxInspection?.file !== picked[0];
   const docxWarnings = docxInspection?.file === picked[0] ? docxInspection?.warnings ?? [] : [];
   useEffect(() => {
     const file = picked[0];
-    if(id !== 'docx-pdf' || !file) return;
+    if(!presentationActive || id !== 'docx-pdf' || !file) return;
     let current=true;
     void import('../pdf/docxToPdf').then(module=>module.inspectDocx(file))
       .then(warnings=>{if(current)setDocxInspection({file,warnings});})
       .catch(error=>{if(current)setDocxInspection({file,warnings:[error instanceof Error ? error.message : 'Could not inspect this document.']});});
     return ()=>{current=false;};
-  }, [id,picked]);
+  }, [id,picked,presentationActive]);
   const [draftStatus, setDraftStatus] = useState('');
   const [retakeIndex, setRetakeIndex] = useState<number | null>(null);
   const [scanRevision, setScanRevision] = useState(0);
   const scanCompleted = useRef(false);
 
   useBackHandler(() => {
-    if (id !== "scan" || cameraOpen) return false;
+    if (!presentationActive || id !== "scan" || cameraOpen) return false;
     if (scanStep === "pdf") {
       setScanStep("edit");
       return true;
@@ -201,7 +276,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
   });
 
   const [jobProgress, setJobProgress] = useState<number | undefined>();
-  const [jobLabel, setJobLabel] = useState("Working on-device…");
+  const [jobLabel, setJobLabel] = useState("Working on-device\u2026");
   const [pageCount, setPageCount] = useState(0);
   const [startPage, setStartPage] = useState(1);
   const [endPage, setEndPage] = useState(1);
@@ -211,11 +286,17 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [rotateAll, setRotateAll] = useState(false);
-  const [reverse, setReverse] = useState(false);
-  const [thumbs, setThumbs] = useState<string[]>([]);
-  const [pageOrder, setPageOrder] = useState<number[]>([]);
-  const [removedPages, setRemovedPages] = useState<number[]>([]);
+  const organizeInputActive = tool.id === "organize";
+  const [organizeReady,setOrganizeReady]=useState<{source:PickedFile;file:PickedFile}|null>(null);
+  const [organizeInputBusy,setOrganizeInputBusy]=useState(false);
+  const organizeRequest=useRef<AbortController|null>(null);
+  // Organize: every page in display order, plus the pages left out of the output.
+  const [pageArrangement, setPageArrangement] = useState<number[]>([]);
+  const [pageExcluded, setPageExcluded] = useState<number[]>([]);
+  const pageOrder = useMemo(() => {
+    const excluded = new Set(pageExcluded);
+    return pageArrangement.filter((page) => !excluded.has(page));
+  }, [pageArrangement, pageExcluded]);
   const [pageRotations, setPageRotations] = useState<Record<number, number>>(
     {},
   );
@@ -235,7 +316,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
   useEffect(() => {
     if (id !== 'scan' || initialScan.files.length) return;
     let cancelled = false;
-    void loadScanDraft().then(draft => {
+    void loadNativeScanDraft().then(draft => {
       if (cancelled) return;
       if (draft) {
         setPicked(draft.files);setScanEdits(draft.edits);setScanStep(draft.step);
@@ -244,7 +325,12 @@ export function ToolFlow({ id }: ToolFlowProps) {
     }).catch(() => {if(!cancelled)setDraftStatus('Could not restore the last scan.');})
       .finally(() => {if(!cancelled)setDraftReady(true);});
     return () => { cancelled = true; };
-  }, [id, initialScan]);
+  }, [id, initialScan, loadNativeScanDraft]);
+  useLayoutEffect(() => {
+    if (id === 'scan' && nativeScan) onNativePresentation?.(
+      !draftReady || cameraOpen ? nativePresentation : 'ready',
+    );
+  }, [id, nativeScan, draftReady, cameraOpen, nativePresentation, onNativePresentation]);
   useEffect(() => {
     if(id !== 'scan' || !draftReady || scanCompleted.current) return;
     let current=true;
@@ -254,23 +340,33 @@ export function ToolFlow({ id }: ToolFlowProps) {
     return () => {current=false;};
   }, [id,draftReady,picked,scanEdits,scanStep,scanName,imageOptions]);
   const [watermarkAngle, setWatermarkAngle] = useState(-35);
-  const [organizeOffset, setOrganizeOffset] = useState(0);
   const jobController = useRef<AbortController | null>(null);
+  const componentMounted = useRef(true);
+  useLayoutEffect(() => {
+    componentMounted.current = true;
+    return () => { componentMounted.current = false; organizeRequest.current?.abort(); };
+  }, []);
   const mounted = useRef(true);
   useEffect(() => {
-    mounted.current = true;
+    mounted.current = presentationActive;
     return () => {
       mounted.current = false;
+      organizeRequest.current?.abort();
       if (jobController.current) {
         jobController.current.abort();
         cancelPendingJobs();
       }
     };
-  }, []);
+  }, [presentationActive]);
   function cancelJob() {
     jobController.current?.abort();
     cancelPendingJobs();
-    setJobLabel("Cancelling…");
+    setJobLabel("Cancelling\u2026");
+  }
+  function reorderFiles(order: number[]) {
+    setPicked((files) =>
+      order.length === files.length ? order.map((from) => files[from]!) : files,
+    );
   }
   function moveFile(index: number, direction: -1 | 1) {
     setPicked((files) => {
@@ -285,17 +381,30 @@ export function ToolFlow({ id }: ToolFlowProps) {
   const locked = !pro && tool.pro;
   const maxFiles = pro ? Number.POSITIVE_INFINITY : tool.maxFilesFree;
   const scanMaxPages = Number.isFinite(maxFiles) ? Math.max(1, maxFiles) : 20;
-  const multiple = tool.accept === "pdfs" || tool.accept === "images";
+  const multiple = tool.id === "organize" || tool.accept === "pdfs" || tool.accept === "images";
   const copy = wellCopy(tool.id, tool.minFiles);
+  const reorderable = tool.accept === "pdfs" || tool.accept === "images";
+  // Multi-file tools put the file list's reorder control beside a compact,
+  // centred main button in the bottom action row.
+  const [actionStart, setActionStart] = useState<HTMLElement | null>(null);
+  const actionSlots = useMemo(
+    () => (multiple ? { start: actionStart } : null),
+    [actionStart, multiple],
+  );
   const wellItems = useMemo(
     () =>
-      picked.map((file) => ({ name: file.name, size: file.bytes.byteLength })),
+      picked.map((file) => ({
+        name: file.name,
+        size: file.bytes.byteLength,
+        id: pickedFileId(file),
+        source: file,
+      })),
     [picked],
   );
 
   useEffect(() => {
     const file = picked[0];
-    if (!file || !["split", "organize", "pdf-images"].includes(tool.id)) return;
+    if (!file || checkingPdf || failedPdfs.has(file) || !["split", "pdf-images"].includes(tool.id)) return;
     let cancelled = false;
     void engine
       .pageCount(file)
@@ -304,11 +413,9 @@ export function ToolFlow({ id }: ToolFlowProps) {
         setPageCount(count);
         setStartPage(1);
         setEndPage(Math.max(1, count));
-        setPageOrder(Array.from({ length: count }, (_, index) => index));
-        setRemovedPages([]);
+        setPageArrangement(Array.from({ length: count }, (_, index) => index));
+        setPageExcluded([]);
         setPageRotations({});
-        setRotateAll(false);
-        setReverse(false);
       })
       .catch((error) => {
         if (!cancelled) {
@@ -321,59 +428,34 @@ export function ToolFlow({ id }: ToolFlowProps) {
     return () => {
       cancelled = true;
     };
-  }, [picked, tool.id]);
-
-  useEffect(() => {
-    if (tool.id !== "organize" || !picked[0] || pageCount < 1) return;
-    let cancelled = false;
-    const controller = new AbortController();
-    const urls: string[] = [];
-    let session: Awaited<ReturnType<typeof engine.openViewer>> | undefined;
-    void (async () => {
-      try {
-        session = await engine.openViewer(picked[0]!, undefined, {
-          signal: controller.signal,
-          indexText: false,
-        });
-        for (const i of pageOrder.slice(organizeOffset, organizeOffset + 30)) {
-          if (cancelled) return;
-          const blob = await session.renderPage(i, 150);
-          if (cancelled) return;
-          const url = URL.createObjectURL(blob);
-          urls.push(url);
-          setThumbs((current) => {
-            const next = [...current];
-            next[i] = url;
-            return next;
-          });
-        }
-      } catch (error) {
-        if (!cancelled)
-          setError(
-            error instanceof Error ? error.message : "Could not load previews.",
-          );
-      }
-    })();
-    return () => {
-      cancelled = true;
-      controller.abort();
-      if (session) void session.destroy();
-      urls.forEach((url) => URL.revokeObjectURL(url));
-      setThumbs([]);
-    };
-  }, [tool.id, picked, pageCount, organizeOffset, pageOrder]);
+  }, [picked, tool.id, checkingPdf, failedPdfs]);
 
   async function onPick(fileList: FileList): Promise<void> {
     setError(null);
+    if(tool.id==='organize'){
+      organizeRequest.current?.abort();const owner=new AbortController();organizeRequest.current=owner;setOrganizeInputBusy(true);
+      const current=()=>!owner.signal.aborted&&componentMounted.current&&window.location.hash.split('?')[0]==='#/tool/organize';
+      const ask=(incorrect:boolean)=>new Promise<string>((resolve,reject)=>{
+        if(!current()){reject(new DOMException('Cancelled','AbortError'));return;}
+        const cancel=()=>{reject(new DOMException('Cancelled','AbortError'));if(organizeRequest.current===owner){setPasswordPrompt(null);setInputPassword('');passwordReply.current=null;}};
+        owner.signal.addEventListener('abort',cancel,{once:true});
+        setInputPassword('');setPasswordPrompt({file:picked[0]??{name:'PDF',mime:'application/pdf',bytes:new Uint8Array()},incorrect});
+        passwordReply.current=value=>{owner.signal.removeEventListener('abort',cancel);setPasswordPrompt(null);setInputPassword('');passwordReply.current=null;resolve(value);};
+      });
+      try{const file=await prepareOrganizeInput(Array.from(fileList),owner.signal,ask);if(current()){resetPageState();setOrganizeReady(null);setPicked([file]);}}
+      catch(err){if(current())setError(err instanceof Error?err.message:'Could not prepare these files.');}
+      finally{if(organizeRequest.current===owner){organizeRequest.current=null;if(componentMounted.current)setOrganizeInputBusy(false);}}
+      return;
+    }
     try {
-      const incoming = await fileListToPicked(
+      const incoming = tool.id === "scan" ? await fileListToScanImages(fileList) : await fileListToPicked(
         fileList,
         tool.accept === "images",
       );
       const combined = multiple ? [...picked, ...incoming] : incoming;
       if (
         combined.length > 200 ||
-        combined.reduce((sum, file) => sum + file.bytes.length, 0) >
+        (tool.id==='scan'?retainedScanBytes(combined):combined.reduce((sum, file) => sum + file.bytes.length, 0)) >
           MAX_INPUT_BYTES
       )
         throw new Error(
@@ -395,22 +477,30 @@ export function ToolFlow({ id }: ToolFlowProps) {
   }
 
   function onRemove(index: number): void {
+    if (tool.id === "organize") organizeRequest.current?.abort();
     resetPageState();
     setPicked((prev) => prev.filter((_, i) => i !== index));
   }
 
+  useEffect(() => {
+    if (!queuedOrganizeGroup) return;
+    const files = initialScan.files.map(file => new File([file.bytes.slice().buffer], file.name, {type:file.mime}));
+    const transfer = new DataTransfer(); files.forEach(file => transfer.items.add(file));
+    void onPick(transfer.files);
+    const owner = organizeRequest.current;
+    return () => owner?.abort();
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- Consume this immutable queued group per tool identity, including StrictMode replay.
+  }, [initialScan, queuedOrganizeGroup]);
+
   function resetPageState(): void {
+    setOrganizeReady(null);
     setPageCount(0);
-    setOrganizeOffset(0);
     setSelection("");
     setStartPage(1);
     setEndPage(1);
-    setThumbs([]);
-    setPageOrder([]);
-    setRemovedPages([]);
+    setPageArrangement([]);
+    setPageExcluded([]);
     setPageRotations({});
-    setRotateAll(false);
-    setReverse(false);
   }
 
   useEffect(() => {
@@ -468,7 +558,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
       case "protect":
         return password.trim().length > 0 && password === confirmPassword;
       case "organize":
-        return pageCount > 0 && removedPages.length < pageCount;
+        return pageCount > 0 && pageOrder.length > 0 && organizeReady?.source === picked[0] && !organizeInputBusy;
       default:
         return true;
     }
@@ -476,12 +566,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
 
   function buildOps(count: number): OrganizeOp[] {
     const ops: OrganizeOp[] = [];
-    const baseOrder =
-      pageOrder.length === count
-        ? pageOrder
-        : Array.from({ length: count }, (_, index) => index);
-    const removed = new Set(removedPages);
-    const order = baseOrder.filter((pageIndex) => !removed.has(pageIndex));
+    const order = pageOrder.filter(index=>index>=0&&index<count);
     ops.push({ type: "reorder", order });
     order.forEach((originalPageIndex, outputIndex) => {
       const degrees = normalizeQuarterTurn(
@@ -494,16 +579,6 @@ export function ToolFlow({ id }: ToolFlowProps) {
     return ops;
   }
 
-  function movePage(pageIndex: number, direction: -1 | 1): void {
-    const at = pageOrder.indexOf(pageIndex);
-    const target = at + direction;
-    if (at < 0 || target < 0 || target >= pageOrder.length) return;
-    const next = [...pageOrder];
-    [next[at], next[target]] = [next[target]!, next[at]!];
-    setPageOrder(next);
-    setReverse(false);
-  }
-
   function rotatePage(pageIndex: number): void {
     setPageRotations((current) => ({
       ...current,
@@ -511,29 +586,24 @@ export function ToolFlow({ id }: ToolFlowProps) {
     }));
   }
 
-  function toggleRemoved(pageIndex: number): void {
-    setRemovedPages((current) =>
-      current.includes(pageIndex)
-        ? current.filter((index) => index !== pageIndex)
-        : [...current, pageIndex],
+  function togglePage(page: number): void {
+    setPageExcluded((current) =>
+      current.includes(page)
+        ? current.filter((value) => value !== page)
+        : [...current, page],
     );
   }
 
-  function rotateEveryPage(): void {
-    const rotationDelta = rotateAll ? -90 : 90;
-    setRotateAll((value) => !value);
-    setPageRotations((current) => {
-      const next = { ...current };
-      for (let index = 0; index < pageCount; index++) {
-        next[index] = (next[index] ?? 0) + rotationDelta;
-      }
-      return next;
-    });
+  function applyTapOrder(sequence: number[]): void {
+    const chosen = new Set(sequence);
+    const rest = pageArrangement.filter((page) => !chosen.has(page));
+    setPageArrangement([...sequence, ...rest]);
+    setPageExcluded(rest);
   }
 
-  function reversePages(): void {
-    setReverse((value) => !value);
-    setPageOrder((current) => [...current].reverse());
+  function resetPageArrangement(): void {
+    setPageArrangement(Array.from({ length: pageCount }, (_, index) => index));
+    setPageExcluded([]);
   }
 
   async function run(exportAction?: "save" | "share"): Promise<void> {
@@ -552,8 +622,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
       setError("Fill in the options first.");
       return;
     }
-    if(checkingPdf)return;
-    const first = tool.id === 'pdf-docx' && pdfAccess?.file === picked[0] ? {...picked[0]!,password:pdfAccess.password} : picked[0];
+    if (checkingPdf || hasFailedPdf) return;
+    const first = picked[0];
     if (!first) return;
     const controller = new AbortController();
     jobController.current = controller;
@@ -567,8 +637,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
       },
     };
     setBusy(true);
-    setJobProgress(tool.id === "pdf-docx" ? 0 : undefined);
-    setJobLabel(tool.id === "pdf-docx" ? "Reading PDF" : "Working on-device…");
+    setJobProgress(tool.id === "pdf-docx" || tool.id === "compress" ? 0 : undefined);
+    setJobLabel(tool.id === "pdf-docx" ? "Reading PDF" : tool.id === "compress" ? "Optimizing PDF" : "Working on-device\u2026");
     setError(null);
     try {
       let result: JobResult;
@@ -604,7 +674,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
           result = await engine.compress(first, compressLevel, control);
           break;
         case "organize":
-          result = await engine.organize(first, buildOps(pageCount));
+          result = await engine.organize(organizeReady!.file, buildOps(pageCount));
           break;
         case "watermark":
           result = await engine.watermark(first, {
@@ -656,9 +726,9 @@ export function ToolFlow({ id }: ToolFlowProps) {
       if (mounted.current && !controller.signal.aborted)
         setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
-      if (mounted.current) {
+      if (componentMounted.current) {
         setBusy(false);
-        if (controller.signal.aborted)
+        if (controller.signal.aborted && mounted.current)
           setError(
             "Processing cancelled. Your selected files are ready to try again.",
           );
@@ -671,29 +741,24 @@ export function ToolFlow({ id }: ToolFlowProps) {
     !locked &&
     !busy &&
     !scanBusy &&
+    !organizeInputBusy &&
     !checkingPdf &&
+    !hasFailedPdf &&
     !(tool.id === 'docx-pdf' && docxChecking) &&
     tool.id !== "view" &&
     picked.length >= tool.minFiles &&
     extraValid();
   const hasFile = picked.length >= tool.minFiles;
-  const flowSteps = tool.id === "scan" ? ["Edit pages", "PDF & export"] : TOOLS_WITH_OPTIONS.has(tool.id)
-    ? ["Select", "Adjust", "Create"]
-    : ["Select", "Create"];
-  const activeStep = tool.id === "scan" ? (scanStep === "edit" ? 0 : 1) :
-    picked.length < tool.minFiles
-      ? 0
-      : busy || flowSteps.length === 2
-        ? flowSteps.length - 1
-        : 1;
 
   function blockedReason(): string | null {
     if (scanBusy) return "Finish or cancel the page adjustment first.";
+    if (tool.id === 'organize' && organizeInputBusy) return 'Preparing PDF or images\u2026';
     if (locked) return "This tool is not available right now.";
     if (tool.id === "view") return null;
     if (picked.length < tool.minFiles) {
       if (tool.id === "merge") return "Add at least 2 PDFs to merge.";
       if (tool.id === "scan") return "Take or choose a photo first.";
+      if (tool.id === 'organize') return 'Choose a PDF or images first.';
       if (tool.id === "images") {
         return tool.minFiles === 1
           ? "Add a photo first."
@@ -702,6 +767,9 @@ export function ToolFlow({ id }: ToolFlowProps) {
       if (tool.id === "docx-pdf") return "Choose a Word file first.";
       return "Choose a PDF first.";
     }
+    if (passwordPrompt) return "Unlock the password-protected PDF first.";
+    if (checkingPdf) return "Checking PDF access\u2026";
+    if (hasFailedPdf) return "Remove or replace the unreadable PDF first.";
     if (tool.id === "split" || tool.id === "pdf-images")
       return extraValid()
         ? null
@@ -715,24 +783,37 @@ export function ToolFlow({ id }: ToolFlowProps) {
     if (
       tool.id === "organize" &&
       pageCount > 0 &&
-      removedPages.length >= pageCount
+      pageOrder.length === 0
     ) {
-      return "Restore at least one page before continuing.";
+      return "Keep at least one page before organizing.";
     }
     return null;
   }
 
-  const ctaHint = canRun ? null : blockedReason();
+  // An action that isn't ready yet still takes the tap and explains why in a
+  // toast, instead of a hint line sitting above the button.
+  const whenReady = (action: () => void) => () => {
+    if (canRun) {
+      action();
+      return;
+    }
+    const reason = blockedReason();
+    if (reason) showToast(reason);
+  };
   const scanPdf = tool.id === "scan" && scanStep === "pdf";
 
   const scanCamera = tool.id === "scan" && cameraOpen && draftReady ? (
       <ScanCamera
+        nativeScan={nativeScan}
+        onPresentation={setNativePresentation}
         pages={retakeIndex === null ? picked : []}
         maxPages={retakeIndex === null ? scanMaxPages : 1}
         onPages={(next) => {
+          const replacement=retakeIndex !== null && next[0] ? replaceScanPage(picked,retakeIndex,next[0]) : null;
+          if(!replacement)assertScanBudget(next,scanMaxPages);
           setError(null);
           if(retakeIndex !== null && next[0]) {
-            setPicked(files => files.map((file,i) => i===retakeIndex ? next[0]! : file));
+            setPicked(replacement!);
             setScanEdits(edits => edits.map((edit,i) => i===retakeIndex ? null : edit));
             setScanRevision(value=>value+1);setRetakeIndex(null);
           } else setPicked(next);
@@ -741,6 +822,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
         }}
         onClose={() => {
           setRetakeIndex(null);
+          if (picked.length === 0 && onEmptyScanClose) { onEmptyScanClose(); return; }
           setCameraOpen(false);
           if (picked.length === 0) replaceWith("#/");
         }}
@@ -749,11 +831,15 @@ export function ToolFlow({ id }: ToolFlowProps) {
     ) : null;
 
   return (
-    <>
+    <ActionSlotsContext.Provider value={actionSlots}>
+    {nativeScan && tool.id === 'scan' && !draftReady ? createPortal(
+      <button autoFocus className="btn native-capture-cancel" onClick={onEmptyScanClose ?? (() => goBack())}>Cancel scan</button>, document.body,
+    ) : null}
     {tool.id === 'scan' && !draftReady ? <p role="status">Restoring your scan…</p> : null}
     {scanCamera}
     <div
-      style={tool.id === "scan" && cameraOpen ? {display: "none"} : undefined}
+      style={tool.id === "scan" && cameraOpen && (!nativeScan || nativePresentation === 'explicit') ? {display: "none"} : undefined}
+      inert={tool.id === 'scan' && cameraOpen ? true : undefined}
       className={`ps-screen${tool.id === "scan" && scanStep === "edit" ? " ps-screen--scan-edit" : ""}${scanPdf ? " ps-screen--scan-pdf" : ""}`}
     >
       {tool.id !== "scan" || scanStep !== "edit" ? <PageHeader
@@ -767,19 +853,6 @@ export function ToolFlow({ id }: ToolFlowProps) {
         onBack={scanPdf ? () => setScanStep("edit") : () => goBack("#/")}
       /> : null}
       <div className="ps-body">
-        {tool.id !== "scan" ? <div className="ps-steps" aria-label="Tool progress">
-          {flowSteps.map((step, index) => (
-            <span
-              key={step}
-              className={`ps-step${index < activeStep ? " is-complete" : ""}${
-                index === activeStep ? " is-active" : ""
-              }`}
-              aria-current={index === activeStep ? "step" : undefined}
-            >
-              {index + 1}. {step}
-            </span>
-          ))}
-        </div> : null}
         {error ? (
           <p className="ps-banner ps-banner--error" role="alert">
             {error}
@@ -794,16 +867,19 @@ export function ToolFlow({ id }: ToolFlowProps) {
         ) : null}
         {tool.accept !== "none" && tool.id !== "scan" ? (
           <FileWell
-            accept={acceptAttr(tool.accept)}
+            accept={tool.id === "organize" ? "application/pdf,image/*" : acceptAttr(tool.accept)}
             multiple={multiple}
+            disabled={organizeInputActive && (busy || organizeInputBusy)}
             files={wellItems}
             onPick={(list) => {
               void onPick(list);
             }}
             onRemove={onRemove}
             onMove={multiple ? moveFile : undefined}
-            label={copy.label}
-            hint={copy.hint}
+            onReorder={reorderable ? reorderFiles : undefined}
+            label={tool.id === "organize" ? "Choose PDF or images" : copy.label}
+            hint={tool.id === "organize" ? "One PDF OR up to 200 supported images \u00b7 128 MB total" : copy.hint}
+            hideFile={tool.id === "organize"}
           />
         ) : null}
 
@@ -819,29 +895,33 @@ export function ToolFlow({ id }: ToolFlowProps) {
           {docxWarnings.length ? <div className="ps-banner" role="status"><strong>Before you convert</strong>{docxWarnings.map(warning=><p key={warning}>{warning}</p>)}</div> : null}
           </>
         ) : null}
-        {tool.id === "pdf-docx" ? (
+        {tool.id === "organize" && organizeInputBusy ? <p role="status">Preparing organizer input…</p> : null}
+        {PDF_INPUT_TOOLS.has(tool.id) || tool.id === "organize" ? (
           <>
-          {passwordPrompt?.file === inputPdf && inputPdf ? (
+          {passwordPrompt && (tool.id === "organize" || passwordPrompt.file === pendingPdf) ? (
             <form className="ps-banner" aria-label="Unlock PDF" onSubmit={event=>{event.preventDefault();passwordReply.current?.(inputPassword);}}>
               <p>This PDF is password protected. Enter its password to continue.</p>
               {passwordPrompt.incorrect ? <p role="alert">That password was incorrect. Try again.</p> : null}
               <label className="ps-field">Document password<input autoFocus type="password" autoComplete="off" value={inputPassword} onChange={event=>setInputPassword(event.target.value)} /></label>
-              <button type="submit" className="btn">Unlock PDF</button>
-              <button type="button" className="btn" onClick={()=>{setPicked([]);setPasswordPrompt(null);setInputPassword('');}}>Cancel</button>
+              <div className="ps-row">
+                <button type="submit" className="btn">Unlock PDF</button>
+                <button type="button" className="btn btn--ghost" onClick={()=>{if(tool.id === "organize")organizeRequest.current?.abort();else setPicked(prev=>prev.filter(file=>file!==passwordPrompt.file));setPasswordPrompt(null);setInputPassword('');}}>Cancel</button>
+              </div>
             </form>
-          ) : checkingPdf && pdfFailedFile !== inputPdf ? <p role="status">Checking PDF access…</p> : null}
-          <label className="ps-field">Scanned text language<select aria-label="Scanned text language" value={ocrLanguage} disabled={busy} onChange={event=>setOcrLanguage(event.target.value as OcrLanguage)}>{OCR_LANGUAGES.map(language=><option key={language.id} value={language.id}>{language.label}</option>)}</select></label>
+          ) : checkingPdf ? <p role="status">Checking PDF access…</p> : null}
+          {tool.id === "pdf-docx" ? <><label className="ps-field">Scanned text language<select aria-label="Scanned text language" value={ocrLanguage} disabled={busy} onChange={event=>setOcrLanguage(event.target.value as OcrLanguage)}>{OCR_LANGUAGES.map(language=><option key={language.id} value={language.id}>{language.label}</option>)}</select></label>
           <p className="ps-note">
             Rebuilds styled text, detected tables, and two-column layouts.
             Scanned pages use the selected language entirely on-device; uncertain
             pages stay as full-page images instead of returning unreliable text.
-          </p>
+          </p></> : null}
           </>
         ) : null}
 
         {tool.id === "scan" && draftReady && picked.length > 0 ? (
           <div hidden={scanStep !== "edit"} className="ps-scan-review">
           <ScanEditor
+            importError={error}
             key={scanRevision}
             initialEdits={scanEdits}
             onDrafts={setScanEdits}
@@ -872,7 +952,50 @@ export function ToolFlow({ id }: ToolFlowProps) {
           {draftStatus ? <p className="scan-draft-status" role="status">{draftStatus}</p> : null}
           </div>
         ) : null}
-        {["split", "pdf-images"].includes(tool.id) && hasFile ? (
+        {tool.id === "split" && hasFile ? (
+          <section className="ps-tool-settings" aria-labelledby="split-settings">
+            <div className="ps-tool-settings__intro">
+              <h2 id="split-settings">Split settings</h2>
+              <p>
+                Extract a page range, or list exact pages below to pick
+                those instead.
+              </p>
+            </div>
+            {!selection.trim() ? (
+              <div className="ps-range">
+                <label className="ps-field">
+                  Start page
+                  <input
+                    type="number"
+                    min={1}
+                    max={pageCount || undefined}
+                    value={startPage}
+                    onChange={(event) => setStartPage(Number(event.target.value))}
+                  />
+                </label>
+                <label className="ps-field">
+                  End page
+                  <input
+                    type="number"
+                    min={1}
+                    max={pageCount || undefined}
+                    value={endPage}
+                    onChange={(event) => setEndPage(Number(event.target.value))}
+                  />
+                </label>
+              </div>
+            ) : null}
+            <label className="ps-field">
+              Pages (optional)
+              <input
+                value={selection}
+                onChange={(e) => setSelection(e.target.value)}
+                placeholder="For example: 1-3, 5, 8-10"
+              />
+            </label>
+          </section>
+        ) : null}
+        {tool.id === "pdf-images" && hasFile ? (
           <label className="ps-field">
             Pages (optional)
             <input
@@ -881,47 +1004,15 @@ export function ToolFlow({ id }: ToolFlowProps) {
               placeholder="For example: 1-3, 5, 8-10"
             />
             <span className="ps-note">
-              {pageCount || "Reading"} pages. Leave blank to use{" "}
-              {tool.id === "split"
-                ? "the range below"
-                : "all pages (up to 200)"}
-              .
+              {pageCount || "Reading"} pages. Leave blank to use all pages
+              (up to 200).
             </span>
           </label>
-        ) : null}
-        {tool.id === "split" && hasFile && !selection.trim() ? (
-          <>
-            <div className="ps-row">
-              <label className="ps-field ps-grow">
-                Start page
-                <input
-                  type="number"
-                  min={1}
-                  max={pageCount || undefined}
-                  value={startPage}
-                  onChange={(event) => setStartPage(Number(event.target.value))}
-                />
-              </label>
-              <label className="ps-field ps-grow">
-                End page
-                <input
-                  type="number"
-                  min={1}
-                  max={pageCount || undefined}
-                  value={endPage}
-                  onChange={(event) => setEndPage(Number(event.target.value))}
-                />
-              </label>
-            </div>
-            {pageCount > 0 ? (
-              <p className="ps-note tabular">{pageCount} pages</p>
-            ) : null}
-          </>
         ) : null}
 
         {tool.id === "compress" && hasFile ? (
           <>
-            <div className="ps-row" role="group" aria-label="Compression level">
+            <div className="ps-segmented" role="group" aria-label="Compression level">
               {LEVELS.map((level) => (
                 <AnimatedButton
                   key={level.id}
@@ -934,10 +1025,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
               ))}
             </div>
             <p className="ps-note">
-              {compressLevel === "keep"
-                ? "Optimizes PDF structure while keeping text, links and forms. Signed documents are returned unchanged. Some PDFs are already optimized."
-                : "For scanned pages: rebuilds pages as images. Selectable text, links, forms and digital signatures are lost. Balanced scans use 144 DPI; smallest scans use about 86 DPI."}{" "}
-              Ream keeps the original if it is smaller.
+              {LEVELS.find((level) => level.id === compressLevel)?.note}{" "}
+              Signed PDFs are returned unchanged. Ream keeps the original if it is smaller.
             </p>
           </>
         ) : null}
@@ -1005,8 +1094,8 @@ export function ToolFlow({ id }: ToolFlowProps) {
                   setImageFormat(e.target.value as "jpeg" | "png")
                 }
               >
-                <option value="jpeg">JPEG — smaller files</option>
-                <option value="png">PNG — lossless images</option>
+                <option value="jpeg">JPEG - smaller files</option>
+                <option value="png">PNG - lossless images</option>
               </select>
             </label>
             <label className="ps-field ps-grow">
@@ -1015,9 +1104,9 @@ export function ToolFlow({ id }: ToolFlowProps) {
                 value={imageScale}
                 onChange={(e) => setImageScale(Number(e.target.value))}
               >
-                <option value={1}>72 DPI — screen</option>
-                <option value={2}>144 DPI — balanced</option>
-                <option value={3}>216 DPI — detailed</option>
+                <option value={1}>72 DPI - screen</option>
+                <option value={2}>144 DPI - balanced</option>
+                <option value={3}>216 DPI - detailed</option>
               </select>
             </label>
             <p className="ps-note">
@@ -1062,7 +1151,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
                 <option value="right">Bottom right</option>
               </select>
             </label>
-            <label>
+            <label className="ps-switch">
               <input
                 type="checkbox"
                 checked={numberOptions.total}
@@ -1148,142 +1237,50 @@ export function ToolFlow({ id }: ToolFlowProps) {
           </>
         ) : null}
 
-        {tool.id === "organize" && hasFile ? (
-          <>
-            {pageCount > 0 ? (
-              <p className="ps-muted tabular">{pageCount} pages</p>
-            ) : null}
-            {thumbs.length > 0 ? (
-              <div className="ps-organize-grid">
-                {pageOrder
-                  .slice(organizeOffset, organizeOffset + 30)
-                  .map((pageIndex) => {
-                    const removed = removedPages.includes(pageIndex);
-                    const position = pageOrder.indexOf(pageIndex);
-                    const rotation = pageRotations[pageIndex] ?? 0;
-                    return (
-                      <article
-                        className={`ps-organize-card${removed ? " is-removed" : ""}`}
-                        key={pageIndex}
-                      >
-                        <div className="ps-organize-card__header">
-                          <span>Page {pageIndex + 1}</span>
-                          <span className="tabular">#{position + 1}</span>
-                        </div>
-                        <div className="ps-organize-preview">
-                          <img
-                            src={thumbs[pageIndex]}
-                            alt={`Page ${pageIndex + 1}`}
-                            style={{ transform: `rotate(${rotation}deg)` }}
-                          />
-                        </div>
-                        <div className="ps-organize-controls">
-                          <AnimatedButton
-                            variant="ghost"
-                            disabled={position === 0}
-                            aria-label={`Move page ${pageIndex + 1} left`}
-                            onClick={() => movePage(pageIndex, -1)}
-                          >
-                            Left
-                          </AnimatedButton>
-                          <AnimatedButton
-                            variant="ghost"
-                            disabled={position === pageOrder.length - 1}
-                            aria-label={`Move page ${pageIndex + 1} right`}
-                            onClick={() => movePage(pageIndex, 1)}
-                          >
-                            Right
-                          </AnimatedButton>
-                          <AnimatedButton
-                            variant="ghost"
-                            aria-label={`Rotate page ${pageIndex + 1} clockwise`}
-                            onClick={() => rotatePage(pageIndex)}
-                          >
-                            Rotate
-                          </AnimatedButton>
-                          <AnimatedButton
-                            variant={removed ? "brass" : "danger"}
-                            aria-label={`${removed ? "Restore" : "Remove"} page ${pageIndex + 1}`}
-                            onClick={() => toggleRemoved(pageIndex)}
-                          >
-                            {removed ? "Restore" : "Remove"}
-                          </AnimatedButton>
-                        </div>
-                      </article>
-                    );
-                  })}
-              </div>
-            ) : null}
-            {pageCount > 30 ? (
-              <p className="ps-note">
-                Pages {organizeOffset + 1}–
-                {Math.min(pageCount, organizeOffset + 30)} of {pageCount}. Bulk
-                actions apply to every page.
-              </p>
-            ) : null}
-            {pageCount > 30 ? (
-              <div className="ps-row">
-                <AnimatedButton
-                  variant="ghost"
-                  disabled={organizeOffset === 0}
-                  onClick={() =>
-                    setOrganizeOffset((value) => Math.max(0, value - 30))
-                  }
-                >
-                  Previous pages
-                </AnimatedButton>
-                <AnimatedButton
-                  variant="ghost"
-                  disabled={organizeOffset + 30 >= pageCount}
-                  onClick={() => setOrganizeOffset((value) => value + 30)}
-                >
-                  Next pages
-                </AnimatedButton>
-              </div>
-            ) : null}
-            {removedPages.length === pageCount && pageCount > 0 ? (
-              <p className="ps-banner ps-banner--error" role="alert">
-                Restore at least one page before running.
-              </p>
-            ) : null}
-            <div
-              className="ps-row"
-              role="group"
-              aria-label="Bulk page adjustments"
-            >
-              <AnimatedButton
-                variant={rotateAll ? "brass" : "ghost"}
-                aria-pressed={rotateAll}
-                disabled={pageCount === 0}
-                onClick={rotateEveryPage}
-              >
-                Rotate all 90°
-              </AnimatedButton>
-              <AnimatedButton
-                variant={reverse ? "brass" : "ghost"}
-                aria-pressed={reverse}
-                disabled={pageCount === 0}
-                onClick={reversePages}
-              >
-                Reverse order
-              </AnimatedButton>
-            </div>
-          </>
-        ) : null}
+        {tool.id === "organize" && picked[0] ? <>
+          <OrganizeGrid active={presentationActive} file={picked[0]} arrangement={pageArrangement} order={pageOrder} rotations={pageRotations} disabled={busy || organizeInputBusy}
+            onSelect={togglePage}
+            onMove={(from,to)=>{setPageArrangement(current=>movedOrder(current,from,to));}}
+            onTapOrder={applyTapOrder}
+            onRotate={rotatePage}
+            onReady={(file,count)=>{
+              setPageCount(count);
+              setOrganizeReady({source:picked[0]!,file});
+              // A re-ready of the same document keeps the user's arrangement.
+              setPageArrangement(current=>current.length===count?current:Array.from({length:count},(_,i)=>i));
+              setPageExcluded(current=>current.every(page=>page<count)?current:[]);
+            }}
+            onError={setError}/>
+        </> : null}
 
         {tool.id === "scan" && scanStep === "edit" ? null : tool.id !== "view" ? (
           <div className={`ps-actions${tool.id === "scan" ? " ps-actions--row ps-actions--follow" : " ps-actions--sticky"}`}>
-            {ctaHint ? (
-              <p className="ps-cta-hint" role="status">
-                {ctaHint}
-              </p>
-            ) : null}
             {tool.id === "scan" ? <>
-              <AnimatedButton disabled={!canRun} onClick={() => void run("save")}>Save PDF</AnimatedButton>
-              <AnimatedButton variant="ghost" disabled={!canRun} onClick={() => void run("share")}>Share PDF</AnimatedButton>
-            </> : <AnimatedButton block disabled={!canRun} onClick={() => void run()}>
-              {ACTION_LABELS[tool.id as Exclude<ToolId, "view">]}
-            </AnimatedButton>}
+              <AnimatedButton aria-disabled={!canRun || undefined} onClick={whenReady(() => void run("save"))}>Save PDF</AnimatedButton>
+              <AnimatedButton variant="ghost" aria-disabled={!canRun || undefined} onClick={whenReady(() => void run("share"))}>Share PDF</AnimatedButton>
+            </> : multiple ? (
+              <div className="ps-actions__bar">
+                <div className="ps-actions__side" ref={setActionStart} />
+                <AnimatedButton className="ps-actions__main" aria-disabled={!canRun || undefined} onClick={whenReady(() => void run())}>
+                  {ACTION_LABELS[tool.id as Exclude<ToolId, "view">]}
+                </AnimatedButton>
+                {tool.id === "organize" && pageCount ? (
+                  <div className="ps-actions__side ps-actions__side--end">
+                    <AnimatedButton variant="ghost" icon={Undo2} aria-label="Reset to original" disabled={busy} onClick={resetPageArrangement}>Reset</AnimatedButton>
+                  </div>
+                ) : (
+                  <div className="ps-actions__side" aria-hidden="true" />
+                )}
+              </div>
+            ) : (
+              <div className="ps-actions__bar">
+                <div className="ps-actions__side" aria-hidden="true" />
+                <AnimatedButton className="ps-actions__main" aria-disabled={!canRun || undefined} onClick={whenReady(() => void run())}>
+                  {ACTION_LABELS[tool.id as Exclude<ToolId, "view">]}
+                </AnimatedButton>
+                <div className="ps-actions__side" aria-hidden="true" />
+              </div>
+            )}
           </div>
         ) : (
           <p className="ps-note">Pick a file to open it here.</p>
@@ -1296,7 +1293,7 @@ export function ToolFlow({ id }: ToolFlowProps) {
         onCancel={cancelJob}
       />
     </div>
-    </>
+    </ActionSlotsContext.Provider>
   );
 }
 

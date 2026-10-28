@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Check, Download, Eye, FolderOpen, Share2, Plus } from "lucide-react";
-import { AnimatedButton, PageHeader } from "../components";
+import { AnimatedButton, PageHeader, ToolTile } from "../components";
+import { toolById } from "../lib/catalog";
 import type { JobOk, ToolId } from "../lib/types";
+import { engine } from "../pdf";
 import {
   formatBytes,
   saveBytes,
@@ -12,6 +14,7 @@ import { lastJob, setCurrentViewer } from "../store/lastJob";
 import { saveRecent, renameRecent } from "../store/recents";
 import { queueToolFiles } from "../store/toolInput";
 import { navigate } from "./nav";
+import { TOOL_ICONS } from "./icons";
 
 const retained = new WeakMap<JobOk, Promise<string>>();
 function retain(job: JobOk): Promise<string> {
@@ -71,6 +74,30 @@ export function Result() {
     return () => URL.revokeObjectURL(url);
   }, [images, previewIndex]);
 
+  // Page one of a PDF result, shown in the result card.
+  const [pagePreview, setPagePreview] = useState<string | null>(null);
+  useEffect(() => {
+    if (!job || !job.filename.toLowerCase().endsWith(".pdf")) return;
+    let cancelled = false;
+    let url: string | null = null;
+    void engine
+      .renderPage(
+        { name: job.filename, mime: "application/pdf", bytes: job.bytes },
+        0,
+        560,
+      )
+      .then((blob) => {
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setPagePreview(url);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [job]);
+
   if (!job)
     return (
       <div className="ps-screen">
@@ -101,6 +128,10 @@ export function Result() {
       : clean;
   })();
   const canContinue = isPdf && lastJob.tool !== "protect";
+  const openPdf = () => {
+    setCurrentViewer(done.bytes, outputName);
+    navigate("#/viewer");
+  };
 
   async function exportFile(action: "save" | "share") {
     setMessage(null);
@@ -171,9 +202,24 @@ export function Result() {
       <PageHeader title="Result ready" onBack={() => navigate("#/")} />
       <div className="ps-body">
         <div className="ps-result-card">
-          <span className="ps-result-card__icon" aria-hidden="true">
-            <Check size={27} />
-          </span>
+          {isPdf ? (
+            <button
+              type="button"
+              className="ps-result-card__preview"
+              aria-label={`Open ${outputName}`}
+              onClick={openPdf}
+            >
+              {pagePreview ? (
+                <img src={pagePreview} alt="" draggable={false} />
+              ) : (
+                <span className="ps-reader-loader" aria-hidden="true" />
+              )}
+            </button>
+          ) : (
+            <span className="ps-result-card__icon" aria-hidden="true">
+              <Check size={27} />
+            </span>
+          )}
           <div>
             <h2>Your file is ready</h2>
             <p>{done.filename}</p>
@@ -194,6 +240,67 @@ export function Result() {
             ) : null}
             {images ? <span>{images.length} images</span> : null}
           </div>
+        </div>
+        <div className="ps-actions ps-actions--compact-row">
+          <AnimatedButton
+            icon={Download}
+            disabled={activeExport !== null}
+            onClick={() => void exportFile("save")}
+          >
+            {activeExport === "save"
+              ? "Saving…"
+              : isDocx
+                ? "Save Word file"
+                : images && images.length > 1
+                  ? "Save ZIP"
+                  : isPdf
+                    ? "Save PDF"
+                    : "Save image"}
+          </AnimatedButton>
+          <AnimatedButton
+            variant="ghost"
+            icon={Share2}
+            disabled={activeExport !== null}
+            onClick={() => void exportFile("share")}
+          >
+            {activeExport === "share" ? "Sharing…" : "Share file"}
+          </AnimatedButton>
+          {isPdf ? (
+            <AnimatedButton
+              variant="ghost"
+              icon={Eye}
+              onClick={openPdf}
+            >
+              Open PDF
+            </AnimatedButton>
+          ) : null}
+          {isDocx && !wordPreview ? (
+            <AnimatedButton
+              variant="ghost"
+              icon={Eye}
+              disabled={previewBusy}
+              onClick={() => void previewWord()}
+            >
+              {previewBusy ? "Preparing preview…" : "Preview Word text"}
+            </AnimatedButton>
+          ) : null}
+          {images && images.length > 1 ? (
+            <AnimatedButton
+              variant="ghost"
+              disabled={activeExport !== null}
+              onClick={() => {
+                setActiveExport("share");
+                void shareOrDownloadBlobs(
+                  images,
+                  outputName.replace(/\.zip$/i, ""),
+                )
+                  .catch((error) => setMessage(String(error)))
+                  .finally(() => setActiveExport(null));
+              }}
+            >
+              Share individual images
+            </AnimatedButton>
+          ) : null}
         </div>
         <p className="ps-note" role="status">
           {status}
@@ -235,7 +342,9 @@ export function Result() {
                 ? "The attempted optimization did not produce a smaller safe file."
                 : compression.mode === "lossless"
                   ? "Text, links, and forms are retained."
-                  : "Pages are images. Selectable text, interactive links, forms, and digital signatures are not retained."}
+                  : compression.mode === "images"
+                    ? `Text, links, and forms are retained. ${compression.imagesRecompressed} ${compression.imagesRecompressed === 1 ? "image was" : "images were"} resized and recompressed.`
+                    : "Pages are images. Selectable text, interactive links, forms, and digital signatures are not retained."}
             </p>
           </section>
         ) : null}
@@ -325,97 +434,34 @@ export function Result() {
             {message}
           </p>
         ) : null}
-        <div className="ps-actions">
-          <AnimatedButton
-            block
-            icon={Download}
-            disabled={activeExport !== null}
-            onClick={() => void exportFile("save")}
-          >
-            {activeExport === "save"
-              ? "Saving…"
-              : isDocx
-                ? "Save Word file"
-                : images && images.length > 1
-                  ? "Save ZIP"
-                  : isPdf
-                    ? "Save PDF"
-                    : "Save image"}
-          </AnimatedButton>
-          <AnimatedButton
-            block
-            variant="ghost"
-            icon={Share2}
-            disabled={activeExport !== null}
-            onClick={() => void exportFile("share")}
-          >
-            {activeExport === "share" ? "Sharing…" : "Share file"}
-          </AnimatedButton>
-          {isPdf ? (
-            <AnimatedButton
-              block
-              variant="ghost"
-              icon={Eye}
-              onClick={() => {
-                setCurrentViewer(done.bytes, outputName);
-                navigate("#/viewer");
-              }}
-            >
-              Open PDF
-            </AnimatedButton>
-          ) : null}
-          {isDocx && !wordPreview ? (
-            <AnimatedButton
-              block
-              variant="ghost"
-              icon={Eye}
-              disabled={previewBusy}
-              onClick={() => void previewWord()}
-            >
-              {previewBusy ? "Preparing preview…" : "Preview Word text"}
-            </AnimatedButton>
-          ) : null}
-          {images && images.length > 1 ? (
-            <AnimatedButton
-              block
-              variant="ghost"
-              disabled={activeExport !== null}
-              onClick={() => {
-                setActiveExport("share");
-                void shareOrDownloadBlobs(
-                  images,
-                  outputName.replace(/\.zip$/i, ""),
-                )
-                  .catch((error) => setMessage(String(error)))
-                  .finally(() => setActiveExport(null));
-              }}
-            >
-              Share individual images
-            </AnimatedButton>
-          ) : null}
-        </div>
         {canContinue ? (
           <section>
-            <h3>Use this PDF in another tool</h3>
-            <div className="ps-row">
-              {(["compress", "organize", "protect", "pdf-docx"] as const).map(
-                (tool) => (
-                  <AnimatedButton
+            <h3 className="ps-next-title">Use this PDF in another tool</h3>
+            <div className="ps-next-tools">
+              {(
+                [
+                  "compress",
+                  "organize",
+                  "split",
+                  "merge",
+                  "watermark",
+                  "numbers",
+                  "protect",
+                  "pdf-docx",
+                ] as const
+              ).map((tool) => {
+                const def = toolById(tool);
+                return def ? (
+                  <ToolTile
                     key={tool}
-                    variant="ghost"
-                    onClick={() => continueWith(tool)}
-                  >
-                    {
-                      {
-                        compress: "Compress",
-                        organize: "Organize",
-                        protect: "Protect",
-                        "pdf-docx": "Convert to Word",
-                      }[tool]
-                    }
-                  </AnimatedButton>
-                ),
-              )}
+                    compact
+                    title={def.title}
+                    blurb={def.blurb}
+                    icon={TOOL_ICONS[tool]}
+                    onSelect={() => continueWith(tool)}
+                  />
+                ) : null;
+              })}
             </div>
           </section>
         ) : null}

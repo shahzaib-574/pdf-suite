@@ -1,4 +1,4 @@
-import { ChevronRight, type LucideIcon } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import '../motion/gsapSetup';
 import { usePress } from '../motion/press';
 
@@ -9,6 +9,8 @@ export type ToolTileProps = {
   pro?: boolean;
   onSelect: () => void;
   index?: number;
+  /** Smaller tile for secondary lists (e.g. follow-up tools on Result). */
+  compact?: boolean;
 };
 
 /** Wrap tiles in StaggerGrid for home enter stagger. */
@@ -19,6 +21,7 @@ export function ToolTile({
   pro = false,
   onSelect,
   index,
+  compact = false,
 }: ToolTileProps) {
   const { ref, bind } = usePress<HTMLButtonElement>();
 
@@ -26,7 +29,7 @@ export function ToolTile({
     <button
       ref={ref}
       type="button"
-      className="tile"
+      className={compact ? "tile tile--compact" : "tile"}
       data-tile=""
       data-index={index}
       onClick={onSelect}
@@ -41,7 +44,6 @@ export function ToolTile({
       <span className="tile__title">{title}</span>
       <span className="tile__bottom">
         <span className="tile__blurb">{blurb}</span>
-        <ChevronRight className="tile__arrow" size={17} aria-hidden="true" />
       </span>
     </button>
   );

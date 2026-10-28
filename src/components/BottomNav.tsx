@@ -1,8 +1,8 @@
 import type { LucideIcon } from 'lucide-react';
-import { Camera, Clock3, FilePenLine, LayoutGrid, Settings } from 'lucide-react';
+import { Camera, Clock3, LayoutGrid, Search, Settings } from 'lucide-react';
 import { navigate } from '../screens/nav';
 
-export type BottomNavTab = 'tools' | 'scan' | 'word' | 'recents' | 'settings';
+export type BottomNavTab = 'tools' | 'scan' | 'search' | 'recents' | 'settings';
 
 export type BottomNavProps = {
   activeTab?: BottomNavTab;
@@ -19,12 +19,12 @@ export function BottomNav({ activeTab }: BottomNavProps) {
         onClick={() => navigate('#/')}
       />
       <NavButton
-        id="word"
-        label="Word"
-        ariaLabel="PDF to Word"
+        id="search"
+        label="Search"
+        ariaLabel="Search tools"
         activeTab={activeTab}
-        icon={FilePenLine}
-        onClick={() => navigate('#/tool/pdf-docx')}
+        icon={Search}
+        onClick={() => navigate('#/search')}
       />
       <button
         type="button"

@@ -24,14 +24,25 @@ assert.equal(lock.packages['node_modules/@capacitor-community/admob'].version, '
 
 const source = read('src/ads/admob.ts');
 assert(source.includes('MaxAdContentRating.General'));
-assert(source.includes('initializeForTesting: true'));
-assert(source.includes('initializeForTesting: false'));
+assert(/initializeForTesting:\s*true/.test(source));
+assert(/initializeForTesting:\s*false/.test(source));
 assert(!/tagForChildDirectedTreatment\s*:/.test(source));
 assert.equal((source.match(/tagForUnderAgeOfConsent:\s*true/g) ?? []).length, 2);
-assert(source.includes('BannerAdSize.ADAPTIVE_BANNER'));
-assert(source.includes('BannerAdPluginEvents.SizeChanged'));
-assert(source.includes('BannerAdPluginEvents.Loaded'));
+assert(!/showBanner\s*\(|BannerAdPluginEvents|BannerAdSize/.test(source), 'community banner owner must be retired');
+assert(source.includes('await AdMob.removeBanner()'), 'legacy owner cleanup must be awaited');
+assert(source.includes('bannerCleanupFailed') && source.includes('retireBanners'), 'failed cleanup must disable new ownership');
 assert(source.includes('consent.canRequestAds'));
+const nativeSource=read('android/app/src/main/java/com/reampdf/mobile/ToolsBannerPlugin.java');
+assert(nativeSource.includes('@CapacitorPlugin(name="ToolsBanner")'));
+assert(nativeSource.includes('AdSize.getInlineAdaptiveBannerAdSize(widthDp,100)'));
+assert(nativeSource.includes('UserMessagingPlatform.getConsentInformation(getContext()).canRequestAds()'));
+assert(nativeSource.includes('getServerBasePath()') && nativeSource.includes('ToolsBannerAuthority.validate'));
+assert(read('android/app/src/main/java/com/reampdf/mobile/MainActivity.java').includes('registerPlugin(ToolsBannerPlugin.class)'));
+assert(/TOOLS_INLINE_BANNER_PRODUCTION_VERIFIED.*false/.test(read('android/app/build.gradle')));
+const app=read('src/App.tsx'),slot=read('src/ads/ToolsBannerSlot.tsx');
+assert(!/setDiscoveryBannerVisible|toolsBannerProbe|showBanner\s*\(/.test(app));
+assert(slot.includes('createInlineBannerController(nativeToolsBanner'));
+assert(slot.includes("import.meta.env.DEV&&import.meta.env.VITE_REAM_INLINE_AD_PREVIEW==='true'"));
 
 const debugEnv = read('.env.android-debug');
 assert.match(debugEnv, /^VITE_ADMOB_TEST_MODE=true$/m);
@@ -85,12 +96,14 @@ function collectTextFiles(dir, files = []) {
 const productionId = config.admobBannerUnitId;
 for (const dir of ['dist', assetRoot]) {
   const bundle = collectTextFiles(dir).map(read).join('\n');
+  assert(!bundle.includes('Development ad placeholder') && !bundle.includes('Fixture — mocked bridge'), `${dir} must exclude development placeholder/fixture`);
+  assert(!bundle.includes('data-tools-banner-probe'), `${dir} must exclude obsolete proof bootstrap`);
   if (requestedMode === 'production') {
     assert(bundle.includes(productionId), `${dir} does not contain the configured production banner ID`);
     assert(!bundle.includes(GOOGLE_TEST_BANNER_ID), `${dir} production bundle contains Google's test banner ID`);
     assert(!bundle.includes('VITE_UMP_DEBUG_GEOGRAPHY'), `${dir} production bundle contains UMP debug configuration`);
   } else {
-    assert(bundle.includes(GOOGLE_TEST_BANNER_ID), `${dir} debug bundle does not contain Google's anchored adaptive test ID`);
+    assert(bundle.includes(GOOGLE_TEST_BANNER_ID), `${dir} debug bundle does not contain Google's existing test banner ID`);
     assert(!bundle.includes(productionId), `${dir} debug bundle contains the production banner ID`);
   }
 }

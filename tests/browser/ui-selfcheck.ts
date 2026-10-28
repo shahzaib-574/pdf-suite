@@ -58,7 +58,7 @@ const tools = [
   ["images", "Create PDF"],
   ["scan", "Save PDF"],
   ["compress", "Compress PDF"],
-  ["organize", "Apply page changes"],
+  ["organize", "Organize"],
   ["watermark", "Add watermark"],
   ["numbers", "Add page numbers"],
   ["protect", "Protect PDF"],
@@ -114,6 +114,10 @@ try {
         results.push({ id, status: "PASS" });
         console.log("PASS", id);
         continue;
+      }
+      if (id === "organize") {
+        // Every page starts kept; wait for the page cards before organizing.
+        await page.locator(".ps-organize-number").first().waitFor();
       }
       await page.getByRole("button", { name: action, exact: true }).click();
       await page

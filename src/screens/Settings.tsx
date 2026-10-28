@@ -17,6 +17,8 @@ import {
   subscribeAdPrivacyState,
 } from '../ads/admob';
 
+declare const __REAM_VERSION__: string;
+
 export function Settings() {
   const { theme, setTheme, reducedMotion, setReducedMotion } = useTheme();
   const [cleared, setCleared] = useState(false);
@@ -187,7 +189,7 @@ export function Settings() {
           </div>
         </section>
 
-        <p className="ps-app-version">Ream 1.2.0 · On-device PDF tools</p>
+        <p className="ps-app-version">Ream {__REAM_VERSION__} · On-device PDF tools</p>
       </section>
     </AppShell>
   );

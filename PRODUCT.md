@@ -38,11 +38,11 @@ On-device processing is the current implementation and a marketing plus. It is n
 
 Shipped today:
 
-- Tools: merge, split, images → PDF, PDF → images, compress, scan, organize, watermark, page numbers, protect (AES-256), view, Word → PDF (simplified), PDF → Word (layout rebuild + English OCR).
+- Tools: merge, split, images → PDF, PDF → images, compress, scan, organize, watermark, page numbers, protect (AES-256), view, Word → PDF (simplified), PDF → Word (layout rebuild + English, Urdu + English, and Arabic + English OCR).
 - Reader: continuous pages, search, outlines, thumbnails, pinch zoom, save/share.
 - Scanner: automatic edge detection on request, cleanup presets with previews, retake/delete/reorder, lossless rotation, retained originals, and an automatically saved draft that can be resumed from Home.
 - Word conversion: compatibility warnings before conversion; footnotes and endnotes are retained in a numbered notes section. Unsupported headers, footers, charts and complex layouts still require export from Word for full fidelity.
-- Recents in IndexedDB: separate metadata and file bytes, up to 200 items / 512 MB subject to storage availability; search, rename, delete and external save.
+- Recents in IndexedDB: separate metadata and file bytes, up to 200 items / 512 MB subject to storage availability with LRU eviction of the oldest stored copies when full; search, rename, delete, share, and external save.
 - Light / dark / system theme and a reduce-motion setting.
 - Android 1.2.0 uses AdMob banners only on Tools and Recents with UMP gating; all requests use under-age-of-consent treatment and a General content ceiling for the selected teen/adult audience, while COPPA child-directed treatment remains unset. Document contents remain local. The website does not load an ad script.
 - All tools unlocked. `pro` flags exist for a future paywall; they are not charged.

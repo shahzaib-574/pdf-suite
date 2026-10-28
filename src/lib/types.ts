@@ -78,11 +78,14 @@ export type JobOk = {
     images?: Blob[];
     pdfToDocx?: PdfToDocxReport;
     wordToPdf?: WordToPdfReport;
+    /** Worker count of embedded images it re-encoded. */
+    imagesRecompressed?: number;
     compression?: {
       originalBytes: number;
       outputBytes: number;
-      mode: "lossless" | "raster";
+      mode: "lossless" | "images" | "raster";
       originalRetained: boolean;
+      imagesRecompressed?: number;
     };
   };
 };
@@ -128,6 +131,7 @@ export type RecentItem = {
 export type Route =
   | { name: "home" }
   | { name: "recents" }
+  | { name: "search" }
   | { name: "tool"; id: ToolId }
   | { name: "viewer"; recentId?: string }
   | { name: "result" }
