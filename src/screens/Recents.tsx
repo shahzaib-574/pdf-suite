@@ -158,7 +158,7 @@ export function Recents() {
                         </span>
                         <span className="ps-library-item__meta tabular">
                           {!canOpen
-                            ? "Original file needed — no retained copy"
+                            ? "Original file needed - no retained copy"
                             : saving
                               ? "Saving…"
                               : `${formatBytes(item.size)} · ${relativeDate(item.createdAt)}`}

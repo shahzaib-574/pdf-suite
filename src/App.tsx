@@ -9,6 +9,7 @@ import { beginViewerImport, setCurrentViewer, setLastJob } from "./store/lastJob
 import { navigate, goBack, replaceWith } from "./screens/nav";
 import { installAppBack, useBackHandler } from "./screens/back";
 import { AnimatedButton } from "./components";
+import { ToastHost } from "./components/Toast";
 import { Home } from "./screens/Home";
 import { Recents } from "./screens/Recents";
 import { Search } from "./screens/Search";
@@ -185,7 +186,7 @@ export function AppView({nativeScan, loadNativeScanDraft}: {
 
 
   useLayoutEffect(() => {
-    document.title = webLayout && visibleRoute.name === 'home' ? 'Ream PDF Suite \u2014 Free PDF tools in your browser' : `${routeTitle(visibleRoute)} \u00b7 Ream`;
+    document.title = webLayout && visibleRoute.name === 'home' ? 'Ream PDF Suite - Free PDF tools in your browser' : `${routeTitle(visibleRoute)} \u00b7 Ream`;
     if (pendingOrigin && scanOrigin) {
       window.scrollTo(0, scanOrigin.scroll);
       return;
@@ -328,6 +329,7 @@ export function AppView({nativeScan, loadNativeScanDraft}: {
         )}
       </div>
       {webLayout ? <WebFooter /> : null}
+      <ToastHost />
       </WebNavProvider>
     </ThemeProvider>
   );

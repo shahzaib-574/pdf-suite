@@ -34,6 +34,8 @@ type Props = {
   hint: string;
   /** One-file tools show a single wide preview card; + replaces the file. */
   single?: boolean;
+  /** With single: show no file card (the tool shows the pages itself). */
+  hideFile?: boolean;
   addControl: ReactNode;
   formatBytes: (size: number) => string;
   onReorder?: (order: number[]) => void;
@@ -56,24 +58,76 @@ function previewKind(item: OrderGridItem): PreviewKind {
 
 // First-page previews are rendered once per input buffer and serially, so a
 // large selection never runs several pdf.js documents at the same time.
-const pdfPreviews = new WeakMap<Uint8Array, Promise<Blob | null>>();
+// Cached per file and render width (grid cards vs. the single-file preview).
+const pdfPreviews = new WeakMap<Uint8Array, Map<number, Promise<Blob | null>>>();
 let previewQueue: Promise<unknown> = Promise.resolve();
 
-function pdfPreview(file: PickedFile): Promise<Blob | null> {
-  const hit = pdfPreviews.get(file.bytes);
+function pdfPreview(file: PickedFile, width = 240): Promise<Blob | null> {
+  let byWidth = pdfPreviews.get(file.bytes);
+  if (!byWidth) {
+    byWidth = new Map();
+    pdfPreviews.set(file.bytes, byWidth);
+  }
+  const hit = byWidth.get(width);
   if (hit) return hit;
   const work = previewQueue
-    .then(() => engine.renderPage(file, 0, 240).catch(() => null))
+    .then(() => engine.renderPage(file, 0, width).catch(() => null))
     .then((blob) => {
-      if (!blob) pdfPreviews.delete(file.bytes);
+      if (!blob) byWidth.delete(width);
       return blob;
     });
   previewQueue = work;
-  pdfPreviews.set(file.bytes, work);
+  byWidth.set(width, work);
   return work;
 }
 
-function OrderThumb({ item }: { item: OrderGridItem }) {
+/** Name, size and (for PDFs) page count under the single-file preview. */
+function SoloMeta({
+  item,
+  formatBytes,
+}: {
+  item: OrderGridItem;
+  formatBytes: (bytes: number) => string;
+}) {
+  const [pages, setPages] = useState<number | null>(null);
+  const source = item.source;
+  const pdf = previewKind(item) === "pdf";
+  useEffect(() => {
+    if (!source || !pdf) return;
+    let cancelled = false;
+    // A locked or damaged PDF just shows its size.
+    void engine
+      .pageCount(source)
+      .then((count) => {
+        if (!cancelled && count > 0) setPages(count);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [source, pdf]);
+  return (
+    <div className="order-solo__meta">
+      <span className="order-card__name" title={item.name}>
+        {item.name}
+      </span>
+      <span className="order-card__size tabular">
+        {formatBytes(item.size)}
+        {pages ? ` \u00b7 ${pages} ${pages === 1 ? "page" : "pages"}` : ""}
+      </span>
+    </div>
+  );
+}
+
+function OrderThumb({
+  item,
+  width = 240,
+  className = "order-card__thumb",
+}: {
+  item: OrderGridItem;
+  width?: number;
+  className?: string;
+}) {
   const rootRef = useRef<HTMLSpanElement>(null);
   const [src, setSrc] = useState<string | null>(null);
   const source = item.source;
@@ -99,7 +153,7 @@ function OrderThumb({ item }: { item: OrderGridItem }) {
           setSrc(url);
           return;
         }
-        void pdfPreview(source).then((blob) => {
+        void pdfPreview(source, width).then((blob) => {
           if (cancelled || !blob) return;
           url = URL.createObjectURL(blob);
           setSrc(url);
@@ -113,12 +167,12 @@ function OrderThumb({ item }: { item: OrderGridItem }) {
       io.disconnect();
       if (url) URL.revokeObjectURL(url);
     };
-  }, [source, pdf, previewable]);
+  }, [source, pdf, previewable, width]);
 
   const Icon =
     kind === "image" ? ImageIcon : kind === "docx" ? FilePenLine : FileText;
   return (
-    <span ref={rootRef} className="order-card__thumb" aria-hidden="true">
+    <span ref={rootRef} className={className} aria-hidden="true">
       {src ? (
         <img src={src} alt="" decoding="async" draggable={false} />
       ) : (
@@ -134,6 +188,7 @@ export function FileOrderGrid({
   disabled,
   hint,
   single = false,
+  hideFile = false,
   addControl,
   formatBytes,
   onReorder,
@@ -232,9 +287,7 @@ export function FileOrderGrid({
     setAnnouncement(`Moved ${item.name} to position ${to + 1} of ${items.length}.`);
   }
 
-  const status = single
-    ? "Tap + to choose a different file"
-    : tapping
+  const status = tapping
       ? tapSeq.length
         ? `${tapSeq.length} of ${items.length} picked`
         : "Tap files in the order you want"
@@ -242,43 +295,31 @@ export function FileOrderGrid({
         ? "Hold and drag to reorder"
         : hint;
 
+  // One-file tools: a large first-page preview, like the result screen.
+  // Removing the file (x) returns to the picker to choose another.
+  if (single && hideFile) return null;
+
   if (single) {
     const item = items[0];
-    return (
-      <div className="order">
-        <div className="order__bar">
-          <div className="order__meta">
-            <p className="order__count">Selected file</p>
-            <p className="order__status">{status}</p>
-          </div>
-          {addControl}
+    return item ? (
+      <div className="order order-solo">
+        <div className="order-solo__frame">
+          <OrderThumb item={item} width={560} className="order-solo__preview" />
+          {onRemove ? (
+            <button
+              type="button"
+              className="order-solo__remove"
+              disabled={disabled}
+              aria-label={`Remove ${item.name}`}
+              onClick={() => onRemove(0)}
+            >
+              <X size={18} strokeWidth={2} aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
-        {item ? (
-          <div className="order-solo">
-            <OrderThumb item={item} />
-            <div className="order-solo__meta">
-              <span className="order-card__name" title={item.name}>
-                {item.name}
-              </span>
-              <span className="order-card__size tabular">
-                {formatBytes(item.size)}
-              </span>
-            </div>
-            {onRemove ? (
-              <button
-                type="button"
-                className="order-solo__remove"
-                disabled={disabled}
-                aria-label={`Remove ${item.name}`}
-                onClick={() => onRemove(0)}
-              >
-                <X size={18} strokeWidth={2.2} aria-hidden="true" />
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+        <SoloMeta item={item} formatBytes={formatBytes} />
       </div>
-    );
+    ) : null;
   }
 
   const orderControl = canOrder ? (
@@ -367,9 +408,6 @@ export function FileOrderGrid({
               ) : null}
               <span className="order-card__name" title={item.name}>
                 {item.name}
-              </span>
-              <span className="order-card__size tabular">
-                {formatBytes(item.size)}
               </span>
             </li>
           );

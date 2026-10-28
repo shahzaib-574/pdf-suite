@@ -1,11 +1,14 @@
 import {
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { ListOrdered, RotateCw } from "lucide-react";
+import { ActionSlotsContext } from "../components/actionSlots";
 import { useDragReorder } from "../components/useDragReorder";
 import type { PickedFile } from "../lib/types";
 import { engine } from "../pdf";
@@ -28,6 +31,7 @@ type Props = {
 };
 /** One owned input session, serial visible-page work, at most 32 owned preview URLs. */
 export function OrganizeGrid(props: Props) {
+  const slots = useContext(ActionSlotsContext);
   const current = useRef(props),
     scroll = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -274,6 +278,34 @@ export function OrganizeGrid(props: Props) {
     focusAfterMove.current = arrangement[index]!;
     props.onMove(index, to);
   }
+  // Tap order sits beside the main button in the tool's action row, as on
+  // Merge; outside a tool it stays in the bar above the pages.
+  const tapControl = count > 1 ? (
+            tapping ? (
+              <button
+                type="button"
+                className="order__chip is-active"
+                disabled={props.disabled}
+                onClick={() => {
+                  if (tapSeq.length) props.onTapOrder(tapSeq);
+                  setTapSeq(null);
+                }}
+              >
+                {tapSeq.length ? "Done" : "Cancel"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="order__chip"
+                disabled={props.disabled}
+                onClick={() => setTapSeq([])}
+              >
+                <ListOrdered size={16} strokeWidth={2.1} aria-hidden="true" />
+                Tap order
+              </button>
+            )
+  ) : null;
+
   return (
     <>
       {prompt ? (
@@ -337,31 +369,7 @@ export function OrganizeGrid(props: Props) {
                   : "Tap to leave a page out"}
             </p>
           </div>
-          {count > 1 ? (
-            tapping ? (
-              <button
-                type="button"
-                className="order__chip is-active"
-                disabled={props.disabled}
-                onClick={() => {
-                  if (tapSeq.length) props.onTapOrder(tapSeq);
-                  setTapSeq(null);
-                }}
-              >
-                {tapSeq.length ? "Done" : "Cancel"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="order__chip"
-                disabled={props.disabled}
-                onClick={() => setTapSeq([])}
-              >
-                <ListOrdered size={16} strokeWidth={2.1} aria-hidden="true" />
-                Tap order
-              </button>
-            )
-          ) : null}
+          {slots?.start ? createPortal(tapControl, slots.start) : tapControl}
         </div>
       ) : null}
       <div
@@ -415,16 +423,6 @@ export function OrganizeGrid(props: Props) {
                 }}
                 onKeyDown={(event) => onKeyDown(event, index)}
               >
-                <span className="ps-organize-card__header">
-                  <span>Page {page + 1}</span>
-                  {position >= 0 ? (
-                    <strong className="ps-organize-number">
-                      {position + 1}
-                    </strong>
-                  ) : !tapping ? (
-                    <span className="ps-organize-out">Out</span>
-                  ) : null}
-                </span>
                 <span className="ps-organize-preview">
                   {thumbs[page] ? (
                     <img
@@ -439,7 +437,23 @@ export function OrganizeGrid(props: Props) {
                     <span className="ps-muted">Preview</span>
                   )}
                 </span>
+                <span className="ps-organize-card__label">Page {page + 1}</span>
               </button>
+              {/* Same corner badge as Merge's file cards. */}
+              {position >= 0 ? (
+                <span
+                  className="order-card__badge ps-organize-number tabular"
+                  aria-hidden="true"
+                >
+                  {position + 1}
+                </span>
+              ) : !tapping ? (
+                <span className="order-card__badge ps-organize-out" aria-hidden="true">
+                  Out
+                </span>
+              ) : (
+                <span className="order-card__badge is-empty" aria-hidden="true" />
+              )}
               <button
                 type="button"
                 className="ps-organize-rotate"
@@ -448,7 +462,7 @@ export function OrganizeGrid(props: Props) {
                 title="Rotate"
                 onClick={() => props.onRotate(page)}
               >
-                <RotateCw size={16} strokeWidth={2.3} aria-hidden="true" />
+                <RotateCw size={14} strokeWidth={2.4} aria-hidden="true" />
               </button>
             </article>
           );

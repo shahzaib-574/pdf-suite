@@ -487,7 +487,10 @@ export function Viewer({ recentId }: ViewerProps) {
       const style = pages ? window.getComputedStyle(pages) : null;
       const padX = style ? parseFloat(style.paddingLeft) || 0 : 12;
       const padY = style ? parseFloat(style.paddingTop) || 0 : 12;
-      const widthChanged = entry.contentRect.width !== fitWidthRef.current;
+      // The first measurement isn't a rotation; there's no position to keep.
+      const widthChanged =
+        fitWidthRef.current !== 0 &&
+        entry.contentRect.width !== fitWidthRef.current;
       fitWidthRef.current = entry.contentRect.width;
       if (fitModeRef.current && widthChanged) {
         // Keep the current page's top in view when rotation re-fits it.
@@ -806,6 +809,18 @@ export function Viewer({ recentId }: ViewerProps) {
   );
   const effectiveZoom = clampZoom(zoom, layoutMaxZoom, minZoom);
   const displayScale = effectiveZoom * CSS_PX_PER_PT;
+  // A landscape page shorter than the view sits centred: the spare height is
+  // split above the first page and below the last. Portrait pages keep
+  // starting at the top, one page per screen.
+  const centerPad = (page: PdfViewerPage | undefined) =>
+    page && page.width > page.height
+      ? Math.max(
+          0,
+          Math.round((viewportSize.height - page.height * displayScale) / 2),
+        )
+      : 0;
+  const centerTop = centerPad(indexedPages[0]);
+  const centerBottom = centerPad(indexedPages[indexedPages.length - 1]);
 
   useLayoutEffect(() => {
     maxZoomRef.current = layoutMaxZoom;
@@ -1319,7 +1334,11 @@ export function Viewer({ recentId }: ViewerProps) {
                 setChromeHidden((hidden) => !hidden);
               }}
             >
-              <div ref={pagesRef} className="ps-reader-pages">
+              <div
+                ref={pagesRef}
+                className="ps-reader-pages"
+                style={{ paddingTop: centerTop, paddingBottom: centerBottom }}
+              >
                 {session.document.pages.map((page, pageIndex) => (
                   <ReaderPage
                     key={pageIndex}
@@ -1339,19 +1358,19 @@ export function Viewer({ recentId }: ViewerProps) {
           </div>
           <nav className="ps-reader-dock" aria-label="PDF tools">
             <button type="button" onClick={() => openTool("merge")}>
-              <FilePlus size={22} strokeWidth={2.1} aria-hidden="true" />
+              <FilePlus size={22} strokeWidth={1.75} aria-hidden="true" />
               Add
             </button>
             <button type="button" onClick={() => openTool("organize")}>
-              <ListOrdered size={22} strokeWidth={2.1} aria-hidden="true" />
+              <ListOrdered size={22} strokeWidth={1.75} aria-hidden="true" />
               Organize
             </button>
             <button type="button" onClick={() => openTool("compress")}>
-              <Minimize2 size={22} strokeWidth={2.1} aria-hidden="true" />
+              <Minimize2 size={22} strokeWidth={1.75} aria-hidden="true" />
               Compress
             </button>
             <button type="button" onClick={() => openTool("pdf-docx")}>
-              <FilePenLine size={22} strokeWidth={2.1} aria-hidden="true" />
+              <FilePenLine size={22} strokeWidth={1.75} aria-hidden="true" />
               Word
             </button>
             <div ref={moreRef} className="ps-reader-more">
@@ -1362,7 +1381,7 @@ export function Viewer({ recentId }: ViewerProps) {
                 aria-expanded={moreOpen}
                 onClick={() => setMoreOpen((open) => !open)}
               >
-                <MoreVertical size={22} strokeWidth={2.1} aria-hidden="true" />
+                <MoreVertical size={22} strokeWidth={1.75} aria-hidden="true" />
                 More
               </button>
               {moreOpen ? (

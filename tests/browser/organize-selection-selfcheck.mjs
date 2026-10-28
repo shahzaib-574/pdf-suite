@@ -123,10 +123,7 @@ try {
     .click();
   await page.getByRole("button", { name: "Done", exact: true }).click();
   assert.equal(await page.locator(".ps-organize-number").count(), 2);
-  await page.getByRole("button", { name: "Reverse order" }).click();
   await page.getByRole("button", { name: "Rotate page 3 clockwise" }).click();
-  await page.getByRole("button", { name: "Rotate all 90°" }).click();
-  await page.getByRole("button", { name: "Rotate all 90°" }).click();
   await page.screenshot({
     path: ".superpowers/sdd/2026-10-03-organize-selection/mobile.png",
   });
@@ -165,7 +162,7 @@ try {
     await task.destroy();
     return text;
   }, result);
-  assert.deepEqual(texts, ["PAGE_3", "PAGE_1"]);
+  assert.deepEqual(texts, ["PAGE_1", "PAGE_3"]);
   await page.goto(url);
   const png = async (color) =>
     Buffer.from(
@@ -189,7 +186,6 @@ try {
   await page
     .getByRole("button", { name: "Leave out page 2", exact: true })
     .waitFor();
-  await page.getByRole("button", { name: "Reverse order" }).click();
   const previous = await page.locator(".ps-organize-number").allTextContents();
   await choose([payload, { name: "red.png", mimeType: "", buffer: red }]);
   await page.getByRole("alert").filter({ hasText: "not mixed" }).waitFor();
@@ -226,8 +222,8 @@ try {
     return result;
   });
   assert.deepEqual(colors, [
-    [0, 0, 255],
     [255, 0, 0],
+    [0, 0, 255],
   ]);
   // Password cancellation preserves previous data; unsupported input never publishes.
   await page.goto(url);
@@ -330,7 +326,7 @@ try {
   );
   await call("unmount");
   console.log(
-    "ORGANIZE_SELECTION_OK drag,taporder,actualPDFtext3→1 selected-only source+individual+repeatbulkrotation, imageblue→red,40row3colscroll,passwordwrong/cancel,invalidpreserves,retainedorigincleanup",
+    "ORGANIZE_SELECTION_OK drag,taporder,actualPDFtext1→3 selected-only source+individualrotation, imagered→blue,40row3colscroll,passwordwrong/cancel,invalidpreserves,retainedorigincleanup",
   );
 } finally {
   await browser.close();

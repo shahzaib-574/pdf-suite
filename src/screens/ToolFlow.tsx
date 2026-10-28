@@ -1,6 +1,6 @@
 import { PAPER_SIZES } from "../lib/paperSizes";
 import { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
-import { ArrowDownUp, Eye, EyeOff, RotateCw, Undo2 } from "lucide-react";
+import { Eye, EyeOff, Undo2 } from "lucide-react";
 import { createPortal } from 'react-dom';
 import {
   AnimatedButton,
@@ -11,6 +11,7 @@ import {
 } from "../components";
 import { movedOrder } from "../components/useDragReorder";
 import { ActionSlotsContext } from "../components/actionSlots";
+import { showToast } from "../components/Toast";
 import { ScanCamera, type NativeScanAdapter } from "./ScanCamera";
 import { OCR_LANGUAGES, type OcrLanguage } from '../lib/ocrLanguages';
 import { loadScanDraft, saveScanDraft, clearScanDraft, type ScanPageDraft } from '../store/scanDraft';
@@ -80,18 +81,6 @@ const LEVELS: { id: CompressLevel; label: string; note: string }[] = [
     note: "Turns every page into a 120 DPI image. Loses zoom detail on large maps and posters, plus selectable text, links, forms and signatures.",
   },
 ];
-
-const TOOLS_WITH_OPTIONS = new Set<ToolId>([
-  "split",
-  "compress",
-  "organize",
-  "watermark",
-  "protect",
-  "scan",
-  "images",
-  "pdf-images",
-  "numbers",
-]);
 
 const PDF_INPUT_TOOLS = new Set<ToolId>([
   "merge",
@@ -298,7 +287,6 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const organizeInputActive = tool.id === "organize";
-  const [reverse, setReverse] = useState(false);
   const [organizeReady,setOrganizeReady]=useState<{source:PickedFile;file:PickedFile}|null>(null);
   const [organizeInputBusy,setOrganizeInputBusy]=useState(false);
   const organizeRequest=useRef<AbortController|null>(null);
@@ -428,8 +416,6 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
         setPageArrangement(Array.from({ length: count }, (_, index) => index));
         setPageExcluded([]);
         setPageRotations({});
-
-        setReverse(false);
       })
       .catch((error) => {
         if (!cancelled) {
@@ -515,8 +501,6 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
     setPageArrangement([]);
     setPageExcluded([]);
     setPageRotations({});
-
-    setReverse(false);
   }
 
   useEffect(() => {
@@ -602,36 +586,12 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
     }));
   }
 
-  function rotateEveryPage(): void {
-    const rotationDelta = 90;
-
-    setPageRotations((current) => {
-      const next = { ...current };
-      for (let index = 0; index < pageCount; index++) {
-        next[index] = (next[index] ?? 0) + rotationDelta;
-      }
-      return next;
-    });
-  }
-
-  function reversePages(): void {
-    setReverse((value) => !value);
-    // Kept pages swap places among their own slots; left-out pages stay put.
-    setPageArrangement((current) => {
-      const excluded = new Set(pageExcluded);
-      const kept = current.filter((page) => !excluded.has(page)).reverse();
-      let next = 0;
-      return current.map((page) => (excluded.has(page) ? page : kept[next++]!));
-    });
-  }
-
   function togglePage(page: number): void {
     setPageExcluded((current) =>
       current.includes(page)
         ? current.filter((value) => value !== page)
         : [...current, page],
     );
-    setReverse(false);
   }
 
   function applyTapOrder(sequence: number[]): void {
@@ -639,13 +599,11 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
     const rest = pageArrangement.filter((page) => !chosen.has(page));
     setPageArrangement([...sequence, ...rest]);
     setPageExcluded(rest);
-    setReverse(false);
   }
 
   function resetPageArrangement(): void {
     setPageArrangement(Array.from({ length: pageCount }, (_, index) => index));
     setPageExcluded([]);
-    setReverse(false);
   }
 
   async function run(exportAction?: "save" | "share"): Promise<void> {
@@ -791,15 +749,6 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
     picked.length >= tool.minFiles &&
     extraValid();
   const hasFile = picked.length >= tool.minFiles;
-  const flowSteps = tool.id === "scan" ? ["Edit pages", "PDF & export"] : TOOLS_WITH_OPTIONS.has(tool.id)
-    ? ["Select", "Adjust", "Create"]
-    : ["Select", "Create"];
-  const activeStep = tool.id === "scan" ? (scanStep === "edit" ? 0 : 1) :
-    picked.length < tool.minFiles
-      ? 0
-      : busy || flowSteps.length === 2
-        ? flowSteps.length - 1
-        : 1;
 
   function blockedReason(): string | null {
     if (scanBusy) return "Finish or cancel the page adjustment first.";
@@ -841,7 +790,16 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
     return null;
   }
 
-  const ctaHint = canRun ? null : blockedReason();
+  // An action that isn't ready yet still takes the tap and explains why in a
+  // toast, instead of a hint line sitting above the button.
+  const whenReady = (action: () => void) => () => {
+    if (canRun) {
+      action();
+      return;
+    }
+    const reason = blockedReason();
+    if (reason) showToast(reason);
+  };
   const scanPdf = tool.id === "scan" && scanStep === "pdf";
 
   const scanCamera = tool.id === "scan" && cameraOpen && draftReady ? (
@@ -895,19 +853,6 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
         onBack={scanPdf ? () => setScanStep("edit") : () => goBack("#/")}
       /> : null}
       <div className="ps-body">
-        {tool.id !== "scan" ? <div className="ps-steps" aria-label="Tool progress">
-          {flowSteps.map((step, index) => (
-            <span
-              key={step}
-              className={`ps-step${index < activeStep ? " is-complete" : ""}${
-                index === activeStep ? " is-active" : ""
-              }`}
-              aria-current={index === activeStep ? "step" : undefined}
-            >
-              {index + 1}. {step}
-            </span>
-          ))}
-        </div> : null}
         {error ? (
           <p className="ps-banner ps-banner--error" role="alert">
             {error}
@@ -934,6 +879,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
             onReorder={reorderable ? reorderFiles : undefined}
             label={tool.id === "organize" ? "Choose PDF or images" : copy.label}
             hint={tool.id === "organize" ? "One PDF OR up to 200 supported images \u00b7 128 MB total" : copy.hint}
+            hideFile={tool.id === "organize"}
           />
         ) : null}
 
@@ -1006,7 +952,50 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
           {draftStatus ? <p className="scan-draft-status" role="status">{draftStatus}</p> : null}
           </div>
         ) : null}
-        {["split", "pdf-images"].includes(tool.id) && hasFile ? (
+        {tool.id === "split" && hasFile ? (
+          <section className="ps-tool-settings" aria-labelledby="split-settings">
+            <div className="ps-tool-settings__intro">
+              <h2 id="split-settings">Split settings</h2>
+              <p>
+                Extract a page range, or list exact pages below to pick
+                those instead.
+              </p>
+            </div>
+            {!selection.trim() ? (
+              <div className="ps-range">
+                <label className="ps-field">
+                  Start page
+                  <input
+                    type="number"
+                    min={1}
+                    max={pageCount || undefined}
+                    value={startPage}
+                    onChange={(event) => setStartPage(Number(event.target.value))}
+                  />
+                </label>
+                <label className="ps-field">
+                  End page
+                  <input
+                    type="number"
+                    min={1}
+                    max={pageCount || undefined}
+                    value={endPage}
+                    onChange={(event) => setEndPage(Number(event.target.value))}
+                  />
+                </label>
+              </div>
+            ) : null}
+            <label className="ps-field">
+              Pages (optional)
+              <input
+                value={selection}
+                onChange={(e) => setSelection(e.target.value)}
+                placeholder="For example: 1-3, 5, 8-10"
+              />
+            </label>
+          </section>
+        ) : null}
+        {tool.id === "pdf-images" && hasFile ? (
           <label className="ps-field">
             Pages (optional)
             <input
@@ -1015,42 +1004,10 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
               placeholder="For example: 1-3, 5, 8-10"
             />
             <span className="ps-note">
-              {pageCount || "Reading"} pages. Leave blank to use{" "}
-              {tool.id === "split"
-                ? "the range below"
-                : "all pages (up to 200)"}
-              .
+              {pageCount || "Reading"} pages. Leave blank to use all pages
+              (up to 200).
             </span>
           </label>
-        ) : null}
-        {tool.id === "split" && hasFile && !selection.trim() ? (
-          <>
-            <div className="ps-row">
-              <label className="ps-field ps-grow">
-                Start page
-                <input
-                  type="number"
-                  min={1}
-                  max={pageCount || undefined}
-                  value={startPage}
-                  onChange={(event) => setStartPage(Number(event.target.value))}
-                />
-              </label>
-              <label className="ps-field ps-grow">
-                End page
-                <input
-                  type="number"
-                  min={1}
-                  max={pageCount || undefined}
-                  value={endPage}
-                  onChange={(event) => setEndPage(Number(event.target.value))}
-                />
-              </label>
-            </div>
-            {pageCount > 0 ? (
-              <p className="ps-note tabular">{pageCount} pages</p>
-            ) : null}
-          </>
         ) : null}
 
         {tool.id === "compress" && hasFile ? (
@@ -1137,8 +1094,8 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
                   setImageFormat(e.target.value as "jpeg" | "png")
                 }
               >
-                <option value="jpeg">JPEG — smaller files</option>
-                <option value="png">PNG — lossless images</option>
+                <option value="jpeg">JPEG - smaller files</option>
+                <option value="png">PNG - lossless images</option>
               </select>
             </label>
             <label className="ps-field ps-grow">
@@ -1147,9 +1104,9 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
                 value={imageScale}
                 onChange={(e) => setImageScale(Number(e.target.value))}
               >
-                <option value={1}>72 DPI — screen</option>
-                <option value={2}>144 DPI — balanced</option>
-                <option value={3}>216 DPI — detailed</option>
+                <option value={1}>72 DPI - screen</option>
+                <option value={2}>144 DPI - balanced</option>
+                <option value={3}>216 DPI - detailed</option>
               </select>
             </label>
             <p className="ps-note">
@@ -1283,7 +1240,7 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
         {tool.id === "organize" && picked[0] ? <>
           <OrganizeGrid active={presentationActive} file={picked[0]} arrangement={pageArrangement} order={pageOrder} rotations={pageRotations} disabled={busy || organizeInputBusy}
             onSelect={togglePage}
-            onMove={(from,to)=>{setPageArrangement(current=>movedOrder(current,from,to));setReverse(false);}}
+            onMove={(from,to)=>{setPageArrangement(current=>movedOrder(current,from,to));}}
             onTapOrder={applyTapOrder}
             onRotate={rotatePage}
             onReady={(file,count)=>{
@@ -1294,34 +1251,36 @@ export function ToolFlow({ id, nativeScan, loadNativeScanDraft = loadScanDraft, 
               setPageExcluded(current=>current.every(page=>page<count)?current:[]);
             }}
             onError={setError}/>
-          <div className="ps-organize-actions" role="group" aria-label="Page order and rotation">
-            <AnimatedButton variant="ghost" icon={Undo2} aria-label="Reset to original" disabled={busy||!pageCount} onClick={resetPageArrangement}>Reset</AnimatedButton>
-            <AnimatedButton variant="ghost" icon={RotateCw} aria-label="Rotate all 90°" disabled={busy||!pageCount} onClick={rotateEveryPage}>Rotate all</AnimatedButton>
-            <AnimatedButton variant="ghost" icon={ArrowDownUp} aria-label="Reverse order" aria-pressed={reverse} disabled={busy||!pageOrder.length} onClick={reversePages}>Reverse</AnimatedButton>
-          </div>
         </> : null}
 
         {tool.id === "scan" && scanStep === "edit" ? null : tool.id !== "view" ? (
           <div className={`ps-actions${tool.id === "scan" ? " ps-actions--row ps-actions--follow" : " ps-actions--sticky"}`}>
-            {ctaHint ? (
-              <p className="ps-cta-hint" role="status">
-                {ctaHint}
-              </p>
-            ) : null}
             {tool.id === "scan" ? <>
-              <AnimatedButton disabled={!canRun} onClick={() => void run("save")}>Save PDF</AnimatedButton>
-              <AnimatedButton variant="ghost" disabled={!canRun} onClick={() => void run("share")}>Share PDF</AnimatedButton>
+              <AnimatedButton aria-disabled={!canRun || undefined} onClick={whenReady(() => void run("save"))}>Save PDF</AnimatedButton>
+              <AnimatedButton variant="ghost" aria-disabled={!canRun || undefined} onClick={whenReady(() => void run("share"))}>Share PDF</AnimatedButton>
             </> : multiple ? (
               <div className="ps-actions__bar">
                 <div className="ps-actions__side" ref={setActionStart} />
-                <AnimatedButton className="ps-actions__main" disabled={!canRun} onClick={() => void run()}>
+                <AnimatedButton className="ps-actions__main" aria-disabled={!canRun || undefined} onClick={whenReady(() => void run())}>
+                  {ACTION_LABELS[tool.id as Exclude<ToolId, "view">]}
+                </AnimatedButton>
+                {tool.id === "organize" && pageCount ? (
+                  <div className="ps-actions__side ps-actions__side--end">
+                    <AnimatedButton variant="ghost" icon={Undo2} aria-label="Reset to original" disabled={busy} onClick={resetPageArrangement}>Reset</AnimatedButton>
+                  </div>
+                ) : (
+                  <div className="ps-actions__side" aria-hidden="true" />
+                )}
+              </div>
+            ) : (
+              <div className="ps-actions__bar">
+                <div className="ps-actions__side" aria-hidden="true" />
+                <AnimatedButton className="ps-actions__main" aria-disabled={!canRun || undefined} onClick={whenReady(() => void run())}>
                   {ACTION_LABELS[tool.id as Exclude<ToolId, "view">]}
                 </AnimatedButton>
                 <div className="ps-actions__side" aria-hidden="true" />
               </div>
-            ) : <AnimatedButton block disabled={!canRun} onClick={() => void run()}>
-              {ACTION_LABELS[tool.id as Exclude<ToolId, "view">]}
-            </AnimatedButton>}
+            )}
           </div>
         ) : (
           <p className="ps-note">Pick a file to open it here.</p>

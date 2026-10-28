@@ -32,6 +32,8 @@ export type FileWellProps = {
   label: string;
   hint: string;
   capture?: boolean | "user" | "environment";
+  /** One-file tools that already show every page (Organize): no file card. */
+  hideFile?: boolean;
 };
 
 function formatBytes(size: number): string {
@@ -63,6 +65,7 @@ export function FileWell({
   label,
   hint,
   capture,
+  hideFile = false,
 }: FileWellProps) {
   const id = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -171,6 +174,7 @@ export function FileWell({
           disabled={disabled}
           hint={hint}
           single={single}
+          hideFile={hideFile}
           formatBytes={formatBytes}
           onReorder={onReorder}
           onMove={onMove}
