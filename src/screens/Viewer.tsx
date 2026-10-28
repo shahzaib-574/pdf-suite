@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -68,10 +69,16 @@ type SearchResult = {
   count: number;
 };
 
-const MIN_ZOOM = 0.65;
+// Zoom is relative to the page's printed size: 100% shows a PDF point
+// (1/72 in) as 1/72 in of CSS length, like desktop PDF readers.
+const CSS_PX_PER_PT = 96 / 72;
+const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 100;
 const ZOOM_FACTOR = 1.2;
-const MAX_PAGE_CSS = 12000;
+// Browsers stop laying out boxes past ~17.9M CSS px (Firefox; Chromium allows
+// ~33.5M), so the whole stacked document must fit under this at any zoom.
+const MAX_STACK_CSS = 16_000_000;
+const MAX_PAGE_CSS = 200_000;
 const TILE_CSS = 768;
 const DETAIL_MAX_PIXELS = 3_000_000;
 const DETAIL_MAX_DIM = 1536;
@@ -99,15 +106,55 @@ type PinchSession = {
   lastZoom: number;
   lastMid: { x: number; y: number };
   maxZoom: number;
+  minZoom: number;
   pending: { mid: { x: number; y: number }; distance: number } | null;
 };
 
+/**
+ * Shows the 10%–10,000% zoom range as 1–100%. The scale is logarithmic so
+ * every 1% step magnifies by the same factor (~7%), wherever it starts.
+ */
 function zoomLabel(value: number): string {
-  return `${Math.round(value * 100)}%`;
+  const span = Math.log(MAX_ZOOM / MIN_ZOOM);
+  const position = Math.log(Math.max(MIN_ZOOM, value) / MIN_ZOOM) / span;
+  return `${Math.max(1, Math.min(100, Math.round(1 + position * 99)))}%`;
 }
 
-function clampZoom(value: number, maxZoom = MAX_ZOOM): number {
-  return Math.min(maxZoom, Math.max(MIN_ZOOM, value));
+function clampZoom(
+  value: number,
+  maxZoom = MAX_ZOOM,
+  minZoom = MIN_ZOOM,
+): number {
+  return Math.min(maxZoom, Math.max(minZoom, value));
+}
+
+/**
+ * Index of the first stacked page whose bottom edge is at or below `clientY`.
+ * A binary search keeps scroll and zoom handlers cheap on long documents.
+ */
+function pageIndexAtY(pages: HTMLElement, clientY: number): number {
+  const items = pages.children;
+  let low = 0;
+  let high = items.length - 1;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (items[mid]!.getBoundingClientRect().bottom < clientY) low = mid + 1;
+    else high = mid;
+  }
+  return Math.max(0, low);
+}
+
+/** The page elements around `clientY`, nearest candidates first. */
+function pagesNearY(viewport: HTMLElement, clientY: number): HTMLElement[] {
+  const pages = viewport.querySelector<HTMLElement>(".ps-reader-pages");
+  if (!pages || pages.children.length === 0) return [];
+  const at = pageIndexAtY(pages, clientY);
+  return [at, at - 1, at + 1].flatMap((index) => {
+    const item = pages.children[index];
+    return item instanceof HTMLElement && item.dataset.pageIndex != null
+      ? [item]
+      : [];
+  });
 }
 
 function occurrences(text: string, query: string): number {
@@ -148,9 +195,8 @@ function captureZoomFocal(
   clientX: number,
   clientY: number,
 ): ZoomFocal | null {
-  const pages = viewport.querySelectorAll<HTMLElement>("[data-page-index]");
   let nearest: { el: HTMLElement; dist: number } | null = null;
-  for (const el of pages) {
+  for (const el of pagesNearY(viewport, clientY)) {
     const box = el.getBoundingClientRect();
     if (
       clientX >= box.left &&
@@ -218,6 +264,7 @@ function applyLivePinch(pages: HTMLElement, pinch: PinchSession): number {
   const nextZoom = clampZoom(
     pinch.zoom * (pending.distance / pinch.distance),
     pinch.maxZoom,
+    pinch.minZoom,
   );
   const ratio = nextZoom / pinch.zoom;
   pages.style.transition = "none";
@@ -239,7 +286,15 @@ export function Viewer({ recentId }: ViewerProps) {
   const [loadingLabel, setLoadingLabel] = useState("Opening document…");
   const [activePage, setActivePage] = useState(0);
   const [zoom, setZoom] = useState(1);
-  const [viewportWidth, setViewportWidth] = useState(420);
+  // While true, zoom tracks the "whole page on screen" level, including after
+  // rotation; any manual zoom leaves fit mode until the zoom label is tapped.
+  const [fitMode, setFitMode] = useState(true);
+  const [viewportSize, setViewportSize] = useState({
+    width: 420,
+    height: 640,
+    padX: 12,
+    padY: 12,
+  });
   const [sidebar, setSidebar] = useState<SidebarMode>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -269,6 +324,9 @@ export function Viewer({ recentId }: ViewerProps) {
   const pinchRef = useRef<PinchSession | null>(null);
   const focalRef = useRef<ZoomFocal | null>(null);
   const maxZoomRef = useRef(MAX_ZOOM);
+  const minZoomRef = useRef(MIN_ZOOM);
+  const fitModeRef = useRef(true);
+  const activePageRef = useRef(0);
 
   const backHash = recentId ? "#/recents" : lastJob.result ? "#/result" : "#/";
 
@@ -339,17 +397,19 @@ export function Viewer({ recentId }: ViewerProps) {
       .openViewer(
         file,
         (current, total) => {
-          if (!cancelled) {
+          // Each update re-renders the reader, so long documents report in
+          // larger steps.
+          const step = total > 200 ? 32 : 8;
+          if (
+            !cancelled &&
+            (current === 1 || current % step === 0 || current === total)
+          ) {
             setLoadingLabel(
               current < total
                 ? `Search indexing: ${current} of ${total} pages`
                 : "Search index ready",
             );
-            if (
-              opened &&
-              (current === 1 || current % 8 === 0 || current === total)
-            )
-              setIndexedPages([...opened.document.pages]);
+            if (opened) setIndexedPages([...opened.document.pages]);
           }
         },
         {
@@ -398,7 +458,28 @@ export function Viewer({ recentId }: ViewerProps) {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const observer = new ResizeObserver(([entry]) => {
-      if (entry) setViewportWidth(entry.contentRect.width);
+      if (!entry) return;
+      const pages = pagesRef.current;
+      const style = pages ? window.getComputedStyle(pages) : null;
+      const padX = style ? parseFloat(style.paddingLeft) || 0 : 12;
+      const padY = style ? parseFloat(style.paddingTop) || 0 : 12;
+      if (fitModeRef.current) {
+        // Keep the current page's top in view when rotation re-fits it.
+        const box = viewport.getBoundingClientRect();
+        focalRef.current = {
+          pageIndex: activePageRef.current,
+          relX: 0.5,
+          relY: 0,
+          clientX: box.left + box.width / 2,
+          clientY: box.top + padY,
+        };
+      }
+      setViewportSize({
+        width: entry.contentRect.width,
+        height: entry.contentRect.height,
+        padX,
+        padY,
+      });
     });
     observer.observe(viewport);
     return () => observer.disconnect();
@@ -409,14 +490,16 @@ export function Viewer({ recentId }: ViewerProps) {
     if (!viewport) return;
     const center =
       viewport.getBoundingClientRect().top + viewport.clientHeight * 0.36;
-    const pages = viewport.querySelectorAll<HTMLElement>("[data-page-index]");
     let closest = activePage;
     let distance = Number.POSITIVE_INFINITY;
-    pages.forEach((page) => {
+    pagesNearY(viewport, center).forEach((page) => {
       const box = page.getBoundingClientRect();
-      const current = Math.abs(
-        box.top + Math.min(box.height * 0.2, 100) - center,
-      );
+      // The page under the reading line wins, even when zoomed in so far
+      // that its top is far above the screen.
+      const current =
+        box.top <= center && box.bottom >= center
+          ? -1
+          : Math.min(Math.abs(box.top - center), Math.abs(box.bottom - center));
       if (current < distance) {
         distance = current;
         closest = Number(page.dataset.pageIndex ?? 0);
@@ -469,6 +552,14 @@ export function Viewer({ recentId }: ViewerProps) {
     [reducedMotion, session],
   );
 
+  const selectPage = useCallback(
+    (pageIndex: number) => {
+      goToPage(pageIndex);
+      if (window.innerWidth < 760) setSidebar(null);
+    },
+    [goToPage],
+  );
+
   const rememberFocal = useCallback((clientX: number, clientY: number) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -483,10 +574,26 @@ export function Viewer({ recentId }: ViewerProps) {
         const box = viewport.getBoundingClientRect();
         rememberFocal(box.left + box.width / 2, box.top + box.height / 2);
       }
-      setZoom((value) => clampZoom(value * factor, maxZoomRef.current));
+      setFitMode(false);
+      const next = clampZoom(
+        zoomRef.current * factor,
+        maxZoomRef.current,
+        minZoomRef.current,
+      );
+      zoomRef.current = next;
+      setZoom(next);
     },
     [rememberFocal],
   );
+
+  const fitToScreen = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (viewport) {
+      const box = viewport.getBoundingClientRect();
+      rememberFocal(box.left + box.width / 2, box.top + box.height / 2);
+    }
+    setFitMode(true);
+  }, [rememberFocal]);
 
   const writeZoomLabel = useCallback((value: number) => {
     const label = zoomLabelRef.current;
@@ -514,12 +621,12 @@ export function Viewer({ recentId }: ViewerProps) {
       } else if (event.key === "-") {
         zoomAroundViewportCenter(1 / ZOOM_FACTOR);
       } else if (event.key === "0") {
-        setZoom(1);
+        fitToScreen();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [zoomAroundViewportCenter]);
+  }, [fitToScreen, zoomAroundViewportCenter]);
 
   useEffect(() => {
     if (searchOpen)
@@ -649,41 +756,84 @@ export function Viewer({ recentId }: ViewerProps) {
     () => indexedPages.reduce((max, page) => Math.max(max, page.height), 1),
     [indexedPages],
   );
-  const pageGutter = viewportWidth < 620 ? 24 : 52;
-  const fitScale = Math.max(0.1, (viewportWidth - pageGutter) / maxPageWidth);
-  const layoutMaxZoom = Math.min(
-    MAX_ZOOM,
-    MAX_PAGE_CSS / Math.max(1, maxPageWidth * fitScale),
-    MAX_PAGE_CSS / Math.max(1, maxPageHeight * fitScale),
+  const stackHeight = useMemo(
+    () => indexedPages.reduce((sum, page) => sum + page.height, 0),
+    [indexedPages],
   );
-  const displayScale = fitScale * Math.min(zoom, layoutMaxZoom);
+  // The zoom that shows the largest page whole, in portrait or landscape.
+  const fitZoom = Math.max(
+    0.01,
+    Math.min(
+      (viewportSize.width - viewportSize.padX * 2) /
+        (maxPageWidth * CSS_PX_PER_PT),
+      (viewportSize.height - viewportSize.padY * 2) /
+        (maxPageHeight * CSS_PX_PER_PT),
+    ),
+  );
+  const minZoom = Math.min(MIN_ZOOM, fitZoom);
+  const layoutMaxZoom = Math.max(
+    minZoom,
+    Math.min(
+      MAX_ZOOM,
+      MAX_STACK_CSS / Math.max(1, stackHeight * CSS_PX_PER_PT),
+      MAX_PAGE_CSS / Math.max(1, maxPageWidth * CSS_PX_PER_PT),
+      MAX_PAGE_CSS / Math.max(1, maxPageHeight * CSS_PX_PER_PT),
+    ),
+  );
+  const effectiveZoom = clampZoom(zoom, layoutMaxZoom, minZoom);
+  const displayScale = effectiveZoom * CSS_PX_PER_PT;
 
   useLayoutEffect(() => {
     maxZoomRef.current = layoutMaxZoom;
-  }, [layoutMaxZoom]);
+    minZoomRef.current = minZoom;
+  }, [layoutMaxZoom, minZoom]);
+
+  useLayoutEffect(() => {
+    fitModeRef.current = fitMode;
+    if (!fitMode) return;
+    zoomRef.current = fitZoom;
+    setZoom(fitZoom);
+  }, [fitMode, fitZoom]);
 
   useEffect(() => {
-    zoomRef.current = zoom;
-  }, [zoom]);
+    activePageRef.current = activePage;
+  }, [activePage]);
 
+  // zoomRef is the live zoom: wheel and pinch move it between renders, so
+  // every write keeps it current rather than copying `zoom` back after a
+  // commit, which raced fast wheel events and made zoom stall and jitter.
   useEffect(() => {
-    setZoom((value) => clampZoom(value, layoutMaxZoom));
-  }, [layoutMaxZoom]);
+    const next = clampZoom(zoomRef.current, layoutMaxZoom, minZoom);
+    zoomRef.current = next;
+    setZoom(next);
+  }, [layoutMaxZoom, minZoom]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     const focal = focalRef.current;
     if (!viewport || !focal || pinchRef.current) return;
     applyZoomFocal(viewport, focal);
-  }, [displayScale, viewportWidth, zoom]);
+    // A focal belongs to one zoom change; reapplying it later (when indexing
+    // refines page sizes, say) would yank the reader back to an old spot.
+    focalRef.current = null;
+  }, [displayScale, viewportSize]);
 
+  // Base page images are sized for the fitted view; zooming past it is
+  // sharpened by viewport tiles, so this only changes on resize or rotation.
   const paintWidth = Math.min(
     session && session.document.pageCount > 24 ? 1280 : 2048,
     Math.max(
-      720,
-      (viewportWidth - pageGutter) * Math.min(window.devicePixelRatio || 1, 2),
+      512,
+      Math.ceil(
+        (maxPageWidth *
+          fitZoom *
+          CSS_PX_PER_PT *
+          Math.min(window.devicePixelRatio || 1, 2)) /
+          256,
+      ) * 256,
     ),
   );
+  const highZoom = effectiveZoom > fitZoom * 1.2;
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -716,24 +866,27 @@ export function Viewer({ recentId }: ViewerProps) {
         pinch.lastZoom = clampZoom(
           pinch.zoom * (pinch.pending.distance / pinch.distance),
           pinch.maxZoom,
+          pinch.minZoom,
         );
         pinch.lastMid = pinch.pending.mid;
         pinch.pending = null;
       }
-      focalRef.current = {
+      const focal: ZoomFocal = {
         pageIndex: pinch.pageIndex,
         relX: pinch.relX,
         relY: pinch.relY,
         clientX: pinch.lastMid.x,
         clientY: pinch.lastMid.y,
       };
+      focalRef.current = focal;
       clearLivePinchTransform(pages);
       writeZoomLabel(pinch.lastZoom);
       zoomRef.current = pinch.lastZoom;
       flushSync(() => {
+        setFitMode(false);
         setZoom(pinch.lastZoom);
       });
-      applyZoomFocal(viewport, focalRef.current);
+      applyZoomFocal(viewport, focal);
       viewport.classList.remove("is-pinching");
       viewport.dispatchEvent(new Event("reader-pinch-end"));
     };
@@ -761,6 +914,7 @@ export function Viewer({ recentId }: ViewerProps) {
         lastZoom: zoomRef.current,
         lastMid: mid,
         maxZoom: maxZoomRef.current,
+        minZoom: minZoomRef.current,
         pending: null,
       };
       focalRef.current = focal;
@@ -793,12 +947,14 @@ export function Viewer({ recentId }: ViewerProps) {
       const next = clampZoom(
         zoomRef.current * Math.exp(-event.deltaY * 0.0024),
         maxZoomRef.current,
+        minZoomRef.current,
       );
       zoomRef.current = next;
       writeZoomLabel(next);
       if (wheelRafRef.current) return;
       wheelRafRef.current = window.requestAnimationFrame(() => {
         wheelRafRef.current = 0;
+        setFitMode(false);
         setZoom(zoomRef.current);
       });
     };
@@ -945,7 +1101,7 @@ export function Viewer({ recentId }: ViewerProps) {
             <div className="ps-reader-toolbar__group ps-reader-zoom">
               <ReaderIconButton
                 label="Zoom out"
-                disabled={zoom <= MIN_ZOOM}
+                disabled={effectiveZoom <= minZoom}
                 onClick={() => zoomAroundViewportCenter(1 / ZOOM_FACTOR)}
               >
                 <Minus size={17} />
@@ -954,25 +1110,15 @@ export function Viewer({ recentId }: ViewerProps) {
                 ref={zoomLabelRef}
                 type="button"
                 className="ps-reader-zoom__value"
-                aria-label="Fit pages to width"
-                title="Fit to width"
-                onClick={() => {
-                  const viewport = viewportRef.current;
-                  if (viewport) {
-                    const box = viewport.getBoundingClientRect();
-                    rememberFocal(
-                      box.left + box.width / 2,
-                      box.top + box.height / 2,
-                    );
-                  }
-                  setZoom(1);
-                }}
+                aria-label="Fit page to screen"
+                title="Fit page to screen"
+                onClick={fitToScreen}
               >
-                {zoomLabel(zoom)}
+                {zoomLabel(effectiveZoom)}
               </button>
               <ReaderIconButton
                 label="Zoom in"
-                disabled={zoom >= layoutMaxZoom}
+                disabled={effectiveZoom >= layoutMaxZoom}
                 onClick={() => zoomAroundViewportCenter(ZOOM_FACTOR)}
               >
                 <Plus size={17} />
@@ -1088,10 +1234,7 @@ export function Viewer({ recentId }: ViewerProps) {
                         page={page}
                         pageIndex={pageIndex}
                         active={activePage === pageIndex}
-                        onSelect={() => {
-                          goToPage(pageIndex);
-                          if (window.innerWidth < 760) setSidebar(null);
-                        }}
+                        onSelect={selectPage}
                       />
                     ))}
                   </div>
@@ -1136,7 +1279,7 @@ export function Viewer({ recentId }: ViewerProps) {
                     renderWidth={paintWidth}
                     query={normalizedQuery}
                     active={activePage === pageIndex}
-                    highZoom={zoom > 1.2}
+                    highZoom={highZoom}
                     viewportRef={viewportRef}
                   />
                 ))}
@@ -1295,7 +1438,9 @@ type PageDetail = {
   key: string;
 };
 
-function ReaderPage({
+// Memoized: indexing and the active-page highlight change props for only a
+// few pages at a time, so long documents don't re-render every page.
+const ReaderPage = memo(function ReaderPage({
   session,
   page,
   pageIndex,
@@ -1338,6 +1483,17 @@ function ReaderPage({
     return () => observer.disconnect();
   }, [highZoom, viewportRef]);
 
+  // A fast fling passes many pages; only start text work for pages that stay.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (!visible) return;
+    const timer = window.setTimeout(() => setSettled(true), 180);
+    return () => {
+      window.clearTimeout(timer);
+      setSettled(false);
+    };
+  }, [visible]);
+
   // Off-screen pages stay cached until the bounded cache needs room, then
   // drop their image so long documents don't keep every page decoded.
   useEffect(() => {
@@ -1350,8 +1506,9 @@ function ReaderPage({
     if (!visible) return;
     if (src && imageCache.lookup(pageIndex, renderWidth) === src) return;
     let cancelled = false;
+    const controller = new AbortController();
     void session
-      .renderPage(pageIndex, renderWidth)
+      .renderPage(pageIndex, renderWidth, controller.signal)
       .then((blob) => {
         const url = URL.createObjectURL(blob);
         if (cancelled) {
@@ -1372,11 +1529,12 @@ function ReaderPage({
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [imageCache, pageIndex, renderWidth, session, src, visible]);
 
   useEffect(() => {
-    if (!visible || !textLayerRef.current || !page.text) return;
+    if (!settled || !textLayerRef.current || !page.text) return;
     let cancelled = false;
     const container = textLayerRef.current;
     container.replaceChildren();
@@ -1399,7 +1557,7 @@ function ReaderPage({
       renderedTextRef.current = null;
       container.replaceChildren();
     };
-  }, [page.text, pageIndex, session, visible]);
+  }, [page.text, pageIndex, session, settled]);
 
   useEffect(() => {
     if (renderedTextRef.current) markTextLayer(renderedTextRef.current, query);
@@ -1421,6 +1579,7 @@ function ReaderPage({
     }
 
     let timer = 0;
+    let batch: AbortController | null = null;
     const paint = () => {
       if (viewport.classList.contains("is-pinching")) return;
       const pageBox = pageEl.getBoundingClientRect();
@@ -1466,6 +1625,11 @@ function ReaderPage({
       }
       if (jobs.length === 0) return;
       const generation = ++detailGen.current;
+      // Tiles for a spot the reader already scrolled past are dropped from
+      // the paint queue rather than rendered and thrown away.
+      batch?.abort();
+      batch = new AbortController();
+      const signal = batch.signal;
       void Promise.allSettled(
         jobs.map(async (job) => {
           const cached = tileUrlsRef.current.get(job.key);
@@ -1490,6 +1654,7 @@ function ReaderPage({
             },
             outW,
             outH,
+            signal,
           );
           const url = URL.createObjectURL(region.blob);
           const image = new Image();
@@ -1540,6 +1705,7 @@ function ReaderPage({
     };
     const pause = () => {
       window.clearTimeout(timer);
+      batch?.abort();
       detailGen.current += 1;
     };
     schedule();
@@ -1551,6 +1717,7 @@ function ReaderPage({
       viewport.removeEventListener("scroll", schedule);
       viewport.removeEventListener("reader-pinch-start", pause);
       viewport.removeEventListener("reader-pinch-end", schedule);
+      batch?.abort();
       detailGen.current += 1;
     };
   }, [displayScale, dpr, needsDetail, pageIndex, session, viewportRef]);
@@ -1638,7 +1805,7 @@ function ReaderPage({
       </span>
     </article>
   );
-}
+});
 
 function markTextLayer(layer: PdfViewerTextLayer, query: string): void {
   layer.textDivs.forEach((element, index) => {
@@ -1655,10 +1822,10 @@ type ReaderThumbnailProps = {
   page: PdfViewerPage;
   pageIndex: number;
   active: boolean;
-  onSelect: () => void;
+  onSelect: (pageIndex: number) => void;
 };
 
-function ReaderThumbnail({
+const ReaderThumbnail = memo(function ReaderThumbnail({
   session,
   page,
   pageIndex,
@@ -1693,8 +1860,9 @@ function ReaderThumbnail({
     if (!visible) return;
     if (src && imageCache.lookup(pageIndex, THUMBNAIL_WIDTH) === src) return;
     let cancelled = false;
+    const controller = new AbortController();
     void session
-      .renderPage(pageIndex, THUMBNAIL_WIDTH)
+      .renderPage(pageIndex, THUMBNAIL_WIDTH, controller.signal)
       .then((blob) => {
         const url = URL.createObjectURL(blob);
         if (cancelled) {
@@ -1709,6 +1877,7 @@ function ReaderThumbnail({
       .catch(() => undefined);
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [imageCache, pageIndex, session, src, visible]);
 
@@ -1721,7 +1890,7 @@ function ReaderThumbnail({
       }
       aria-label={`Go to page ${pageIndex + 1}`}
       aria-current={active ? "page" : undefined}
-      onClick={onSelect}
+      onClick={() => onSelect(pageIndex)}
     >
       <span
         className="ps-reader-thumbnail__page"
@@ -1732,4 +1901,4 @@ function ReaderThumbnail({
       <span>{pageIndex + 1}</span>
     </button>
   );
-}
+});

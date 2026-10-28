@@ -146,12 +146,18 @@ export type PdfViewerPageRegion = {
 
 export type PdfViewerSession = {
   document: PdfViewerDocument;
-  renderPage(pageIndex: number, width: number): Promise<Blob>;
+  /** Aborting `signal` drops a queued paint or cancels one in progress. */
+  renderPage(
+    pageIndex: number,
+    width: number,
+    signal?: AbortSignal,
+  ): Promise<Blob>;
   renderPageRegion(
     pageIndex: number,
     clip: { x: number; y: number; width: number; height: number },
     outputWidth: number,
     outputHeight: number,
+    signal?: AbortSignal,
   ): Promise<PdfViewerPageRegion>;
   renderTextLayer(
     pageIndex: number,
@@ -190,10 +196,26 @@ function canvasToBlob(
   });
 }
 
+function abortError(): DOMException {
+  return new DOMException("The page paint was cancelled.", "AbortError");
+}
+
+/** Cancels `renderTask` when `signal` aborts, until the returned cleanup runs. */
+function cancelOnAbort(
+  renderTask: { cancel(): void },
+  signal: AbortSignal | undefined,
+): () => void {
+  if (!signal) return () => undefined;
+  const onAbort = () => renderTask.cancel();
+  signal.addEventListener("abort", onAbort, { once: true });
+  return () => signal.removeEventListener("abort", onAbort);
+}
+
 async function renderClippedPage(
   page: PDFPageProxy,
   clip: { x: number; y: number; width: number; height: number },
   outputWidth: number,
+  signal?: AbortSignal,
 ): Promise<PdfViewerPageRegion> {
   const base = page.getViewport({ scale: 1 });
   const x = Math.min(Math.max(0, clip.x), Math.max(0, base.width - 0.01));
@@ -206,9 +228,12 @@ async function renderClippedPage(
     0.01,
     Math.min(clip.height, base.height - y),
   );
+  // Only the clip is rasterized, so bound the clip's canvas, not the whole
+  // page's: a page-sized bound caps deep zoom at ~10 px per point and turns
+  // detail tiles into upscaled blur.
   const scale = Math.min(
     Math.max(0.2, outputWidth) / clipWidth,
-    safePageScale(base, 8192, 16_000_000),
+    safePageScale({ width: clipWidth, height: clipHeight }, 8192, 16_000_000),
   );
   const width = Math.max(1, Math.round(clipWidth * scale));
   const height = Math.max(1, Math.round(clipHeight * scale));
@@ -229,6 +254,7 @@ async function renderClippedPage(
     transform: [1, 0, 0, 1, -x * scale, -y * scale],
     background: "#ffffff",
   });
+  const release = cancelOnAbort(renderTask, signal);
   try {
     await renderTask.promise;
     // Viewer detail tiles contain text and line art. Keep them lossless so the
@@ -236,6 +262,7 @@ async function renderClippedPage(
     const blob = await canvasToBlob(canvas, "image/png");
     return { blob, width, height };
   } finally {
+    release();
     canvas.width = 0;
     canvas.height = 0;
   }
@@ -413,6 +440,9 @@ export async function openPdfViewer(
         void (async () => {
           try {
             for (let i = 0; i < pdf.numPages; i++) {
+              // Indexing shares the PDF worker with painting; let on-screen
+              // pages finish first so a long document stays responsive.
+              await paintIdle();
               if (destroyed || options?.signal?.aborted) return;
               try {
                 const page = await pdf.getPage(i + 1);
@@ -424,6 +454,7 @@ export async function openPdfViewer(
                 } catch {
                   /* Keep page dimensions even if text content is malformed. */
                 }
+                page.cleanup();
                 pages[i] = {
                   width: viewport.width,
                   height: viewport.height,
@@ -469,25 +500,66 @@ export async function openPdfViewer(
       return next;
     }
 
-    let paintTail: Promise<unknown> = Promise.resolve();
+    // Paints run one at a time, newest request first: after a fast scroll the
+    // pages now on screen paint before the ones the reader flew past, and
+    // those stale requests are aborted out of the queue by their owners.
+    type PaintJob = { run: () => Promise<void> };
+    const paintJobs: PaintJob[] = [];
+    let painting = false;
+    let idleWaiters: (() => void)[] = [];
+
+    function pumpPaint(): void {
+      if (painting) return;
+      const job = paintJobs.pop();
+      if (!job) {
+        const waiters = idleWaiters;
+        idleWaiters = [];
+        waiters.forEach((resolve) => resolve());
+        return;
+      }
+      painting = true;
+      void job.run().finally(() => {
+        painting = false;
+        pumpPaint();
+      });
+    }
+
+    function paintIdle(): Promise<void> {
+      if (!painting && paintJobs.length === 0) return Promise.resolve();
+      return new Promise((resolve) => idleWaiters.push(resolve));
+    }
+
     function enqueuePaint<T>(
       pageIndex: number,
       work: () => Promise<T>,
+      signal?: AbortSignal,
     ): Promise<T> {
-      const run = paintTail.then(
-        () => enqueuePage(pageIndex, work),
-        () => enqueuePage(pageIndex, work),
-      );
-      paintTail = run.then(
-        () => undefined,
-        () => undefined,
-      );
-      return run;
+      if (signal?.aborted) return Promise.reject(abortError());
+      return new Promise<T>((resolve, reject) => {
+        const onAbort = () => {
+          const at = paintJobs.indexOf(job);
+          if (at < 0) return;
+          paintJobs.splice(at, 1);
+          reject(abortError());
+        };
+        const job: PaintJob = {
+          run: () => {
+            signal?.removeEventListener("abort", onAbort);
+            return enqueuePage(pageIndex, () => {
+              if (signal?.aborted) throw abortError();
+              return work();
+            }).then(resolve, reject);
+          },
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+        paintJobs.push(job);
+        pumpPaint();
+      });
     }
 
     return {
       document: viewerDocument,
-      async renderPage(pageIndex, width) {
+      async renderPage(pageIndex, width, signal) {
         return enqueuePaint(pageIndex, async () => {
           if (destroyed) throw new Error("This viewer session is closed.");
           if (pageIndex < 0 || pageIndex >= pdf.numPages) {
@@ -511,6 +583,7 @@ export async function openPdfViewer(
             canvasContext.fillStyle = "#ffffff";
             canvasContext.fillRect(0, 0, canvas.width, canvas.height);
             const renderTask = page.render({ canvas, canvasContext, viewport });
+            const release = cancelOnAbort(renderTask, signal);
             try {
               await renderTask.promise;
               // Reader text and line art should not acquire JPEG ringing.
@@ -524,15 +597,22 @@ export async function openPdfViewer(
                 );
               });
             } finally {
+              release();
               canvas.width = 0;
               canvas.height = 0;
             }
           } finally {
             page.cleanup();
           }
-        });
+        }, signal);
       },
-      async renderPageRegion(pageIndex, clip, outputWidth, _outputHeight) {
+      async renderPageRegion(
+        pageIndex,
+        clip,
+        outputWidth,
+        _outputHeight,
+        signal,
+      ) {
         return enqueuePaint(pageIndex, async () => {
           if (destroyed) throw new Error("This viewer session is closed.");
           if (pageIndex < 0 || pageIndex >= pdf.numPages) {
@@ -540,13 +620,19 @@ export async function openPdfViewer(
           }
           const page = await pdf.getPage(pageIndex + 1);
           try {
-            return await renderClippedPage(page, clip, outputWidth);
-          } catch {
-            return await renderClippedPage(page, clip, Math.max(64, outputWidth / 2));
+            return await renderClippedPage(page, clip, outputWidth, signal);
+          } catch (error) {
+            if (signal?.aborted) throw error;
+            return await renderClippedPage(
+              page,
+              clip,
+              Math.max(64, outputWidth / 2),
+              signal,
+            );
           } finally {
             page.cleanup();
           }
-        });
+        }, signal);
       },
       async renderTextLayer(pageIndex, container, scale) {
         return enqueuePage(pageIndex, async () => {

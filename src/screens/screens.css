@@ -1234,8 +1234,9 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 24px;
-  padding: 24px;
+  /* No padding: a fitted page fills the viewport edge to edge. */
+  gap: 8px;
+  padding: 0;
 }
 
 .ps-reader-viewport.is-pinching {
@@ -1265,7 +1266,7 @@
   overflow: hidden;
   content-visibility: auto;
   contain: layout paint;
-  scroll-margin: 18px;
+  scroll-margin: 0;
   border-radius: 3px;
   background: #fff;
   box-shadow:
@@ -1436,10 +1437,6 @@
     box-shadow: 20px 0 45px rgb(20 18 40 / 0.2);
   }
 
-  .ps-reader-pages {
-    gap: 21px;
-    padding: 12px;
-  }
 }
 
 /* Phone widths: tighten spacing so Save PDF stays on screen without the
