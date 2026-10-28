@@ -182,6 +182,26 @@ function safePageScale(
   );
 }
 
+/**
+ * pdf.js switches image smoothing off whenever an image is drawn larger than
+ * its own pixels, so zoomed scans turn into hard blocks. Pin it on, at high
+ * quality, so enlarged images blend instead.
+ */
+function keepImagesSmooth(ctx: CanvasRenderingContext2D): CanvasRenderingContext2D {
+  ctx.imageSmoothingQuality = "high";
+  Object.defineProperty(ctx, "imageSmoothingEnabled", {
+    configurable: true,
+    get: () => true,
+    set: () => undefined,
+  });
+  Object.defineProperty(ctx, "imageSmoothingQuality", {
+    configurable: true,
+    get: () => "high",
+    set: () => undefined,
+  });
+  return ctx;
+}
+
 function abortError(): DOMException {
   return new DOMException("The page paint was cancelled.", "AbortError");
 }
@@ -235,7 +255,7 @@ async function renderClippedPage(
   canvasContext.fillRect(0, 0, width, height);
   const renderTask = page.render({
     canvas,
-    canvasContext,
+    canvasContext: keepImagesSmooth(canvasContext),
     viewport,
     transform: [1, 0, 0, 1, -x * scale, -y * scale],
     background: "#ffffff",
@@ -619,7 +639,7 @@ export async function openPdfViewer(
             }
             canvasContext.fillStyle = "#ffffff";
             canvasContext.fillRect(0, 0, canvas.width, canvas.height);
-            const renderTask = page.render({ canvas, canvasContext, viewport });
+            const renderTask = page.render({ canvas, canvasContext: keepImagesSmooth(canvasContext), viewport });
             const release = cancelOnAbort(renderTask, signal);
             try {
               await renderTask.promise;
@@ -744,7 +764,7 @@ async function renderPageCanvas(
   }
   canvasContext.fillStyle = "#ffffff";
   canvasContext.fillRect(0, 0, canvas.width, canvas.height);
-  const task = page.render({ canvas, canvasContext, viewport });
+  const task = page.render({ canvas, canvasContext: keepImagesSmooth(canvasContext), viewport });
   try {
     await task.promise;
     return canvas;
