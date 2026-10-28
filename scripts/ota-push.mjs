@@ -12,6 +12,13 @@ const publicKey = readFileSync('ota-public.pem', 'utf8');
 if (createPublicKey(privateKey).export({ type: 'spki', format: 'pem' }) !== publicKey) throw new Error('OTA signing keys do not match.');
 const version = readFileSync('android/variables.gradle', 'utf8').match(/appVersionCode\s*=\s*(\d+)/)?.[1];
 if (!version) throw new Error('Missing native version.');
+// OTA_NATIVE_VERSION targets an older native build's channel (same native
+// code, earlier version code), never a newer one.
+const override = process.env.OTA_NATIVE_VERSION;
+if (override !== undefined && !(/^[1-9]\d*$/.test(override) && Number(override) <= Number(version))) {
+  throw new Error(`OTA_NATIVE_VERSION must be a version code up to ${version}.`);
+}
+const targetVersion = override ?? version;
 function run(command, args) {
   const result = spawnSync(command, args, { stdio: 'inherit' });
   if (result.error) throw result.error;
@@ -39,18 +46,18 @@ function add(dir, relative = '') {
 add('dist');
 const bytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
 const sequence = Date.now();
-const channel = `${prefix}-${version}`;
+const channel = `${prefix}-${targetVersion}`;
 const bundleId = `ream-${channel}-${sequence}`;
 const signature = sign('RSA-SHA256', bytes, privateKey).toString('base64');
 if (!verify('RSA-SHA256', bytes, publicKey, Buffer.from(signature, 'base64'))) throw new Error('Bundle verification failed.');
-const payload = JSON.stringify({ schema: 1, bundleId, channel, nativeVersion: version, sequence,
+const payload = JSON.stringify({ schema: 1, bundleId, channel, nativeVersion: targetVersion, sequence,
   url: `https://github.com/${repository}/releases/download/${bundleId}/bundle.zip`,
   checksum: createHash('sha256').update(bytes).digest('hex'), signature });
 const dir = path.resolve('tmp/ota', bundleId);
 mkdirSync(dir, { recursive: true });
 writeFileSync(path.join(dir, 'bundle.zip'), bytes);
 writeFileSync(path.join(dir, 'latest.json'), JSON.stringify({ payload, signature: sign('RSA-SHA256', Buffer.from(payload), privateKey).toString('base64') }) + '\n');
-writeFileSync(path.join(dir, 'notes.md'), `Signed Ream web update for Android native version ${version}, channel ${channel}.\n`);
+writeFileSync(path.join(dir, 'notes.md'), `Signed Ream web update for Android native version ${targetVersion}, channel ${channel}.\n`);
 if (process.argv.includes('--prepare-only')) { console.log(`OTA prepared: ${dir}`); process.exit(0); }
 run('gh', ['release', 'create', bundleId, path.join(dir, 'bundle.zip'), '--repo', repository, '--title', bundleId, '--notes-file', path.join(dir, 'notes.md'), '--latest=false']);
 const existing = spawnSync('gh', ['release', 'view', channel, '--repo', repository], { stdio: 'ignore' });
