@@ -312,6 +312,10 @@ export function Viewer({ recentId }: ViewerProps) {
   const [locked, setLocked] = useState(false);
   const [unlockPassword, setUnlockPassword] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
+  // Tapping the page slides the header, toolbar and tool dock away to give
+  // the page the whole screen; tapping again brings them back.
+  const [chromeHidden, setChromeHidden] = useState(false);
+  const fitWidthRef = useRef(0);
   const moreRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -463,8 +467,11 @@ export function Viewer({ recentId }: ViewerProps) {
       const style = pages ? window.getComputedStyle(pages) : null;
       const padX = style ? parseFloat(style.paddingLeft) || 0 : 12;
       const padY = style ? parseFloat(style.paddingTop) || 0 : 12;
-      if (fitModeRef.current) {
+      const widthChanged = entry.contentRect.width !== fitWidthRef.current;
+      fitWidthRef.current = entry.contentRect.width;
+      if (fitModeRef.current && widthChanged) {
         // Keep the current page's top in view when rotation re-fits it.
+        // Height-only changes (the bars sliding away) leave the fit alone.
         const box = viewport.getBoundingClientRect();
         focalRef.current = {
           pageIndex: activePageRef.current,
@@ -760,15 +767,12 @@ export function Viewer({ recentId }: ViewerProps) {
     () => indexedPages.reduce((sum, page) => sum + page.height, 0),
     [indexedPages],
   );
-  // The zoom that shows the largest page whole, in portrait or landscape.
+  // The zoom that makes the widest page span the screen edge to edge, in
+  // portrait or landscape; taller pages scroll.
   const fitZoom = Math.max(
     0.01,
-    Math.min(
-      (viewportSize.width - viewportSize.padX * 2) /
-        (maxPageWidth * CSS_PX_PER_PT),
-      (viewportSize.height - viewportSize.padY * 2) /
-        (maxPageHeight * CSS_PX_PER_PT),
-    ),
+    (viewportSize.width - viewportSize.padX * 2) /
+      (maxPageWidth * CSS_PX_PER_PT),
   );
   const minZoom = Math.min(MIN_ZOOM, fitZoom);
   const layoutMaxZoom = Math.max(
@@ -1008,7 +1012,19 @@ export function Viewer({ recentId }: ViewerProps) {
         };
 
   return (
-    <div className="ps-screen ps-screen--viewer" aria-label="Reader">
+    <div
+      className={
+        chromeHidden && !searchOpen && sidebar === null && !moreOpen
+          ? "ps-screen ps-screen--viewer is-chrome-hidden"
+          : "ps-screen ps-screen--viewer"
+      }
+      aria-label="Reader"
+      onFocusCapture={(event) => {
+        // Keyboard focus moving into a hidden bar brings the bars back.
+        if (!viewportRef.current?.contains(event.target as Node))
+          setChromeHidden(false);
+      }}
+    >
       <PageHeader
         subtitle={error ? undefined : name}
         onBack={() => navigate(backHash)}
@@ -1267,7 +1283,18 @@ export function Viewer({ recentId }: ViewerProps) {
               </aside>
             ) : null}
 
-            <div ref={viewportRef} className="ps-reader-viewport">
+            <div
+              ref={viewportRef}
+              className="ps-reader-viewport"
+              onClick={(event) => {
+                // A plain tap on the page toggles the bars; finishing a text
+                // selection does not.
+                if (event.detail > 1) return;
+                const selection = window.getSelection();
+                if (selection && !selection.isCollapsed) return;
+                setChromeHidden((hidden) => !hidden);
+              }}
+            >
               <div ref={pagesRef} className="ps-reader-pages">
                 {session.document.pages.map((page, pageIndex) => (
                   <ReaderPage

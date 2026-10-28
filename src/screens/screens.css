@@ -862,6 +862,43 @@
   justify-content: space-between;
 }
 
+/* Bars slide away while reading so the page gets the whole screen. */
+.ps-screen--viewer .page-header,
+.ps-reader-toolbar,
+.ps-reader-dock {
+  max-height: 160px;
+  transition:
+    max-height 220ms ease,
+    min-height 220ms ease,
+    padding 220ms ease,
+    border-width 220ms ease,
+    opacity 160ms ease;
+}
+
+.ps-screen--viewer.is-chrome-hidden .page-header,
+.ps-screen--viewer.is-chrome-hidden .ps-reader-toolbar,
+.ps-screen--viewer.is-chrome-hidden .ps-reader-dock {
+  max-height: 0;
+  min-height: 0;
+  padding-block: 0;
+  border-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ps-screen--viewer.is-chrome-hidden .ps-reader {
+  gap: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ps-screen--viewer .page-header,
+  .ps-reader-toolbar,
+  .ps-reader-dock {
+    transition: none;
+  }
+}
+
 .ps-reader-toolbar__group {
   display: flex;
   align-items: center;
