@@ -123,9 +123,22 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
         assertEquals("OTHER",ads.getString("debugGeography"));
         return ads;
     }
+    /** The emulator's compositor can hand back a frame from before the last
+     * navigation, so keep shooting until two frames in a row match. */
+    private Bitmap stableScreenshot() throws Exception {
+        Bitmap previous=getUiAutomation().takeScreenshot();assertNotNull(previous);
+        for(int attempt=0;attempt<30;attempt++){
+            Thread.sleep(700);
+            Bitmap next=getUiAutomation().takeScreenshot();assertNotNull(next);
+            boolean same=next.sameAs(previous);previous.recycle();previous=next;
+            if(same)return next;
+        }
+        previous.recycle();
+        throw new AssertionError("Screen never settled on one frame");
+    }
     private void capture(String name) throws Exception {
         until("document.fonts.status==='loaded'"); untilVisualStateReady();
-        Bitmap bitmap=getUiAutomation().takeScreenshot();
+        Bitmap bitmap=stableScreenshot();
         assertNotNull(bitmap);assertEquals(1080,bitmap.getWidth());assertEquals(1920,bitmap.getHeight());
         File file=new File(directory,name);assertFalse("Capture must not overwrite an image",file.exists());
         try(OutputStream output=new FileOutputStream(file)){assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,output));}
@@ -205,14 +218,15 @@ public class StoreScreenshotInstrumentation extends Instrumentation {
             Intent open=new Intent(Intent.ACTION_VIEW).setClassName(context,context.getPackageName()+".MainActivity")
                 .setDataAndType(uri,"application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP);
             context.startActivity(open);
-            until("document.querySelector('.ps-reader-page__surface img')?.naturalWidth>0");
+            until("(()=>{const p=document.querySelector('.ps-reader-page.is-active');const i=p?.querySelector('.ps-reader-page__surface img');return i?.complete&&i.naturalWidth>0&&!p.querySelector('.ps-reader-loader')})()");
             capture("04-pdf-reader-1080x1920.png");
             clickText("Organize"); until("document.querySelectorAll('.ps-organize-card').length===5");
-            js("document.querySelector('.ps-organize-grid').scrollIntoView({block:'start',behavior:'auto'})");
-            until("document.querySelector('.ps-organize-preview img')?.naturalWidth>0&&document.querySelector('.ps-organize-preview img')?.getBoundingClientRect().top>=0&&document.querySelector('.ps-organize-card')?.getBoundingClientRect().bottom<window.innerHeight");
+            js("Array.from(document.querySelectorAll('*')).find(e=>e.children.length===0&&/^5 pages/.test(e.textContent.trim())).parentElement.scrollIntoView({block:'start',behavior:'auto'})");
+            until("(()=>{const i=Array.from(document.querySelectorAll('.ps-organize-preview img'));return i.length===5&&i.every(e=>e.complete&&e.naturalWidth>0)&&i[0].getBoundingClientRect().top>=0})()");
             capture("05-organize-pages-1080x1920.png");
-            js("history.back()");until("document.querySelector('.ps-reader-page__surface img')?.naturalWidth>0");
+            js("history.back()");until("(()=>{const p=document.querySelector('.ps-reader-page.is-active');const i=p?.querySelector('.ps-reader-page__surface img');return i?.complete&&i.naturalWidth>0&&!p.querySelector('.ps-reader-loader')})()");
             clickText("Word");until("Array.from(document.querySelectorAll('button')).some(b=>b.textContent.trim()==='Convert to Word'&&!b.disabled)");
+            until("(()=>{const i=document.querySelector('.order-solo__preview img');return location.hash.includes('pdf-docx')&&i?.complete&&i.naturalWidth>0})()");
             capture("03-pdf-to-word-1080x1920.png");
             clickText("Convert to Word");until("location.hash==='#/result'");
             until("document.body.innerText.includes('Local copy kept in Recents')");
