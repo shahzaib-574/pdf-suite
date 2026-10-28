@@ -11,6 +11,7 @@ import { installAppBack, useBackHandler } from "./screens/back";
 import { AnimatedButton } from "./components";
 import { Home } from "./screens/Home";
 import { Recents } from "./screens/Recents";
+import { Search } from "./screens/Search";
 import { Result } from "./screens/Result";
 import { Settings } from "./screens/Settings";
 import { ToolFlow } from "./screens/ToolFlow";
@@ -340,6 +341,8 @@ function RouteView({ route, bannerEligible, nativeScan, loadNativeScanDraft, onN
       return isWebsite ? <WebHome /> : <Home bannerEligible={bannerEligible} />;
     case "recents":
       return <Recents />;
+    case "search":
+      return <Search />;
     case "tool":
       return <ToolFlow key={route.id} id={route.id} nativeScan={nativeScan}
         loadNativeScanDraft={loadNativeScanDraft} onNativePresentation={onNativePresentation}
@@ -367,7 +370,7 @@ function activeNavTab(route: Route): BottomNavTab | undefined {
   if (route.name === "recents") return "recents";
   if (route.name === "settings") return "settings";
   if (route.name === "tool" && route.id === "scan") return "scan";
-  if (route.name === "tool" && route.id === "pdf-docx") return "word";
+  if (route.name === "search") return "search";
   if (route.name === "viewer" && route.recentId) return "recents";
   return "tools";
 }
@@ -375,6 +378,7 @@ function activeNavTab(route: Route): BottomNavTab | undefined {
 function routeTitle(route: Route): string {
   if (route.name === "home") return "Tools";
   if (route.name === "recents") return "Recent files";
+  if (route.name === "search") return "Search";
   if (route.name === "settings") return "Settings";
   if (route.name === "viewer") return "Reader";
   if (route.name === "result") return "File ready";

@@ -131,6 +131,7 @@ export type RecentItem = {
 export type Route =
   | { name: "home" }
   | { name: "recents" }
+  | { name: "search" }
   | { name: "tool"; id: ToolId }
   | { name: "viewer"; recentId?: string }
   | { name: "result" }

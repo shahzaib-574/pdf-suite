@@ -244,7 +244,7 @@ try {
     );
     await call("unmount");
   }
-  await call("mount", "#/");
+  await call("mount", "#/search");
   await page.getByPlaceholder("Search tools").fill("merge");
   const calls = (await call("trace")).captureCalls;
   await page.getByRole("button", { name: "Scan to PDF", exact: true }).click();
@@ -271,11 +271,11 @@ try {
   await page.getByRole("status").filter({ hasText: "Choose photos" }).waitFor();
   await page.getByRole("button", { name: "Back to scan", exact: true }).click();
   await call("galleryCancel");
-  await page.waitForURL((url) => url.hash === "#/");
+  await page.waitForURL((url) => url.hash === "#/search");
   assert.equal(
     await page.getByPlaceholder("Search tools").inputValue(),
     "merge",
-    "retained Home instance preserves filter/query",
+    "retained Search instance preserves filter/query",
   );
   assert.equal(
     await page
