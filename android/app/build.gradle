@@ -155,6 +155,11 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // Bundle native symbol tables so Play can symbolicate native crashes
+            // (needs the NDK; without it the bundle builds with no symbols).
+            ndk {
+                debugSymbolLevel 'SYMBOL_TABLE'
+            }
             if (hasReleaseKeystore && !allowUnsignedRelease) {
                 signingConfig signingConfigs.release
             }
